@@ -10,6 +10,7 @@ A Winamp-skinned player that follows the **Spotify** desktop app (and YouTube pl
 | macOS (Apple silicon and Intel) | [`docs/downloads/Minapp-Mac-v1.7.3.zip`](docs/downloads/Minapp-Mac-v1.7.3.zip) | `Minapp.app` (right-click > Open the first time) |
 
 The first run downloads about 150 MB (Electron and Webamp) into the folder. Each zip has its own `README.txt`.
+<img width="274" height="24" alt="image" src="https://github.com/user-attachments/assets/bec7146f-e738-4000-a393-c02c7b4497ed" />
 
 ## Features
 - Any Winamp `.wsz` skin, from a skin library menu that fills itself: skins you load, drag onto the player or copy into the skins folder appear in it automatically. The corner logo opens skins.webamp.org to find more. Mini mode, always-on-top pin, 0.5x to 3x size
@@ -18,6 +19,7 @@ The first run downloads about 150 MB (Electron and Webamp) into the folder. Each
 - YouTube source (playlists or videos) with an option to hide the video window
 - Windows: working 10-band equalizer for Spotify through [Equalizer APO](https://sourceforge.net/projects/equalizerapo/), real Spotify volume, audio-reactive visualizer and Milkdrop, taskbar buttons, tray menu
 - Global hotkeys, snap to screen edges, remembered position and settings, optional song-change notifications
+<img width="343" height="435" alt="image" src="https://github.com/user-attachments/assets/9c80b083-01a9-42ab-975f-79c6c6e7aa00" />
 
 ## Layout
 ```
