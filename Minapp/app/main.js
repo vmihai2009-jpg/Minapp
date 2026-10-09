@@ -8,8 +8,11 @@ const path = require('path');
 const isWin = process.platform === 'win32';
 const isMac = process.platform === 'darwin';
 // Portable: keep settings next to the app (a "data" folder) instead of in %APPDATA% / Library.
+// Inside a macOS .app bundle the app folder is not a place to keep data (it is replaced on updates), so there it
+// uses ~/Library/Application Support/Minapp, which the uninstaller knows about.
+const inMacBundle = isMac && __dirname.includes('.app/Contents/Resources');
 try {
-  const dataDir = path.join(path.dirname(__dirname), 'data');
+  const dataDir = inMacBundle ? path.join(app.getPath('appData'), 'Minapp') : path.join(path.dirname(__dirname), 'data');
   fs.mkdirSync(dataDir, { recursive: true });
   fs.accessSync(dataDir, fs.constants.W_OK);
   app.setPath('userData', dataDir);
@@ -1018,6 +1021,7 @@ function menuItems() {
         click: (mi) => { try { app.setLoginItemSettings({ openAtLogin: mi.checked, path: process.execPath, args: [app.getAppPath()] }); } catch (e) { log('login item failed: ' + e.message); } buildMenu(); } }] : []),
       { type: 'separator' },
       { label: 'Open data folder', click: () => shell.openPath(app.getPath('userData')) },
+      ...(inMacBundle ? [{ label: 'Uninstall Minapp…', click: () => { const u = path.join(app.getPath('userData'), 'Uninstall Minapp.command'); if (fs.existsSync(u)) shell.openPath(u); } }] : []),
     ] },
     ...(isWin ? [{ label: 'Check Spotify connection…', click: checkSpotify }] : []),
     { type: 'separator' },
