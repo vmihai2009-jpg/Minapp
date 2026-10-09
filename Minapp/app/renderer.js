@@ -285,21 +285,23 @@
   // The skin paints the Winamp logo into its background image. Cover that spot with a copy of the clean pixels
   // beside it (so any skin works), draw our logo on top, and make the old "About" link do nothing.
   const logoImg = new Image(); logoImg.src = 'logo-16.png';
-  const LOGO = { x: 246, y: 87, w: 24, h: 22 };
+  const LOGO = { x: 246, y: 83, w: 24, h: 26 };   // the old logo's spot plus clean space above it, for the version text below
   let logoBgUrl = '', logoCanvas = null, logoBg = null;
   function paintLogo() {
     const mw = document.querySelector('#main-window');
     if (!mw) return;
     const about = document.querySelector('#about');
     if (about) { // the link that used to open the Webamp project page
-      about.removeAttribute('href'); about.removeAttribute('target'); about.title = 'Browse skins'; about.style.cursor = 'pointer';
+      about.removeAttribute('href'); about.removeAttribute('target'); about.title = appVersion ? 'Minapp ' + appVersion + ' - click to find more skins' : 'Find more skins'; about.style.cursor = 'pointer';
     }
     const shaded = mw.classList.contains('shade') || mw.getBoundingClientRect().height < 60;
     if (logoCanvas && logoCanvas.parentNode !== mw) logoCanvas = null;
     if (!logoCanvas) {
       logoCanvas = document.createElement('canvas');
       logoCanvas.width = LOGO.w; logoCanvas.height = LOGO.h;
-      logoCanvas.style.cssText = `position:absolute;left:${LOGO.x}px;top:${LOGO.y}px;width:${LOGO.w}px;height:${LOGO.h}px;pointer-events:none;image-rendering:pixelated;z-index:5`;
+      logoCanvas.style.cssText = `position:absolute;left:${LOGO.x}px;top:${LOGO.y}px;width:${LOGO.w}px;height:${LOGO.h}px;pointer-events:auto;cursor:pointer;image-rendering:pixelated;z-index:5`;
+      logoCanvas.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); api.openSkins(); });
+      logoCanvas.title = appVersion ? 'Minapp ' + appVersion + ' - click to find more skins' : 'Find more skins';
       mw.appendChild(logoCanvas); logoBgUrl = '';
     }
     logoCanvas.style.display = shaded ? 'none' : '';
@@ -331,8 +333,30 @@
       }
     }
     c.putImageData(out, 0, 0);
-    c.drawImage(logoImg, 4, 3, 16, 16);
+    // text colour that reads on this skin: light on dark panels, dark on light ones
+    let lum = 0; for (let i = 0; i < 3; i++) lum += out.data[((LOGO.h >> 1) * LOGO.w + 2) * 4 + i];
+    c.drawImage(logoImg, 4, 1, 16, 16);
+    drawVersion(c, lum / 3 < 110 ? '#b4bad9' : '#3c4056');
   }
+  // 3x5 pixel digits for the version number under the logo (drawn pixel by pixel, so it stays crisp at any size)
+  const DIGITS = { '0': '111101101101111', '1': '010110010010111', '2': '111001111100111', '3': '111001111001111', '4': '101101111001001',
+    '5': '111100111001111', '6': '111100111101111', '7': '111001001001001', '8': '111101111101111', '9': '111101111001111' };
+  function drawVersion(c, color) {
+    const text = String(appVersion || '');
+    if (!text) return;
+    const glyphs = [...text].map((ch) => (ch === '.' ? { w: 1, rows: ['0', '0', '0', '0', '1'] } : DIGITS[ch] ? { w: 3, rows: [0, 1, 2, 3, 4].map((y) => DIGITS[ch].slice(y * 3, y * 3 + 3)) } : null)).filter(Boolean);
+    const width = glyphs.reduce((n, g) => n + g.w + 1, -1);
+    let x = Math.max(0, (LOGO.w - width) >> 1);
+    const y = 19;
+    c.fillStyle = color;
+    for (const g of glyphs) {
+      g.rows.forEach((row, ry) => { for (let rx = 0; rx < g.w; rx++) if (row[rx] === '1') c.fillRect(x + rx, y + ry, 1, 1); });
+      x += g.w + 1;
+    }
+  }
+  let appVersion = '';
+  api.version().then((v) => { appVersion = v; if (logoCanvas) logoCanvas.title = 'Minapp ' + v + ' - click to find more skins'; drawLogo(); if (about0()) about0().title = 'Minapp ' + v + ' - click to find more skins'; }).catch(() => {});
+  const about0 = () => document.querySelector('#about');
   logoImg.onload = drawLogo;
   document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('#about')) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); api.openSkins(); } }, true);
   document.addEventListener('auxclick', (e) => { if (e.target.closest && e.target.closest('#about')) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); } }, true);
