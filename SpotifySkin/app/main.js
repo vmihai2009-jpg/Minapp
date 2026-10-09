@@ -209,7 +209,8 @@ async function doCmd(cmd, arg) {
     jumping = true;
     try {
       spotifyQueue.items = spotifyQueue.items.slice(n);
-      for (let i = 0; i < n; i++) { await spotifyCmd('next'); if (i < n - 1) await new Promise((r) => setTimeout(r, 280)); }
+      if (isWin && !process.env.SKIN_FAKE) await psCall('skip ' + n); // done inside the helper: fast and muted
+      else for (let i = 0; i < n; i++) { await spotifyCmd('next'); if (i < n - 1) await new Promise((r) => setTimeout(r, 280)); }
     } finally { jumping = false; setTimeout(refreshSpotifyQueue, 700); }
     return;
   }

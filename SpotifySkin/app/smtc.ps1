@@ -281,6 +281,24 @@ while ($true) {
     if ($bits[1] -eq 'state') { $out = To-AsciiJson (Get-State) }
     elseif ($bits[1] -eq 'cmd')  { Send-Command $bits[2] $null; $out = '{"ok":true}' }
     elseif ($bits[1] -eq 'shuffle' -or $bits[1] -eq 'repeat') { Send-Command $bits[1] $bits[2]; $out = '{"ok":true}' }
+    elseif ($bits[1] -eq 'skip') {
+      # jump ahead N songs in one go: mute Spotify, skip quickly, put the volume back
+      $n = [Math]::Max(0, [Math]::Min(40, [int]$bits[2]))
+      $sess = Get-SpotifySession
+      if ($null -ne $sess -and $n -gt 0) {
+        $orig = -1.0
+        if ($volOk) { try { $orig = [double][SkinVol.AppVolume]::Run('Spotify', -1.0) } catch {} }
+        if ($orig -gt 0) { Set-SpotifyVolume 0 }
+        try {
+          for ($i = 0; $i -lt $n; $i++) {
+            [void](Await ($sess.TrySkipNextAsync()) ([bool]))
+            if ($i -lt $n - 1) { Start-Sleep -Milliseconds 90 }
+          }
+          Start-Sleep -Milliseconds 350   # let the last song start before the sound comes back
+        } finally { if ($orig -gt 0) { Set-SpotifyVolume $orig } }
+      }
+      $out = '{"ok":true}'
+    }
     elseif ($bits[1] -eq 'seek') { Send-Command 'seek' $bits[2]; $out = '{"ok":true}' }
     elseif ($bits[1] -eq 'vol')  { Set-SpotifyVolume ([double]::Parse($bits[2], [Globalization.CultureInfo]::InvariantCulture)); $out = '{"ok":true}' }
   } catch {
