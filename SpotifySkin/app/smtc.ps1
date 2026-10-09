@@ -71,7 +71,7 @@ function Get-SmtcState($s) {
     status   = $(if ($st -eq 'Playing') { 'playing' } else { 'paused' })
     title    = $title
     artist   = $artist
-    id       = "$artist|$title|$([int]$dur)"
+    id       = "$artist|$title"
     duration = $dur
     position = $pos
     volume   = 0

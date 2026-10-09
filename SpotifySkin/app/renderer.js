@@ -307,17 +307,20 @@
   const PL_BLOCKED = '#playlist-window .playlist-tracks, #playlist-window .playlist-bottom-left, #playlist-window .playlist-bottom-right';
   const PL_ALLOWED = '#playlist-scroll-up-button, #playlist-scroll-down-button, [class*="resize" i]';
   // A click on an upcoming title jumps to it (rows are numbered "12. Artist - Title"; the first row is the playing song).
-  let rowDown = null;
+  let rowDown = -1, lastQueue = [];
   const rowIndex = (cell) => { const m = /^\s*(\d+)\./.exec((cell.textContent || '').replace(/\u00a0/g, ' ')); return m ? Number(m[1]) - 1 : -1; };
   const blockPlaylist = (e) => {
     const t = e.target;
     if (!t || !t.closest) return;
     const cell = t.closest('#playlist-window .playlist-track-titles .track-cell');
     if (cell) {
-      if (e.type === 'mousedown') rowDown = cell;
-      if (e.type === 'click' && rowDown === cell) {
-        const i = rowIndex(cell);
-        if (i >= 1) {
+      // compare row numbers, not elements: the list is rebuilt whenever the queue changes
+      if (e.type === 'mousedown') rowDown = rowIndex(cell);
+      if (e.type === 'click' && rowDown >= 0 && rowDown === rowIndex(cell)) {
+        const i = rowDown;
+        rowDown = -1;
+        const item = lastQueue[i - 1];
+        if (i >= 1 && item && !item.hint) {
           api.cmd('jump', i);
           holdUntil = Date.now() + 2500; // ignore the old position while the skip happens
           cell.style.opacity = '0.5'; setTimeout(() => { cell.style.opacity = ''; }, 400);
@@ -351,6 +354,7 @@
         return;
       }
       const q = Array.isArray(s.queue) ? s.queue.slice(0, 30) : [];
+      lastQueue = q;
       const qSig = q.map((x) => x.id + '~' + x.title).join('|');
       const changed = s.id !== curId;
       if (changed || (qSig !== lastQSig && Date.now() - lastBuild > 4000)) {

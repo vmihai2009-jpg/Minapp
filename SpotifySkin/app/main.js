@@ -180,6 +180,7 @@ async function checkSpotify() {
   dialog.showMessageBox(win, {
     type: 'info', message: 'Spotify connection check',
     detail: `Connected through: ${how}\nSpotify currently reports: ${seen}\nSpotify volume control: ${vol === 'unknown' ? 'not available (start a song first)' : 'works (' + vol + ')'}\n` +
+      `Spotify queue: ${readCfg().spotRefresh ? (spotifyQueue.err ? 'connected, but ' + spotifyQueue.err : spotifyQueue.items.length + ' upcoming songs read') : 'not connected (menu > Connect Spotify queue)'}\n`+
       `Equalizer APO (system EQ): ${apo ? 'found at ' + apo : 'not installed'}\n\n` +
       `If this says "closed", open the Spotify desktop app and start a song, then check again.\nA log is kept at:\n${bridgeLogPath()}`,
   });
@@ -199,23 +200,26 @@ const spotifyState = process.env.SKIN_FAKE ? fakeState : isWin ? winState : macS
 const spotifyCmd = process.env.SKIN_FAKE ? fakeCmd : isWin ? winCmd : macCmd;
 
 // one entry point for every control: skin buttons, taskbar buttons, hotkeys
-let jumping = false;
+let jumping = false, queueHoldUntil = 0;
+// right after a skip Spotify's Web API still reports the old queue for a few seconds: keep our own view, then re-read it
+function holdQueue() { queueHoldUntil = Date.now() + 3500; setTimeout(refreshSpotifyQueue, 3600); }
 async function doCmd(cmd, arg) {
   if (source === 'youtube') { if (ytWin) ytWin.webContents.send('yt:cmd', cmd, arg); return; }
-  if (cmd === 'next' && spotifyQueue.items.length) spotifyQueue.items = spotifyQueue.items.slice(1); // show it at once
+  if (cmd === 'next' && spotifyQueue.items.length) { spotifyQueue.items = spotifyQueue.items.slice(1); holdQueue(); } // show it at once
   if (cmd === 'jump') { // click on an upcoming title: Spotify's desktop app has no "play this one", so skip ahead to it
     const n = Math.max(0, Math.min(40, Math.round(Number(arg) || 0)));
     if (!n || jumping) return;
     jumping = true;
     try {
-      spotifyQueue.items = spotifyQueue.items.slice(n);
+      log(`jump ${n}: ` + spotifyQueue.items.slice(0, n).map((x) => x.title).join(' > '));
+      spotifyQueue.items = spotifyQueue.items.slice(n); holdQueue();
       if (isWin && !process.env.SKIN_FAKE) await psCall('skip ' + n); // done inside the helper: fast and muted
       else for (let i = 0; i < n; i++) { await spotifyCmd('next'); if (i < n - 1) await new Promise((r) => setTimeout(r, 280)); }
-    } finally { jumping = false; setTimeout(refreshSpotifyQueue, 700); }
+    } finally { jumping = false; holdQueue(); }
     return;
   }
   const r = await spotifyCmd(cmd, arg);
-  if (cmd === 'next' || cmd === 'previous') setTimeout(refreshSpotifyQueue, 900);
+  if (cmd === 'previous') holdQueue();
   return r;
 }
 
@@ -487,6 +491,8 @@ const SPOT_PORT = 8898;
 const SPOT_REDIRECT = `http://127.0.0.1:${SPOT_PORT}/callback`;
 let spotAccess = null, spotExpires = 0, spotBackoffUntil = 0, spotQueueBusy = false, spotLastId = null;
 let spotifyQueue = { items: [], err: '' };
+let lastSongTitle = '';
+const norm = (t) => String(t || '').toLowerCase().replace(/\s+/g, ' ').trim();
 const b64url = (buf) => Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
 async function spotToken(form) {
@@ -507,7 +513,7 @@ async function spotAccessToken() {
   return spotAccess;
 }
 async function refreshSpotifyQueue() {
-  if (spotQueueBusy || Date.now() < spotBackoffUntil || !readCfg().spotRefresh) return;
+  if (spotQueueBusy || Date.now() < spotBackoffUntil || Date.now() < queueHoldUntil || !readCfg().spotRefresh) return;
   spotQueueBusy = true;
   try {
     const tok = await spotAccessToken();
@@ -518,12 +524,16 @@ async function refreshSpotifyQueue() {
     if (r.status === 204) { spotifyQueue = { items: [], err: '' }; return; }
     if (!r.ok) { spotifyQueue = { items: spotifyQueue.items, err: 'HTTP ' + r.status }; log('queue request failed: HTTP ' + r.status); return; }
     const j = await r.json();
+    // Spotify's API can lag behind the app: if it still thinks another song is playing, its queue is stale, so retry shortly
+    const cp = j.currently_playing && j.currently_playing.name;
+    if (cp && lastSongTitle && norm(cp) !== norm(lastSongTitle)) { spotBackoffUntil = Date.now() + 1500; setTimeout(refreshSpotifyQueue, 1600); return; }
     const items = (j.queue || []).slice(0, 30).map((t) => ({
       id: t.id || t.uri, title: t.name || '',
       artist: t.artists ? t.artists.map((a) => a.name).join(', ') : ((t.show && t.show.name) || ''),
       duration: (t.duration_ms || 0) / 1000,
     }));
     spotifyQueue = { items, err: '' };
+    log('queue: ' + items.slice(0, 4).map((x) => x.title).join(' | ') + (items.length > 4 ? ` (+${items.length - 4})` : ''));
   } catch (e) {
     spotifyQueue = { items: spotifyQueue.items, err: String((e && e.message) || e) };
     log('queue error: ' + spotifyQueue.err);
@@ -741,11 +751,17 @@ ipcMain.handle('spotify:state', async () => {
   const st = (await spotifyState()) || { status: 'closed' };
   if (st.id && st.id !== spotLastId) {
     // the song that just started was the head of the old queue: drop it now, then ask Spotify for the real one
-    if (spotifyQueue.items.length && spotifyQueue.items[0].title === st.title) spotifyQueue.items = spotifyQueue.items.slice(1);
+    if (spotifyQueue.items.length && norm(spotifyQueue.items[0].title) === norm(st.title)) spotifyQueue.items = spotifyQueue.items.slice(1);
     spotLastId = st.id;
-    refreshSpotifyQueue();
+    holdQueue();
   }
+  if (st.title) lastSongTitle = st.title;
   st.queue = spotifyQueue.items;
+  // Explain an empty list instead of showing nothing: the desktop app does not expose its queue
+  if (!st.queue.length && st.title && !process.env.SKIN_FAKE) {
+    const cfg = readCfg();
+    st.queue = [{ id: 'hint', hint: true, title: !cfg.spotRefresh ? 'Queue off: menu > Connect Spotify queue' : (spotifyQueue.err ? 'Queue unavailable (' + spotifyQueue.err + ')' : 'Queue is empty'), artist: '', duration: 0 }];
+  }
   onNowPlaying(st);
   return st;
 });
