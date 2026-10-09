@@ -11,7 +11,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyProduct("Minapp")]
 [assembly: AssemblyDescription("Minapp")]
 [assembly: AssemblyCompany("Minapp")]
-[assembly: AssemblyVersion("1.4.1.0")]
+[assembly: AssemblyVersion("1.4.2.0")]
 
 static class Launcher {
   [DllImport("user32.dll", CharSet = CharSet.Unicode)]

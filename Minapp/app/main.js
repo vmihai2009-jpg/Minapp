@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, dialog, screen, clipboard, session, desktopCapturer, shell, globalShortcut, Notification } = require('electron');
+const { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, dialog, screen, clipboard, session, desktopCapturer, shell, globalShortcut, Notification, net } = require('electron');
 const { execFile, spawn } = require('child_process');
 const fs = require('fs');
 const http = require('http');
@@ -916,15 +916,30 @@ async function pickSkin() {
 }
 
 // ---------- skin archive browser (an in-app copy of skins.webamp.org) ----------
-const SKIN_API = 'https://api.webampskins.org/graphql';
+// The archive's own site serves its GraphQL API at /graphql (confirmed in the Webamp source); skins and screenshots
+// come from r2.webampskins.org. Requests go through Electron's network stack, so system proxies and VPNs apply.
+const SKIN_APIS = ['https://skins.webamp.org/graphql', 'https://api.webamp.org/graphql'];
 const SKIN_WEB = 'https://skins.webamp.org/';
-let skinWin = null;
+let skinWin = null, skinApiGood = null;
+const netFetch = (url, opts) => (net && net.fetch ? net.fetch(url, opts) : fetch(url, opts));
+const why = (e) => { const c = e && e.cause; return ((e && e.message) || String(e)) + (c ? ` (${c.code || c.message || c})` : ''); };
 async function gql(query, variables) {
-  const r = await fetch(SKIN_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, variables }), signal: AbortSignal.timeout(15000) });
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  const j = await r.json();
-  if (j.errors && j.errors.length && !j.data) throw new Error(j.errors.map((e) => e.message).join('; ').slice(0, 200));
-  return j.data;
+  let lastErr = null;
+  for (const url of skinApiGood ? [skinApiGood] : SKIN_APIS) {
+    try {
+      const r = await netFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, variables }), signal: AbortSignal.timeout(20000) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      if (j.errors && j.errors.length && !j.data) { const err = new Error(j.errors.map((x) => x.message).join('; ').slice(0, 300)); err.api = true; throw err; }
+      if (skinApiGood !== url) { skinApiGood = url; log('skin archive API: ' + url); }
+      return j.data;
+    } catch (e) {
+      lastErr = e;
+      log(`skin archive request to ${url} failed: ${why(e)}`);
+      if (e.api) throw e; // the server answered but disliked the query: another host would say the same
+    }
+  }
+  throw new Error(why(lastErr));
 }
 const skinShot = (md5) => `https://r2.webampskins.org/screenshots/${md5}.png`;
 const skinFile = (md5) => `https://r2.webampskins.org/skins/${md5}.wsz`;
@@ -944,10 +959,10 @@ async function listArchiveSkins(query, offset) {
   const fields = ['md5 filename nsfw screenshot_url download_url', 'md5 filename nsfw'];
   const attempts = [];
   for (const f of fields) {
-    if (query) attempts.push([`query($q:String!,$first:Int,$offset:Int){ search_skins(query:$q, first:$first, offset:$offset){ ${f} } }`, { q: query, first: PAGE, offset }, (d) => d.search_skins]);
+    if (query) attempts.push([`query($q:String!,$first:Int!,$offset:Int!){ search_skins(query:$q, first:$first, offset:$offset){ ${f} } }`, { q: query, first: PAGE, offset }, (d) => d.search_skins]);
     else {
-      attempts.push([`query($first:Int,$offset:Int){ skins(first:$first, offset:$offset, sort: MUSEUM, filter: APPROVED){ nodes{ ${f} } } }`, { first: PAGE, offset }, (d) => d.skins.nodes]);
-      attempts.push([`query($first:Int,$offset:Int){ skins(first:$first, offset:$offset){ nodes{ ${f} } } }`, { first: PAGE, offset }, (d) => d.skins.nodes]);
+      attempts.push([`query($first:Int!,$offset:Int!){ skins(first:$first, offset:$offset, sort: MUSEUM, filter: APPROVED){ nodes{ ${f} } } }`, { first: PAGE, offset }, (d) => d.skins.nodes]);
+      attempts.push([`query($first:Int!,$offset:Int!){ skins(first:$first, offset:$offset){ nodes{ ${f} } } }`, { first: PAGE, offset }, (d) => d.skins.nodes]);
     }
   }
   let lastErr = '';
@@ -970,13 +985,13 @@ ipcMain.handle('skins:apply', async (_e, item) => {
     for (const u of [item.url, item.url2]) {
       if (!u || !/^https:\/\/[\w.-]+\//.test(u)) continue;
       try {
-        const r = await fetch(u, { signal: AbortSignal.timeout(30000) });
+        const r = await netFetch(u, { signal: AbortSignal.timeout(30000) });
         if (!r.ok) { err = 'HTTP ' + r.status; continue; }
         const b = Buffer.from(await r.arrayBuffer());
         if (b.length > 8 * 1024 * 1024) { err = 'file too large'; continue; }
         if (b[0] !== 0x50 || b[1] !== 0x4b) { err = 'not a skin file'; continue; } // a .wsz is a zip
         buf = b; break;
-      } catch (e) { err = e.message; }
+      } catch (e) { err = why(e); }
     }
     if (!buf) return { ok: false, error: err };
     const p = storeSkin((item.name || item.md5) + '.wsz', buf);
