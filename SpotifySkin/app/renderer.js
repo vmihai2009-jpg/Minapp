@@ -307,7 +307,7 @@
   const PL_BLOCKED = '#playlist-window .playlist-tracks, #playlist-window .playlist-bottom-left, #playlist-window .playlist-bottom-right';
   const PL_ALLOWED = '#playlist-scroll-up-button, #playlist-scroll-down-button, [class*="resize" i]';
   // A click on an upcoming title jumps to it (rows are numbered "12. Artist - Title"; the first row is the playing song).
-  let rowDown = -1, lastQueue = [];
+  let rowDown = -1, lastQueue = [], lastHist = [];
   const rowIndex = (cell) => { const m = /^\s*(\d+)\./.exec((cell.textContent || '').replace(/\u00a0/g, ' ')); return m ? Number(m[1]) - 1 : -1; };
   const blockPlaylist = (e) => {
     const t = e.target;
@@ -319,9 +319,11 @@
       if (e.type === 'click' && rowDown >= 0 && rowDown === rowIndex(cell)) {
         const i = rowDown;
         rowDown = -1;
-        const item = lastQueue[i - 1];
-        if (i >= 1 && item && !item.hint) {
-          api.cmd('jump', i);
+        // rows: [history..., playing song, queue...]; clicking above the playing song goes back, below it jumps ahead
+        const h = lastHist.length, off = i - h;
+        const item = off > 0 ? lastQueue[off - 1] : off < 0 ? lastHist[i] : null;
+        if (off !== 0 && item && !item.hint) {
+          api.cmd('jump', off);
           holdUntil = Date.now() + 2500; // ignore the old position while the skip happens
           cell.style.opacity = '0.5'; setTimeout(() => { cell.style.opacity = ''; }, 400);
         }
@@ -342,8 +344,8 @@
   }, true);
 
   // ----- Spotify -> skin (poll) -----
-  let curId = null, busy = false, lastQSig = '', lastBuild = 0;
-  const queueUrl = silentWav(1); // placeholder audio for the upcoming items (never actually heard)
+  let pendingFix = null, curId = null, busy = false, lastQSig = '', lastBuild = 0;
+  const queueUrl = silentWav(5); // placeholder audio for the upcoming items (never actually heard)
   async function tick() {
     if (busy) return; busy = true;
     try {
@@ -353,9 +355,24 @@
         if (status === 'PLAYING') webamp.pause();
         return;
       }
+      if (pendingFix) {
+        // Webamp starts the first row; with history above, move playback and the view to the playing song
+        const st = webamp.store.getState(), order = st.playlist.trackOrder;
+        if (order.length === pendingFix.len) {
+          const id = order[pendingFix.h];
+          if (pendingFix.h > 0 && st.playlist.currentTrack !== id) webamp.store.dispatch({ type: 'PLAY_TRACK', id });
+          const overflow = Math.max(0, order.length - 4);
+          const pos = pendingFix.scroll != null ? pendingFix.scroll : overflow ? Math.min(100, (pendingFix.h / overflow) * 100) : 0;
+          webamp.store.dispatch({ type: 'SET_PLAYLIST_SCROLL_POSITION', position: pos });
+          pendingFix = null;
+        } else if (++pendingFix.tries > 8) pendingFix = null;
+        return;
+      }
       const q = Array.isArray(s.queue) ? s.queue.slice(0, 30) : [];
       lastQueue = q;
-      const qSig = q.map((x) => x.id + '~' + x.title).join('|');
+      const hist = Array.isArray(s.history) ? s.history.slice(-30) : [];
+      lastHist = hist;
+      const qSig = hist.map((x) => x.id + '~' + x.title).join('|') + '||' + q.map((x) => x.id + '~' + x.title).join('|');
       const changed = s.id !== curId;
       if (changed || (qSig !== lastQSig && Date.now() - lastBuild > 4000)) {
         curId = s.id; lastQSig = qSig; lastBuild = Date.now();
@@ -363,10 +380,15 @@
           if (silentUrl) URL.revokeObjectURL(silentUrl);
           silentUrl = silentWav(Math.max(1, Math.ceil(s.duration)));
         }
+        // keep the scroll position the user chose, unless the song changed (then show the playing song at the top)
+        let keepScroll = null;
+        try { keepScroll = webamp.store.getState().display.playlistScrollPosition; } catch {}
         webamp.setTracksToPlay([
+          ...hist.map((x) => ({ url: queueUrl, duration: x.duration || 0, metaData: { artist: x.artist || '', title: x.title || '' } })),
           { url: silentUrl, duration: s.duration, metaData: { artist: s.artist, title: s.title } },
           ...q.map((x) => ({ url: queueUrl, duration: x.duration || 0, metaData: { artist: x.artist || '', title: x.title || '' } })),
         ]);
+        pendingFix = { h: hist.length, len: hist.length + 1 + q.length, tries: 0, scroll: changed ? null : keepScroll };
         return; // next tick syncs position/play state once the track has loaded
       }
       followVolume(s.volume);

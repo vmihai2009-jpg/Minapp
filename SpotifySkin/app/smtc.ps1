@@ -288,7 +288,8 @@ while ($true) {
     elseif ($bits[1] -eq 'skip') {
       # jump ahead N songs: mute Spotify, skip one at a time and WAIT until the song really changed
       # (Spotify ignores skips that arrive while the previous one is still loading), then restore the volume
-      $n = [Math]::Max(0, [Math]::Min(40, [int]$bits[2]))
+      $n = [Math]::Max(-30, [Math]::Min(40, [int]$bits[2]))
+      $back = ($n -lt 0); $n = [Math]::Abs($n)
       $done = 0
       $sess = Get-SpotifySession
       if ($null -ne $sess -and $n -gt 0) {
@@ -299,10 +300,11 @@ while ($true) {
           $cur = Get-TrackKey $sess
           for ($i = 0; $i -lt $n; $i++) {
             $ok = $false
-            for ($try = 0; $try -lt 3 -and -not $ok; $try++) {
-              [void](Await ($sess.TrySkipNextAsync()) ([bool]))
+            for ($try = 0; $try -lt 4 -and -not $ok; $try++) {
+              # going back: the first press restarts a song that has played for more than a few seconds, so press again
+              if ($back) { [void](Await ($sess.TrySkipPreviousAsync()) ([bool])) } else { [void](Await ($sess.TrySkipNextAsync()) ([bool])) }
               $t0 = Get-Date
-              while (((Get-Date) - $t0).TotalMilliseconds -lt 1800) {
+              while (((Get-Date) - $t0).TotalMilliseconds -lt $(if ($back) { 900 } else { 1800 })) {
                 Start-Sleep -Milliseconds 70
                 $now = Get-TrackKey $sess
                 if ($now -ne $cur) { $ok = $true; $cur = $now; break }

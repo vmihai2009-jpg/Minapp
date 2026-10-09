@@ -192,6 +192,7 @@ const fake = { i: 0, t0: Date.now(), names: ['Intro', 'Skyline', 'Night Drive', 
 async function fakeState() {
   const dur = 200, pos = ((Date.now() - fake.t0) / 1000) % dur;
   const at = (k) => fake.names[((fake.i + k) % fake.names.length + fake.names.length) % fake.names.length];
+  if (!fake.seeded) { fake.seeded = 1; history = [-2, -1].map((k) => ({ id: 'fh' + k, title: at(k), artist: 'Test Artist', duration: dur })); }
   spotifyQueue = { err: '', items: [1, 2, 3, 4, 5, 6, 7].map((k) => ({ id: 'f' + (fake.i + k), title: at(k), artist: 'Test Artist', duration: dur })) };
   return { status: 'playing', title: at(0), artist: 'Test Artist', id: 'f' + fake.i, duration: dur, position: pos, volume: 60, shuffle: false, repeat: false };
 }
@@ -205,24 +206,23 @@ let jumping = false, queueHoldUntil = 0;
 function holdQueue() { queueHoldUntil = Date.now() + 3500; setTimeout(refreshSpotifyQueue, 3600); }
 async function doCmd(cmd, arg) {
   if (source === 'youtube') { if (ytWin) ytWin.webContents.send('yt:cmd', cmd, arg); return; }
-  if (cmd === 'next' && spotifyQueue.items.length) { spotifyQueue.items = spotifyQueue.items.slice(1); holdQueue(); } // show it at once
   if (cmd === 'jump') { // click on an upcoming title: Spotify's desktop app has no "play this one", so skip ahead to it
-    const n = Math.max(0, Math.min(40, Math.round(Number(arg) || 0)));
+    const n = Math.max(-30, Math.min(40, Math.round(Number(arg) || 0))); // negative = back through the history
     if (!n || jumping) return;
     jumping = true;
     try {
-      log(`jump ${n}: ` + spotifyQueue.items.slice(0, n).map((x) => x.title).join(' > '));
-      let done = n;
+      log(`jump ${n}: ` + (n > 0 ? spotifyQueue.items.slice(0, n) : history.slice(n)).map((x) => x.title).join(' > '));
+      let done = Math.abs(n);
       if (isWin && !process.env.SKIN_FAKE) {
         // the helper skips one song at a time and waits for each to register; it reports how many really happened
         const raw = await psCall('skip ' + n, 45000);
         try { done = Number(JSON.parse(raw).skipped); } catch { done = 0; }
         if (!Number.isFinite(done)) done = 0;
-        if (done < n) log(`jump: only ${done} of ${n} skips registered`);
+        if (done < Math.abs(n)) log(`jump: only ${done} of ${Math.abs(n)} skips registered`);
       } else {
-        for (let i = 0; i < n; i++) { await spotifyCmd('next'); if (i < n - 1) await new Promise((r) => setTimeout(r, 280)); }
+        for (let i = 0; i < Math.abs(n); i++) { await spotifyCmd(n > 0 ? 'next' : 'previous'); if (i < Math.abs(n) - 1) await new Promise((r) => setTimeout(r, 280)); }
       }
-      spotifyQueue.items = spotifyQueue.items.slice(done);
+      // the list itself is updated when the new song shows up in the state (see trackHistory)
     } finally { jumping = false; holdQueue(); }
     return;
   }
@@ -482,6 +482,14 @@ async function fetchYtTitles(ids) {
     }
   } finally { ytFetching = false; }
 }
+function ytHistory() {
+  const ids = ytState.playlist || [], idx = typeof ytState.index === 'number' ? ytState.index : -1;
+  if (!ids.length || idx <= 0) return [];
+  const past = ids.slice(Math.max(0, idx - 30), idx);
+  const missing = past.filter((id) => !ytTitles.has(id));
+  if (missing.length) fetchYtTitles(missing);
+  return past.map((id) => { const t = ytTitles.get(id); return { id: 'h' + id, title: t ? t.title : 'Loading…', artist: t ? t.artist : '', duration: 0 }; });
+}
 function ytQueue() {
   const ids = ytState.playlist || [], idx = typeof ytState.index === 'number' ? ytState.index : -1;
   if (!ids.length || idx < 0) return [];
@@ -500,6 +508,7 @@ const SPOT_REDIRECT = `http://127.0.0.1:${SPOT_PORT}/callback`;
 let spotAccess = null, spotExpires = 0, spotBackoffUntil = 0, spotQueueBusy = false, spotLastId = null;
 let spotifyQueue = { items: [], err: '' };
 let lastSongTitle = '';
+let history = [], prevSong = null; // songs already played, oldest first, so the playlist can scroll back
 const norm = (t) => String(t || '').toLowerCase().replace(/\s+/g, ' ').trim();
 const b64url = (buf) => Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
@@ -615,6 +624,27 @@ function disconnectSpotifyQueue() {
   writeCfg({ spotRefresh: null, spotClientId: null });
   spotAccess = null; spotifyQueue = { items: [], err: '' };
   buildMenu();
+}
+
+// Remember what played. When the song changes it also works out whether we moved forward through the queue
+// (the skipped songs go to the history) or back through the history (they return to the front of the queue).
+function trackHistory(st) {
+  const prev = prevSong;
+  prevSong = { id: st.id, title: st.title, artist: st.artist, duration: st.duration };
+  if (!prev) return;
+  const items = spotifyQueue.items;
+  const k = items.findIndex((x) => norm(x.title) === norm(st.title));
+  if (k >= 0) {
+    history.push(prev, ...items.slice(0, k));
+    spotifyQueue.items = items.slice(k + 1);
+  } else {
+    const h = history.map((x) => norm(x.title)).lastIndexOf(norm(st.title));
+    if (h >= 0) {
+      spotifyQueue.items = [...history.slice(h + 1), prev, ...items];
+      history = history.slice(0, h);
+    } else history.push(prev);
+  }
+  history = history.slice(-30);
 }
 
 // ---------- YouTube source ----------
@@ -752,19 +782,20 @@ ipcMain.handle('spotify:state', async () => {
   if (source === 'youtube') {
     const st = ytWin ? { ...ytState } : { status: 'closed' };
     st.queue = ytQueue();
+    st.history = ytHistory();
     delete st.playlist;
     onNowPlaying(st);
     return st;
   }
   const st = (await spotifyState()) || { status: 'closed' };
   if (st.id && st.id !== spotLastId) {
-    // the song that just started was the head of the old queue: drop it now, then ask Spotify for the real one
-    if (spotifyQueue.items.length && norm(spotifyQueue.items[0].title) === norm(st.title)) spotifyQueue.items = spotifyQueue.items.slice(1);
+    if (st.title) trackHistory(st); // updates the history and our view of the queue at once; the API re-confirms it shortly
     spotLastId = st.id;
     holdQueue();
   }
   if (st.title) lastSongTitle = st.title;
   st.queue = spotifyQueue.items;
+  st.history = history.map((x) => ({ ...x, id: 'h' + x.id }));
   // Explain an empty list instead of showing nothing: the desktop app does not expose its queue
   if (!st.queue.length && st.title && !process.env.SKIN_FAKE) {
     const cfg = readCfg();

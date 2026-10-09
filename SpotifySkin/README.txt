@@ -49,6 +49,8 @@ PIN, QUEUE, TASKBAR
 - Open the playlist (PL) window to see the current song and what's coming up. CLICK AN UPCOMING TITLE
   to jump to it (Spotify: the player skips ahead to it; YouTube: plays it directly). Adding, removing
   and reordering stay disabled.
+  SCROLL UP in the playlist to see what you already played (history) and click one to go back to it.
+  History starts when the player starts; for YouTube it is the part of the playlist before the video.
   YouTube playlists work straight away. For Spotify: tray icon > Connect Spotify Queue... (one-time
   setup with a free Spotify developer app; the account that creates it needs Premium).
 - The taskbar button shows the song, with Previous / Play-Pause / Next buttons on its preview.

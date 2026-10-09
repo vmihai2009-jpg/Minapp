@@ -1,6 +1,6 @@
 {
   "name": "spotify-skin",
-  "version": "0.4.5",
+  "version": "0.5.0",
   "description": "Winamp-skinned remote for Spotify",
   "main": "main.js",
   "scripts": {
