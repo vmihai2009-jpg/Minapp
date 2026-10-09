@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, dialog, screen, clipboard, session, desktopCapturer, shell, globalShortcut, Notification, net } = require('electron');
+const { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, dialog, screen, clipboard, session, desktopCapturer, shell, globalShortcut, Notification } = require('electron');
 const { execFile, spawn } = require('child_process');
 const fs = require('fs');
 const http = require('http');
@@ -8,8 +8,11 @@ const path = require('path');
 const isWin = process.platform === 'win32';
 const isMac = process.platform === 'darwin';
 // Portable: keep settings next to the app (a "data" folder) instead of in %APPDATA% / Library.
+// Inside a macOS .app bundle the app folder is not a place to keep data (it is replaced on updates), so there it
+// uses ~/Library/Application Support/Minapp, which the uninstaller knows about.
+const inMacBundle = isMac && __dirname.includes('.app/Contents/Resources');
 try {
-  const dataDir = path.join(path.dirname(__dirname), 'data');
+  const dataDir = inMacBundle ? path.join(app.getPath('appData'), 'Minapp') : path.join(path.dirname(__dirname), 'data');
   fs.mkdirSync(dataDir, { recursive: true });
   fs.accessSync(dataDir, fs.constants.W_OK);
   app.setPath('userData', dataDir);
@@ -31,8 +34,24 @@ let ytState = { status: 'closed' };
 let ytServer = null, ytPort = 0;
 
 const cfgPath = () => path.join(app.getPath('userData'), 'config.json');
-const readCfg = () => { try { return JSON.parse(fs.readFileSync(cfgPath(), 'utf8')); } catch { return {}; } };
-const writeCfg = (p) => { try { fs.writeFileSync(cfgPath(), JSON.stringify({ ...readCfg(), ...p })); } catch (e) { log('could not save settings: ' + e.message); } };
+// Settings are read from disk once and kept in memory (menus and polls ask for them constantly); writes go to a
+// temporary file first and are then renamed into place, so a crash or power loss mid-write cannot corrupt them.
+let cfgCache = null;
+const readCfg = () => {
+  if (!cfgCache) {
+    try { cfgCache = JSON.parse(fs.readFileSync(cfgPath(), 'utf8')) || {}; }
+    catch { cfgCache = {}; try { if (fs.existsSync(cfgPath())) fs.copyFileSync(cfgPath(), cfgPath() + '.broken'); } catch {} }
+  }
+  return cfgCache;
+};
+const writeCfg = (p) => {
+  cfgCache = { ...readCfg(), ...p };
+  try {
+    const tmp = cfgPath() + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(cfgCache));
+    fs.renameSync(tmp, cfgPath());
+  } catch (e) { log('could not save settings: ' + e.message); }
+};
 
 // ---------- logging ----------
 const bridgeLogPath = () => path.join(app.getPath('userData'), 'bridge.log');
@@ -43,7 +62,6 @@ function log(msg) {
     fs.appendFileSync(p, `${new Date().toISOString()} [app] ${msg}\n`);
   } catch {}
 }
-const bridgeLog = log;
 process.on('uncaughtException', (e) => log('uncaught: ' + ((e && e.stack) || e)));
 process.on('unhandledRejection', (e) => log('unhandled rejection: ' + ((e && e.stack) || e)));
 
@@ -92,8 +110,8 @@ async function macCmd(cmd, arg) {
 
 
 // ---------- Spotify bridge (Windows: PowerShell helper) ----------
-let psProc = null, psReady = null, psInfo = null, psSeq = 0, psBuf = '', lastRaw = '';
-let psFails = 0, psFailUntil = 0, psTimeouts = 0;
+let psProc = null, psReady = null, psInfo = null, psSeq = 0, psBuf = '';
+let psFails = 0, psFailUntil = 0, psTimeouts = 0, psLongCalls = 0;
 const psPending = new Map();
 function psStart() {
   log('starting helper');
@@ -151,13 +169,17 @@ async function psCall(line, timeoutMs = 8000) {
   if (!ok || !psProc) return '';
   const id = String(++psSeq);
   const proc = psProc;
+  const long = timeoutMs > 8000;
+  if (long) psLongCalls++;
   return new Promise((res) => {
     const t = setTimeout(() => {
       psPending.delete(id); res('');
-      // a helper that stops answering is restarted rather than left hanging forever
-      if (++psTimeouts >= 3) { psTimeouts = 0; log('helper unresponsive, restarting'); try { proc.kill(); } catch {} }
+      if (long) psLongCalls--;
+      // a helper that stops answering is restarted rather than left hanging forever (but a helper busy with a
+      // long job, such as a jump over many songs, is not unresponsive: the polls queued behind it just wait)
+      if (!psLongCalls && ++psTimeouts >= 3) { psTimeouts = 0; log('helper unresponsive, restarting'); try { proc.kill(); } catch {} }
     }, timeoutMs);
-    psPending.set(id, (r) => { clearTimeout(t); psTimeouts = 0; res(r); });
+    psPending.set(id, (r) => { clearTimeout(t); psTimeouts = 0; if (long) psLongCalls--; res(r); });
     try { proc.stdin.write(`${id} ${line}\n`); } catch { clearTimeout(t); psPending.delete(id); res(''); }
   });
 }
@@ -165,7 +187,6 @@ app.on('before-quit', () => { try { psProc && psProc.kill(); } catch {} });
 
 async function winState() {
   const raw = await psCall('state');
-  lastRaw = raw;
   try { return JSON.parse(raw); } catch { return { status: 'closed' }; }
 }
 async function winCmd(cmd, arg) {
@@ -266,7 +287,7 @@ ipcMain.handle('pin:get', () => pinned);
 // Visualizer: a capture that only listens (never mutes) feeds Webamp's analyser, so the bars and Milkdrop move.
 const EQ_HZ = [60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000];
 const dbOf = (v) => (Number(v) / 100) * 24 - 12;
-let eqOn = false, eqPref = 'apo', eqWarned = false, eqState = null;
+let eqOn = false, eqPref = 'apo', eqState = null;
 let vizOn = true, capMode = null, vizFailed = false;
 
 function apoDir() {
@@ -447,7 +468,7 @@ async function toggleEq() {
       'Or try the experimental capture mode: it records everything the PC plays, silences the normal output and replays it through the EQ. It can go silent or squeal on some setups.',
   });
   if (r.response === 0) { shell.openExternal('https://sourceforge.net/projects/equalizerapo/'); return buildMenu(); }
-  if (r.response === 1) { eqPref = 'capture'; eqOn = true; eqWarned = true; return applyAudio(); }
+  if (r.response === 1) { eqPref = 'capture'; eqOn = true; return applyAudio(); }
   buildMenu();
 }
 
@@ -480,13 +501,17 @@ function updateThumbar(playing) {
     ]);
   } catch (e) { log('taskbar buttons failed: ' + e.message); }
 }
-let lastNowId = null;
+let lastNowId = null, lastTitle = '';
 function onNowPlaying(st) {
   const playing = st.status === 'playing';
   const label = st.title ? `${st.artist ? st.artist + ' - ' : ''}${st.title}` : '';
   try {
-    if (win && !win.isDestroyed()) win.setTitle(label || 'Minapp');
-    if (tray) tray.setToolTip((label ? label + '\n' : '') + 'Minapp');
+    const title = label || 'Minapp';
+    if (title !== lastTitle) {
+      lastTitle = title;
+      if (win && !win.isDestroyed()) win.setTitle(title);
+      if (tray) tray.setToolTip((label ? label + '\n' : '') + 'Minapp');
+    }
   } catch {}
   updateThumbar(playing);
   const id = st.id || null;
@@ -967,8 +992,8 @@ function registerHotkeys() {
     'Control+Alt+Right': () => doCmd('next'),
     'Control+Alt+Left': () => doCmd('previous'),
     'Control+Alt+Down': () => doCmd('playpause'),
-    'Control+Alt+W': () => toggleVisible(),
-    'Control+Alt+V': () => { if (source === 'youtube') setYtHidden(!readCfg().ytHidden); },
+    'Control+Alt+Up': () => toggleVisible(),
+    'Control+Alt+PageUp': () => { if (source === 'youtube') setYtHidden(!readCfg().ytHidden); },
   };
   for (const [k, fn] of Object.entries(keys)) {
     try { if (!globalShortcut.register(k, fn)) log('hotkey taken by another app: ' + k); } catch (e) { log('hotkey failed: ' + k); }
@@ -1011,17 +1036,18 @@ function menuItems() {
     { label: readCfg().spotRefresh ? 'Disconnect Spotify queue' : 'Connect Spotify queue…', click: () => (readCfg().spotRefresh ? disconnectSpotifyQueue() : connectSpotifyQueue()) },
     { type: 'separator' },
     { label: 'Settings', submenu: [
-      { label: 'Global hotkeys (Ctrl+Alt+←/→/↓, W, V)', type: 'checkbox', checked: cfgOn('hotkeys', true), click: () => { toggleCfg('hotkeys', true)(); registerHotkeys(); } },
+      { label: 'Global hotkeys (Ctrl+Alt+←/→/↓/↑, PgUp)', type: 'checkbox', checked: cfgOn('hotkeys', true), click: () => { toggleCfg('hotkeys', true)(); registerHotkeys(); } },
       { label: 'Snap to screen edges', type: 'checkbox', checked: cfgOn('snap', true), click: toggleCfg('snap', true) },
       { label: 'Song-change notifications', type: 'checkbox', checked: cfgOn('toasts', false), click: toggleCfg('toasts', false) },
       ...(isWin ? [{ label: 'Start with Windows', type: 'checkbox', checked: app.getLoginItemSettings({ path: process.execPath }).openAtLogin,
         click: (mi) => { try { app.setLoginItemSettings({ openAtLogin: mi.checked, path: process.execPath, args: [app.getAppPath()] }); } catch (e) { log('login item failed: ' + e.message); } buildMenu(); } }] : []),
       { type: 'separator' },
       { label: 'Open data folder', click: () => shell.openPath(app.getPath('userData')) },
+      ...(inMacBundle ? [{ label: 'Uninstall Minapp…', click: () => { const u = path.join(app.getPath('userData'), 'Uninstall Minapp.command'); if (fs.existsSync(u)) shell.openPath(u); } }] : []),
     ] },
     ...(isWin ? [{ label: 'Check Spotify connection…', click: checkSpotify }] : []),
     { type: 'separator' },
-    { label: 'Hide to tray', accelerator: 'Control+Alt+W', registerAccelerator: false, click: () => win.hide() },
+    { label: isMac ? 'Hide window' : 'Hide to tray', accelerator: 'Control+Alt+Up', registerAccelerator: false, click: () => win.hide() },
     { label: 'Quit', click: () => app.quit() },
   ];
 }

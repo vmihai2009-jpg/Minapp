@@ -1,0 +1,92 @@
+#!/bin/bash
+# Minapp launcher. The first time it runs it builds the real player (a properly named and branded copy of the
+# Electron engine with Minapp's code inside) in ~/Library/Application Support/Minapp, then starts it.
+# Later runs just start it. Nothing needs an admin password.
+APP_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+RES="$APP_DIR/Contents/Resources"
+SUP="$HOME/Library/Application Support/Minapp"
+ENGINE_DIR="$SUP/engine"
+ENGINE="$ENGINE_DIR/Minapp.app"
+CACHE="$SUP/downloads"
+ELECTRON_VERSION="44.7.0"; WEBAMP_VERSION="2.3.1"
+WANT="$(cat "$RES/VERSION" 2>/dev/null || echo 0)"
+case "$(uname -m)" in arm64) ARCH=arm64;; *) ARCH=x64;; esac
+mkdir -p "$SUP" "$CACHE"
+
+say() { osascript -e "display dialog \"$1\" with title \"Minapp\" buttons {\"OK\"} default button 1 with icon caution" >/dev/null 2>&1; }
+fail() { stop_wait; say "$1"; exit 1; }
+WAITPID=""
+start_wait() {
+  osascript -e 'display dialog "Minapp is setting itself up for the first time (a one-time download of about 120 MB).\n\nThis window closes by itself. Minapp starts when it is done." with title "Minapp" buttons {"Hide"} default button 1 giving up after 1200' >/dev/null 2>&1 &
+  WAITPID=$!
+}
+stop_wait() { [ -n "$WAITPID" ] && kill "$WAITPID" 2>/dev/null; WAITPID=""; }
+
+# files from a downloaded zip carry a quarantine mark that makes macOS refuse to open them
+xattr -dr com.apple.quarantine "$APP_DIR" 2>/dev/null
+
+# offer to move into Applications (once), so it lives where Mac apps live
+case "$APP_DIR" in
+  /Applications/*|"$HOME"/Applications/*) ;;
+  *)
+    if [ ! -f "$SUP/.asked-install" ]; then
+      touch "$SUP/.asked-install"
+      ANS="$(osascript -e 'button returned of (display dialog "Copy Minapp to your Applications folder?\n\nYou can then find it in Launchpad and keep it in the Dock." with title "Minapp" buttons {"Not now", "Copy to Applications"} default button 2)' 2>/dev/null)"
+      if [ "$ANS" = "Copy to Applications" ]; then
+        DEST="/Applications"; [ -w "$DEST" ] || { DEST="$HOME/Applications"; mkdir -p "$DEST"; }
+        rm -rf "$DEST/Minapp.app" && cp -R "$APP_DIR" "$DEST/Minapp.app" && xattr -dr com.apple.quarantine "$DEST/Minapp.app" 2>/dev/null
+        [ -d "$DEST/Minapp.app" ] && { open "$DEST/Minapp.app"; exit 0; }
+      fi
+    fi;;
+esac
+
+build_engine() {
+  # an older Minapp may still be running from the folder we are about to replace: ask it to quit first
+  if pgrep -f "^$ENGINE/Contents/" >/dev/null 2>&1; then
+    osascript -e 'if application "Minapp" is running then tell application "Minapp" to quit' >/dev/null 2>&1
+    sleep 2; pkill -f "^$ENGINE/Contents/" 2>/dev/null; sleep 1
+  fi
+  start_wait
+  EZIP="$CACHE/electron-v$ELECTRON_VERSION-darwin-$ARCH.zip"
+  if [ ! -s "$EZIP" ]; then
+    curl -fL --retry 4 --retry-delay 2 -o "$EZIP.part" \
+      "https://github.com/electron/electron/releases/download/v$ELECTRON_VERSION/electron-v$ELECTRON_VERSION-darwin-$ARCH.zip" \
+      || fail "Minapp could not download its player engine. Check your internet connection (github.com) and open Minapp again."
+    mv "$EZIP.part" "$EZIP"
+  fi
+  WZIP="$CACHE/webamp-$WEBAMP_VERSION.tgz"
+  if [ ! -s "$WZIP" ]; then
+    curl -fL --retry 4 --retry-delay 2 -o "$WZIP.part" "https://registry.npmjs.org/webamp/-/webamp-$WEBAMP_VERSION.tgz" \
+      || fail "Minapp could not download Webamp. Check your internet connection (registry.npmjs.org) and open Minapp again."
+    mv "$WZIP.part" "$WZIP"
+  fi
+  TMP="$ENGINE_DIR.building"; rm -rf "$TMP" "$ENGINE_DIR"; mkdir -p "$TMP/x"
+  ditto -x -k "$EZIP" "$TMP/x" || { rm -rf "$EZIP"; fail "The downloaded engine was damaged. Open Minapp again to retry."; }
+  mv "$TMP/x/Electron.app" "$TMP/Minapp.app" || fail "Unexpected engine layout."
+  E="$TMP/Minapp.app"
+  # Minapp's own code, plus Webamp, go inside the engine where Electron looks for them
+  rm -rf "$E/Contents/Resources/app"; cp -R "$RES/app" "$E/Contents/Resources/app"
+  mkdir -p "$TMP/w" && tar -xzf "$WZIP" -C "$TMP/w" && mkdir -p "$E/Contents/Resources/app/node_modules" \
+    && mv "$TMP/w/package" "$E/Contents/Resources/app/node_modules/webamp" || fail "Could not unpack Webamp."
+  # name and icon
+  cp "$RES/Minapp.icns" "$E/Contents/Resources/electron.icns" 2>/dev/null
+  P="$E/Contents/Info.plist"; PB=/usr/libexec/PlistBuddy
+  setp() { "$PB" -c "Set :$1 $2" "$P" 2>/dev/null || "$PB" -c "Add :$1 string $2" "$P" 2>/dev/null; }
+  setp CFBundleName Minapp; setp CFBundleDisplayName Minapp; setp CFBundleIdentifier com.minapp.player
+  setp NSAppleEventsUsageDescription "Minapp reads what the Spotify app is playing and sends it play, pause and skip commands."
+  # the file was modified, so give it a fresh (ad-hoc, free) signature; Apple silicon refuses unsigned code
+  xattr -cr "$E" 2>/dev/null
+  codesign --force --deep --sign - "$E" >/dev/null 2>&1
+  echo "$WANT" > "$TMP/.version"
+  rm -rf "$TMP/x" "$TMP/w"
+  mv "$TMP" "$ENGINE_DIR"
+  cp "$RES/Uninstall Minapp.command" "$SUP/Uninstall Minapp.command" 2>/dev/null && chmod +x "$SUP/Uninstall Minapp.command"
+  stop_wait
+}
+
+if [ ! -d "$ENGINE" ] || [ "$(cat "$ENGINE_DIR/.version" 2>/dev/null)" != "$WANT" ]; then
+  build_engine
+fi
+
+[ -d "$ENGINE" ] || fail "Minapp is not set up correctly. Open it again to retry."
+open "$ENGINE"

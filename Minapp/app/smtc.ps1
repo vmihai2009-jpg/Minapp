@@ -54,7 +54,8 @@ function Get-TrackKey($s) {
 }
 
 function Get-SmtcState($s) {
-  $st = [string]$s.GetPlaybackInfo().PlaybackStatus
+  $pi = $s.GetPlaybackInfo()
+  $st = [string]$pi.PlaybackStatus
   if ($st -eq 'Closed' -or $st -eq 'Stopped') { return @{ status = 'stopped' } }
   $p = Await ($s.TryGetMediaPropertiesAsync()) $propType
   $t = $s.GetTimelineProperties()
@@ -67,7 +68,6 @@ function Get-SmtcState($s) {
   if ($pos -lt 0) { $pos = 0 }
   $title = [string]$p.Title
   $artist = [string]$p.Artist
-  $pi = $s.GetPlaybackInfo()
   $shuf = $null; $rep = $null
   try { if ($null -ne $pi.IsShuffleActive) { $shuf = [bool]$pi.IsShuffleActive } } catch {}
   try { if ($null -ne $pi.AutoRepeatMode) { $rep = ([string]$pi.AutoRepeatMode -ne 'None') } } catch {}
@@ -104,7 +104,7 @@ function Get-FallbackState {
     $i = $t.IndexOf(' - ')
     if ($i -gt 0) { $artist = $t.Substring(0, $i); $title = $t.Substring($i + 3) }
     if ($title -ne $script:fbTitle -or $artist -ne $script:fbArtist) { $script:fbTitle = $title; $script:fbArtist = $artist; $script:fbPos = 0.0 }
-    elseif ($dt -lt 3) { $script:fbPos += $dt }
+    elseif ($dt -lt 8) { $script:fbPos += $dt }
   }
   return @{
     status   = $(if ($script:fbPlaying) { 'playing' } else { 'paused' })
