@@ -131,7 +131,7 @@ function psStart() {
   proc.on('error', (e) => gone('failed to start: ' + e.message));
   proc.on('exit', (code) => gone('exited with code ' + code));
 }
-async function psCall(line) {
+async function psCall(line, timeoutMs = 8000) {
   if (!psProc) {
     if (Date.now() < psFailUntil) return '';
     psStart();
@@ -145,7 +145,7 @@ async function psCall(line) {
       psPending.delete(id); res('');
       // a helper that stops answering is restarted rather than left hanging forever
       if (++psTimeouts >= 3) { psTimeouts = 0; log('helper unresponsive, restarting'); try { proc.kill(); } catch {} }
-    }, 8000);
+    }, timeoutMs);
     psPending.set(id, (r) => { clearTimeout(t); psTimeouts = 0; res(r); });
     try { proc.stdin.write(`${id} ${line}\n`); } catch { clearTimeout(t); psPending.delete(id); res(''); }
   });
@@ -212,9 +212,17 @@ async function doCmd(cmd, arg) {
     jumping = true;
     try {
       log(`jump ${n}: ` + spotifyQueue.items.slice(0, n).map((x) => x.title).join(' > '));
-      spotifyQueue.items = spotifyQueue.items.slice(n); holdQueue();
-      if (isWin && !process.env.SKIN_FAKE) await psCall('skip ' + n); // done inside the helper: fast and muted
-      else for (let i = 0; i < n; i++) { await spotifyCmd('next'); if (i < n - 1) await new Promise((r) => setTimeout(r, 280)); }
+      let done = n;
+      if (isWin && !process.env.SKIN_FAKE) {
+        // the helper skips one song at a time and waits for each to register; it reports how many really happened
+        const raw = await psCall('skip ' + n, 45000);
+        try { done = Number(JSON.parse(raw).skipped); } catch { done = 0; }
+        if (!Number.isFinite(done)) done = 0;
+        if (done < n) log(`jump: only ${done} of ${n} skips registered`);
+      } else {
+        for (let i = 0; i < n; i++) { await spotifyCmd('next'); if (i < n - 1) await new Promise((r) => setTimeout(r, 280)); }
+      }
+      spotifyQueue.items = spotifyQueue.items.slice(done);
     } finally { jumping = false; holdQueue(); }
     return;
   }

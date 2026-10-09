@@ -49,6 +49,10 @@ function Get-SpotifySession {
   return $found
 }
 
+function Get-TrackKey($s) {
+  try { $m = Await ($s.TryGetMediaPropertiesAsync()) $propType; return ([string]$m.Artist + '|' + [string]$m.Title) } catch { return '' }
+}
+
 function Get-SmtcState($s) {
   $st = [string]$s.GetPlaybackInfo().PlaybackStatus
   if ($st -eq 'Closed' -or $st -eq 'Stopped') { return @{ status = 'stopped' } }
@@ -282,22 +286,35 @@ while ($true) {
     elseif ($bits[1] -eq 'cmd')  { Send-Command $bits[2] $null; $out = '{"ok":true}' }
     elseif ($bits[1] -eq 'shuffle' -or $bits[1] -eq 'repeat') { Send-Command $bits[1] $bits[2]; $out = '{"ok":true}' }
     elseif ($bits[1] -eq 'skip') {
-      # jump ahead N songs in one go: mute Spotify, skip quickly, put the volume back
+      # jump ahead N songs: mute Spotify, skip one at a time and WAIT until the song really changed
+      # (Spotify ignores skips that arrive while the previous one is still loading), then restore the volume
       $n = [Math]::Max(0, [Math]::Min(40, [int]$bits[2]))
+      $done = 0
       $sess = Get-SpotifySession
       if ($null -ne $sess -and $n -gt 0) {
         $orig = -1.0
         if ($volOk) { try { $orig = [double][SkinVol.AppVolume]::Run('Spotify', -1.0) } catch {} }
         if ($orig -gt 0) { Set-SpotifyVolume 0 }
         try {
+          $cur = Get-TrackKey $sess
           for ($i = 0; $i -lt $n; $i++) {
-            [void](Await ($sess.TrySkipNextAsync()) ([bool]))
-            if ($i -lt $n - 1) { Start-Sleep -Milliseconds 90 }
+            $ok = $false
+            for ($try = 0; $try -lt 3 -and -not $ok; $try++) {
+              [void](Await ($sess.TrySkipNextAsync()) ([bool]))
+              $t0 = Get-Date
+              while (((Get-Date) - $t0).TotalMilliseconds -lt 1800) {
+                Start-Sleep -Milliseconds 70
+                $now = Get-TrackKey $sess
+                if ($now -ne $cur) { $ok = $true; $cur = $now; break }
+              }
+            }
+            if (-not $ok) { Log ('skip ' + ($i + 1) + ' of ' + $n + ' did not register'); break }
+            $done++
           }
-          Start-Sleep -Milliseconds 350   # let the last song start before the sound comes back
+          Start-Sleep -Milliseconds 250
         } finally { if ($orig -gt 0) { Set-SpotifyVolume $orig } }
       }
-      $out = '{"ok":true}'
+      $out = '{"ok":true,"skipped":' + $done + '}'
     }
     elseif ($bits[1] -eq 'seek') { Send-Command 'seek' $bits[2]; $out = '{"ok":true}' }
     elseif ($bits[1] -eq 'vol')  { Set-SpotifyVolume ([double]::Parse($bits[2], [Globalization.CultureInfo]::InvariantCulture)); $out = '{"ok":true}' }
