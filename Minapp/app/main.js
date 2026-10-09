@@ -896,6 +896,17 @@ function storeSkin(name, buf) {
     return p;
   } catch (e) { log('could not store skin: ' + e.message); return null; }
 }
+function saveSkinQuiet(name, buf) {
+  try {
+    fs.mkdirSync(skinsDir(), { recursive: true });
+    let base = path.basename(String(name || 'skin.wsz')).replace(/[^\w.\- ()]/g, '_');
+    if (!/\.(wsz|zip)$/i.test(base)) base += '.wsz';
+    const p = path.join(skinsDir(), base);
+    if (fs.existsSync(p)) return false;
+    fs.writeFileSync(p, buf);
+    return true;
+  } catch (e) { log('could not save skin: ' + e.message); return false; }
+}
 function useSkinFile(p) {
   const buf = readSkin(p);
   if (!buf) return;
@@ -1000,6 +1011,58 @@ ipcMain.handle('skins:apply', async (_e, item) => {
     return { ok: true };
   } catch (e) { return { ok: false, error: e.message }; }
 });
+// "Get 50 popular skins": the archive lists its skins in "museum order" (the classics and favourites first).
+// Take the first N that are not flagged adult and keep them in the skin library.
+let popularBusy = false;
+async function downloadPopularSkins(n = 50) {
+  if (popularBusy) return;
+  popularBusy = true;
+  let got = 0, fail = 0, firstErr = '';
+  try {
+    const items = [];
+    for (let off = 0; items.length < n && off < 400; off += 24) {
+      const r = await listArchiveSkins('', off);
+      if (r.error) { firstErr = r.error; break; }
+      items.push(...r.items);
+      if (r.end) break;
+    }
+    const list = items.slice(0, n);
+    if (!list.length) throw new Error(firstErr || 'the archive returned no skins');
+    let done = 0, next = 0;
+    const worker = async () => {
+      while (next < list.length) {
+        const it = list[next++];
+        try {
+          let buf = process.env.SKIN_FAKE_API ? Buffer.from('PK\u0003\u0004fake') : null; // test mode
+          for (const u of buf ? [] : [it.url, it.url2]) {
+            if (!u || !/^https:\/\/[\w.-]+\//.test(u)) continue;
+            try {
+              const r = await netFetch(u, { signal: AbortSignal.timeout(30000) });
+              if (!r.ok) continue;
+              const b = Buffer.from(await r.arrayBuffer());
+              if (b.length < 8 * 1024 * 1024 && b[0] === 0x50 && b[1] === 0x4b) { buf = b; break; }
+            } catch {}
+          }
+          if (buf && saveSkinQuiet(it.name + '.wsz', buf)) got++; else if (!buf) fail++;
+        } finally {
+          done++;
+          try { win.setProgressBar(done / list.length); if (tray) tray.setToolTip(`Minapp: downloading skins ${done}/${list.length}`); } catch {}
+        }
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    writeCfg({ popularDone: true });
+    buildMenu();
+    dialog.showMessageBox(win, { type: 'info', message: `Added ${got} popular skins`, detail: `They are in Skins in the menu${fail ? `\n${fail} could not be downloaded` : ''}.` });
+  } catch (e) {
+    log('popular skins failed: ' + why(e));
+    dialog.showMessageBox(win, { type: 'warning', message: 'Could not download the popular skins', detail: why(e) + '\n\nCheck your internet connection and try again from Skins > Get 50 popular skins.' });
+  } finally {
+    popularBusy = false;
+    try { win.setProgressBar(-1); if (tray) tray.setToolTip('Minapp'); } catch {}
+  }
+}
+ipcMain.on('skins:popular', () => downloadPopularSkins(50));
 ipcMain.on('skins:web', () => shell.openExternal(SKIN_WEB));
 function openSkinBrowser() {
   if (skinWin && !skinWin.isDestroyed()) { skinWin.show(); skinWin.focus(); return; }
@@ -1021,12 +1084,22 @@ function skinsMenu() {
   const skins = listSkins();
   return [
     { label: 'Browse skin archive…', accelerator: 'CmdOrCtrl+B', click: openSkinBrowser },
+    { label: popularBusy ? 'Downloading popular skins…' : 'Get 50 popular skins', enabled: !popularBusy, click: () => downloadPopularSkins(50) },
     { label: 'Load skin from file…', accelerator: 'CmdOrCtrl+O', click: pickSkin },
     { label: 'Random skin', enabled: skins.length > 1, click: () => { const o = skins.filter((f) => path.join(skinsDir(), f) !== cur); useSkinFile(path.join(skinsDir(), o[Math.floor(Math.random() * o.length)])); } },
     { label: 'Minapp (default skin)', type: 'radio', checked: !cur, click: () => { writeCfg({ skin: null }); win.webContents.reload(); } },
     { type: 'separator' },
     ...(skins.length
-      ? skins.slice(0, 40).map((f) => ({ label: f.replace(/\.(wsz|zip)$/i, ''), type: 'radio', checked: path.join(skinsDir(), f) === cur, click: () => useSkinFile(path.join(skinsDir(), f)) }))
+      ? (() => {
+          const items = skins.map((f) => ({ label: f.replace(/\.(wsz|zip)$/i, ''), type: 'radio', checked: path.join(skinsDir(), f) === cur, click: () => useSkinFile(path.join(skinsDir(), f)) }));
+          if (items.length <= 20) return items;
+          const groups = [];   // long libraries become a few short submenus, labelled by first letters
+          for (let i = 0; i < items.length; i += 20) {
+            const part = items.slice(i, i + 20);
+            groups.push({ label: `${part[0].label.slice(0, 12)} … ${part[part.length - 1].label.slice(0, 12)}`, submenu: part });
+          }
+          return groups;
+        })()
       : [{ label: 'Skins you load appear here', enabled: false }]),
     { type: 'separator' },
     { label: 'Open skins folder', click: () => { fs.mkdirSync(skinsDir(), { recursive: true }); shell.openPath(skinsDir()); } },
@@ -1176,5 +1249,12 @@ app.whenReady().then(() => {
   // start on YouTube again only if the last session ended there and a link is saved
   if (cfg.source === 'youtube' && cfg.yt) setSource('youtube');
   else if (eqOn) setTimeout(() => { writeApo(true); }, 1500);
+  // first time only: offer the popular classic skins
+  if (!cfg.popularAsked && !listSkins().length && !process.env.SKIN_FAKE) setTimeout(async () => {
+    writeCfg({ popularAsked: true });
+    const r = await dialog.showMessageBox(win, { type: 'question', buttons: ['Download them', 'Not now'], defaultId: 0, cancelId: 1,
+      message: 'Get 50 popular Winamp skins?', detail: 'Minapp can download 50 of the most-loved classic skins (a few MB) so you can pick them from Skins in the menu. You can do this later from Skins > Get 50 popular skins.' });
+    if (r.response === 0) downloadPopularSkins(50);
+  }, 6000);
 });
 app.on('window-all-closed', () => app.quit());

@@ -3,8 +3,10 @@ MINAPP for Windows - no install, no admin
 1. Unzip this folder anywhere you can write to (Desktop, Documents, a USB stick).
 2. Double-click "Minapp.exe" (it has the Minapp icon). "Start Minapp.bat" does the same if you prefer it.
    Neither needs an admin password. Windows may say "Windows protected your PC" because the file is new and
-   unsigned: click More info > Run anyway. Minapp then removes the "downloaded from the internet" mark from its
-   own files, so it should not ask again. To avoid even the first message: before unzipping, right-click the
+   unsigned: click More info > Run anyway. Minapp then puts a "Minapp" shortcut on your Desktop and in the Start
+   menu. START IT FROM THOSE SHORTCUTS: they run the engine directly, which carries no "downloaded from the
+   internet" mark, so Windows never shows that screen again (it only shows for a freshly unzipped Minapp.exe).
+   The shortcut can be pinned to the taskbar. If you move the folder, run Minapp.exe once to refresh them. To avoid even the first message: before unzipping, right-click the
    zip > Properties > tick Unblock > OK, then unzip. (The first run shows a progress window while it downloads; after that no console window appears.)
    - First run downloads about 150 MB into this folder (needs internet, once only).
    - If Windows says "Windows protected your PC", click More info > Run anyway.
@@ -18,7 +20,8 @@ MENU: click the skin's O button (top-left) or right-click the player. The same m
 ICON (bottom-right, maybe under the ^ arrow); clicking the tray icon shows/hides the player.
 It has: Source (Spotify / YouTube), Open Spotify, Playlist, Equalizer window, Milkdrop, Mini mode,
 Skins, Pin on top, Size (0.5x to 3x), Equalizer sound, Visualizer, Spotify queue, Settings and Quit.
-SKINS: click the Minapp logo in the bottom-right corner (or menu > Skins > Browse skin archive) to open the
+SKINS: Skins > Get 50 popular skins downloads 50 of the most-loved classic skins (offered once on first run).
+Click the Minapp logo in the bottom-right corner (or menu > Skins > Browse skin archive) to open the
 skin archive inside Minapp: search, scroll, click a picture to use that skin. It needs internet; the built-in
 Minapp skin and anything you picked before work offline. You can still drag a .wsz from skins.webamp.org
 onto the window. Every skin you load is

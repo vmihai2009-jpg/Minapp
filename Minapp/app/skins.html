@@ -28,6 +28,7 @@
 <header>
   <h1>Skins</h1>
   <input id="q" type="search" placeholder="Search the Winamp skin archive (try: green, anime, matrix)" autofocus>
+  <button id="pop" title="Download 50 of the most popular classic skins into your library">Get 50 popular</button>
   <button id="web" title="Open skins.webamp.org in your browser">skins.webamp.org</button>
 </header>
 <div id="msg">Loading skins…</div>
@@ -71,6 +72,7 @@
   }
   const reset = () => { gen++; grid.innerHTML = ''; offset = 0; done = false; loading = false; msg.textContent = 'Loading skins…'; load(); };
   let t; q.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { query = q.value.trim(); reset(); }, 350); });
+  document.getElementById('pop').onclick = () => { window.skinsBridge.popular(); say('Downloading 50 popular skins in the background…'); };
   document.getElementById('web').onclick = () => window.skinsBridge.openWeb();
   new IntersectionObserver((e) => { if (e[0].isIntersecting) load(); }, { rootMargin: '600px' }).observe(document.getElementById('more'));
   load();
