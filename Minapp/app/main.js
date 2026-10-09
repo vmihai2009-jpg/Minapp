@@ -370,15 +370,38 @@ async function runCapture(mode) {
   return win.webContents.executeJavaScript(`window.__audioApply ? window.__audioApply(${JSON.stringify(mode)}) : 'not ready'`, true);
 }
 
-async function applyAudio() {
-  if (!win) return;
-  writeApo();
+function desiredMode() {
   const src = source === 'youtube' ? 'youtube' : 'system';
   let mode = null;
   if (eqOn && (src === 'youtube' || eqPref === 'capture')) mode = { kind: 'eq', src };
   else if (vizOn && !vizFailed) mode = { kind: 'viz', src };
   if (mode && mode.src === 'youtube' && !ytWin) mode = null;
   if (mode && mode.src === 'system' && !isWin) mode = null;
+  return mode;
+}
+
+// The listening capture can stop by itself (audio device switched, sleep/wake, a failed start).
+// Every few seconds: if it should be running and is not, or it has been hearing only silence while music plays, restart it.
+let capRetries = 0, capBusy = false;
+async function capWatchdog() {
+  if (!win || win.isDestroyed() || capBusy) return;
+  const want = desiredMode();
+  if (!want) { capRetries = 0; return; }
+  let cur = null;
+  try { cur = await win.webContents.executeJavaScript('window.__audioState ? window.__audioState() : null'); } catch { return; }
+  if (cur === want.kind) { capRetries = 0; return; }
+  if (capRetries >= 6) return; // give up for now (retried again after a source change or restart)
+  capRetries++;
+  log(`audio capture is ${cur || 'off'}, expected ${want.kind}: restarting (attempt ${capRetries})`);
+  capBusy = true; vizFailed = false;
+  try { await applyAudio(); } finally { capBusy = false; }
+}
+ipcMain.on('cap:lost', (_e, why) => { log('audio capture lost: ' + why); capRetries = Math.max(0, capRetries - 1); setTimeout(capWatchdog, 500); });
+
+async function applyAudio() {
+  if (!win) return;
+  writeApo();
+  let mode = desiredMode();
   try { await runCapture(mode); }
   catch (e) {
     const why = String((e && e.message) || e);
@@ -1026,6 +1049,7 @@ app.whenReady().then(() => {
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('render-process-gone', (_e, d) => { log('renderer gone: ' + d.reason); if (d.reason !== 'clean-exit') win.webContents.reload(); });
   installCaptureHandler();
+  setInterval(capWatchdog, 8000);
   if (isMac && app.dock) { try { app.dock.setIcon(nativeImage.createFromPath(path.join(__dirname, 'icon.png'))); } catch {} }
   setInterval(() => { if (source === 'spotify') refreshSpotifyQueue(); }, 15000); // plus an immediate refresh whenever the song changes or a skip happens
   pinned = !!cfg.onTop;

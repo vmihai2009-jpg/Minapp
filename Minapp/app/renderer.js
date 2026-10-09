@@ -198,10 +198,11 @@
     } else {
       src.connect(media._analyser);
     }
-    stream.getAudioTracks()[0].addEventListener('ended', () => { if (cap && cap.stream === stream) stopCapture(); });
-    cap = { kind: mode.kind, stream, src, tap, guard };
+    stream.getAudioTracks()[0].addEventListener('ended', () => { if (cap && cap.stream === stream) { stopCapture(); api.capLost('stream ended'); } });
+    cap = { kind: mode.kind, stream, src, tap, guard, quiet: 0 };
   }
   // called by the main process (with a user gesture, which screen/audio capture requires)
+  window.__audioState = () => (cap ? cap.kind : null);
   window.__audioApply = async (mode) => {
     stopCapture();
     if (!mode) return 'off';
@@ -378,6 +379,14 @@
       if (s.status === 'closed' || s.status === 'stopped') {
         if (status === 'PLAYING') webamp.pause();
         return;
+      }
+      // capturing but hearing nothing for a long while although music plays: the capture went stale, restart it
+      if (cap && s.status === 'playing' && !(s.volume >= 0 && s.volume <= 5)) {
+        const a = media._analyser, d = new Uint8Array(a.frequencyBinCount);
+        a.getByteFrequencyData(d);
+        let peak = 0; for (let i = 0; i < d.length; i++) if (d[i] > peak) peak = d[i];
+        cap.quiet = peak === 0 ? cap.quiet + 1 : 0;
+        if (cap.quiet > 40) { stopCapture(); api.capLost('no sound reached the visualizer for 30 s'); }
       }
       if (pendingFix) {
         // Webamp starts the first row; with history above, move playback and the view to the playing song

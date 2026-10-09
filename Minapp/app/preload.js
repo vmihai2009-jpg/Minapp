@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('bridge', {
   prefsSave: (u) => ipcRenderer.send('prefs:save', u),
   saveSkin: (name, buf) => ipcRenderer.invoke('skin:save', name, buf),
   log: (m) => ipcRenderer.send('app:log', m),
+  capLost: (why) => ipcRenderer.send('cap:lost', why),
   eqMessage: (t) => ipcRenderer.send('eq:message', t),
   pinToggle: () => ipcRenderer.invoke('pin:toggle'),
   pinGet: () => ipcRenderer.invoke('pin:get'),
