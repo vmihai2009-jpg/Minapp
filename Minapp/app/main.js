@@ -1210,6 +1210,8 @@ app.on('activate', () => { if (win && !win.isVisible()) { win.show(); win.focus(
 app.on('second-instance', () => { if (win) { if (!win.isVisible()) win.show(); if (win.isMinimized()) win.restore(); win.focus(); } });
 
 app.whenReady().then(() => {
+  // start the Spotify helper right now, in parallel with the window loading, instead of on the first poll
+  if (isWin && !process.env.SKIN_FAKE) { try { psStart(); } catch (e) { log('helper pre-start failed: ' + e.message); } }
   const cfg = readCfg();
   zoom = cfg.zoomSet === 2 && cfg.zoom ? cfg.zoom : 1; // older versions saved a bigger default
   vizOn = cfg.viz !== false;

@@ -502,4 +502,5 @@
     finally { busy = false; }
   }
   setInterval(tick, 750);
+  tick(); // ask right away rather than after the first interval
 })();
