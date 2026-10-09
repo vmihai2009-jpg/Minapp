@@ -1,11 +1,13 @@
 # Minapp
 
+Project page: `docs/index.html` (published with GitHub Pages: Settings > Pages > Deploy from a branch > `main` / `/docs`).
+
 A Winamp-skinned player that follows the **Spotify** desktop app (and YouTube playlists), built on [Webamp](https://github.com/captbaritone/webamp) and Electron. No install, no admin rights: unzip and run.
 
 | Platform | Download | Start with |
 |---|---|---|
-| Windows 10/11 | [`releases/Minapp-Windows-v1.0.1.zip`](releases/Minapp-Windows-v1.0.1.zip) | `Start Minapp.bat` |
-| macOS (Apple silicon and Intel) | [`releases/Minapp-Mac-v1.0.1.zip`](releases/Minapp-Mac-v1.0.1.zip) | `Start Minapp.command` (right-click > Open the first time) |
+| Windows 10/11 | [`docs/downloads/Minapp-Windows-v1.0.1.zip`](docs/downloads/Minapp-Windows-v1.0.1.zip) | `Start Minapp.bat` |
+| macOS (Apple silicon and Intel) | [`docs/downloads/Minapp-Mac-v1.0.1.zip`](docs/downloads/Minapp-Mac-v1.0.1.zip) | `Start Minapp.command` (right-click > Open the first time) |
 
 The first run downloads about 150 MB (Electron and Webamp) into the folder. Each zip has its own `README.txt`.
 
@@ -22,6 +24,6 @@ The first run downloads about 150 MB (Electron and Webamp) into the folder. Each
 Minapp/app/       shared Electron app (main.js, renderer.js, preload scripts, smtc.ps1 for Windows)
 Minapp/windows/   launcher + README for the Windows zip
 Minapp/mac/       launcher + README for the Mac zip
-Minapp/build.sh   builds both zips into releases/
+Minapp/build.sh   builds both zips into docs/downloads/
 ```
 Rebuild the zips with `Minapp/build.sh` (needs `zip` and `node`).

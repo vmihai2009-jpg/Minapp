@@ -1,9 +1,9 @@
 #!/bin/bash
-# Builds the two ready-to-run zips into ../releases. Usage: ./build.sh
+# Builds the two ready-to-run zips into ../docs/downloads. Usage: ./build.sh
 set -e
 cd "$(dirname "$0")"
 V=$(node -p "require('./app/package.json').version")
-OUT="$(cd .. && pwd)/releases"; mkdir -p "$OUT"
+OUT="$(cd .. && pwd)/docs/downloads"; mkdir -p "$OUT"
 T=$(mktemp -d)
 for P in windows mac; do
   D="$T/Minapp-${P^}"; mkdir -p "$D"
