@@ -65,7 +65,7 @@ PIN, QUEUE, TASKBAR
   setup with a free Spotify developer app; the account that creates it needs Premium).
 - The taskbar button shows the song, with Previous / Play-Pause / Next buttons on its preview.
 - Global hotkeys (Settings to turn off): Ctrl+Alt+Right = next, Ctrl+Alt+Left = previous,
-  Ctrl+Alt+Down = play/pause, Ctrl+Alt+W = show/hide the player, Ctrl+Alt+V = show/hide the YouTube video.
+  Ctrl+Alt+Down = play/pause, Ctrl+Alt+Up = show/hide the player, Ctrl+Alt+PageUp = show/hide the YouTube video.
 - YouTube video: untick "Show YouTube video" in the menu to hear it without the window (it keeps playing).
   Videos whose owner switched embedding off cannot be played by any app: Minapp skips them
   (a note shows at the bottom of the video window) and logs them in data/bridge.log. YouTube Mixes are always

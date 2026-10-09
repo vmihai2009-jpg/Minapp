@@ -34,7 +34,10 @@ try {
     if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
     Get-File "https://github.com/electron/electron/releases/download/v$electronVersion/electron-v$electronVersion-win32-$arch.zip" $zip
     Write-Host 'Unpacking...'
-    Expand-Archive -Path $zip -DestinationPath $tmp -Force
+    # tar.exe (built into Windows 10+) unpacks the 120 MB archive in seconds; Expand-Archive takes a minute or more
+    New-Item -ItemType Directory -Force $tmp | Out-Null
+    & tar.exe -xf $zip -C $tmp
+    if ($LASTEXITCODE -ne 0) { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue; Expand-Archive -Path $zip -DestinationPath $tmp -Force }
     if (Test-Path $rt) { Remove-Item -Recurse -Force $rt }
     Move-Item $tmp $rt
     Remove-Item $zip

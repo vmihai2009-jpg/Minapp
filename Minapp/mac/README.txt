@@ -52,7 +52,7 @@ WHAT WORKS
   The visualizer / Milkdrop and the equalizer for Spotify need system-audio capture, which macOS does not
   offer without extra software, so they are Windows-only for now.
 - Global hotkeys (Settings to turn off): Ctrl+Alt+Right = next, Ctrl+Alt+Left = previous,
-  Ctrl+Alt+Down = play/pause, Ctrl+Alt+W = show/hide the player, Ctrl+Alt+V = show/hide the YouTube video.
+  Ctrl+Alt+Down = play/pause, Ctrl+Alt+Up = show/hide the player, Ctrl+Alt+PageUp = show/hide the YouTube video.
 - The player remembers its position, size, pin state, skin and equalizer between runs.
 
 If the window is hidden, click the Minapp icon in the Dock.

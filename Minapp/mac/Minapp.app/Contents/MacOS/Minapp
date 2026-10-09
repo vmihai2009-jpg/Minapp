@@ -41,6 +41,11 @@ case "$APP_DIR" in
 esac
 
 build_engine() {
+  # an older Minapp may still be running from the folder we are about to replace: ask it to quit first
+  if pgrep -f "^$ENGINE/Contents/" >/dev/null 2>&1; then
+    osascript -e 'if application "Minapp" is running then tell application "Minapp" to quit' >/dev/null 2>&1
+    sleep 2; pkill -f "^$ENGINE/Contents/" 2>/dev/null; sleep 1
+  fi
   start_wait
   EZIP="$CACHE/electron-v$ELECTRON_VERSION-darwin-$ARCH.zip"
   if [ ! -s "$EZIP" ]; then

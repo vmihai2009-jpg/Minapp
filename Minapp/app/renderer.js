@@ -1,5 +1,6 @@
 (async () => {
   const api = window.bridge;
+  let kickPoll = () => {};   // set once polling starts
   window.addEventListener('error', (e) => api.log('error: ' + e.message + ' @' + (e.filename || '').split('/').pop() + ':' + e.lineno));
   window.addEventListener('unhandledrejection', (e) => api.log('promise: ' + ((e.reason && e.reason.message) || e.reason)));
 
@@ -91,6 +92,7 @@
   // keep the Electron window sized to the Winamp windows (and any open menu)
   let lw = 0, lh = 0;
   setInterval(() => {
+    if (document.hidden) return;
     restack();
     // only the few top-level boxes are measured (cheap); a full-tree scan every tick made the playlist feel laggy
     const els = [...document.querySelectorAll('#main-window, #equalizer-window, #playlist-window, #milkdrop-window')];
@@ -131,7 +133,7 @@
   const MAP = { play: 'play', pause: 'playpause', stop: 'pause', next: 'next', previous: 'previous' };
   document.addEventListener('click', (e) => {
     const b = e.target.closest('#play, #pause, #stop, #next, #previous');
-    if (b && MAP[b.id]) api.cmd(MAP[b.id]);
+    if (b && MAP[b.id]) { api.cmd(MAP[b.id]); kickPoll(300); }
     // shuffle / repeat: Webamp flips its own switch, then the source is told the new value
     const sr = e.target.closest('#shuffle, #repeat');
     if (sr) setTimeout(() => {
@@ -292,7 +294,7 @@
     if (about) { // the link that used to open the Webamp project page
       about.removeAttribute('href'); about.removeAttribute('target'); about.title = 'Browse skins'; about.style.cursor = 'pointer';
     }
-    const shaded = mw.classList.contains('shade') || mw.getBoundingClientRect().height < 60 * (zoomNow() || 1);
+    const shaded = mw.classList.contains('shade') || mw.getBoundingClientRect().height < 60;
     if (logoCanvas && logoCanvas.parentNode !== mw) logoCanvas = null;
     if (!logoCanvas) {
       logoCanvas = document.createElement('canvas');
@@ -331,7 +333,6 @@
     c.putImageData(out, 0, 0);
     c.drawImage(logoImg, 4, 3, 16, 16);
   }
-  const zoomNow = () => 1;
   logoImg.onload = drawLogo;
   document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('#about')) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); api.openSkins(); } }, true);
   document.addEventListener('auxclick', (e) => { if (e.target.closest && e.target.closest('#about')) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); } }, true);
@@ -389,7 +390,7 @@
         const h = lastHist.length, off = i - h;
         const item = off > 0 ? lastQueue[off - 1] : off < 0 ? lastHist[i] : null;
         if (off !== 0 && item && !item.hint) {
-          api.cmd('jump', off);
+          api.cmd('jump', off); kickPoll(1200);
           holdUntil = Date.now() + 2500; // ignore the old position while the skip happens
           cell.style.opacity = '0.5'; setTimeout(() => { cell.style.opacity = ''; }, 400);
         }
@@ -436,10 +437,12 @@
   // ----- Spotify -> skin (poll) -----
   let pendingFix = null, curId = null, busy = false, lastQSig = '', lastBuild = 0;
   const queueUrl = silentWav(5); // placeholder audio for the upcoming items (never actually heard)
+  let vizBuf = new Uint8Array(0), lastStatus = 'closed';
   async function tick() {
     if (busy) return; busy = true;
     try {
       const s = await api.state();
+      lastStatus = s.status;
       const status = webamp.getMediaStatus();
       if (s.status === 'closed' || s.status === 'stopped') {
         if (status === 'PLAYING') webamp.pause();
@@ -447,7 +450,7 @@
       }
       // capturing but hearing nothing for a long while although music plays: the capture went stale, restart it
       if (cap && s.status === 'playing' && !(s.volume >= 0 && s.volume <= 5)) {
-        const a = media._analyser, d = new Uint8Array(a.frequencyBinCount);
+        const a = media._analyser, d = vizBuf.length === a.frequencyBinCount ? vizBuf : (vizBuf = new Uint8Array(a.frequencyBinCount));
         a.getByteFrequencyData(d);
         let peak = 0; for (let i = 0; i < d.length; i++) if (d[i] > peak) peak = d[i];
         cap.quiet = peak === 0 ? cap.quiet + 1 : 0;
@@ -466,6 +469,8 @@
         } else if (++pendingFix.tries > 8) pendingFix = null;
         return;
       }
+      // some sources report no length (or 0): use a placeholder so the placeholder track can still be built
+      if (!Number.isFinite(s.duration) || s.duration <= 0) s.duration = 600;
       const q = Array.isArray(s.queue) ? s.queue.slice(0, 30) : [];
       lastQueue = q;
       const hist = Array.isArray(s.history) ? s.history.slice(-30) : [];
@@ -501,6 +506,15 @@
     } catch (e) { console.warn(e); }
     finally { busy = false; }
   }
-  setInterval(tick, 750);
-  tick(); // ask right away rather than after the first interval
+  // Poll quickly while music plays; slowly when paused, closed or the window is hidden (saves CPU and battery).
+  const nextDelay = () => (document.hidden ? 4000 : lastStatus === 'playing' ? 750 : 1500);
+  let loopTimer = null, looping = false;
+  const schedule = (ms) => { clearTimeout(loopTimer); loopTimer = setTimeout(loop, ms == null ? nextDelay() : ms); };
+  async function loop() {
+    if (looping) return;            // the running pass schedules the next one itself
+    looping = true;
+    try { await tick(); } finally { looping = false; schedule(); }
+  }
+  kickPoll = (ms) => schedule(ms == null ? 250 : ms);   // after a button press: check soon instead of waiting
+  loop();
 })();
