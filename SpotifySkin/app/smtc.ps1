@@ -37,7 +37,9 @@ try {
 function Get-SpotifySession {
   if (-not $smtc) { return $null }
   foreach ($s in $mgr.GetSessions()) {
-    if ($s.SourceAppUserModelId -match 'Spotify') { return $s }
+    # the real Spotify only (desktop: Spotify.exe, Store: SpotifyAB.SpotifyMusic...), never this player's own session
+    $id = [string]$s.SourceAppUserModelId
+    if ($id -match '^Spotify(\.exe)?$' -or $id -match '^SpotifyAB\.SpotifyMusic') { return $s }
   }
   return $null
 }

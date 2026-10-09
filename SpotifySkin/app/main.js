@@ -12,9 +12,12 @@ if (isWin) {
     const dataDir = path.join(path.dirname(__dirname), 'data');
     fs.mkdirSync(dataDir, { recursive: true });
     app.setPath('userData', dataDir);
-    app.setAppUserModelId('SpotifySkin.Player'); // groups the taskbar button / toasts under one identity
+    app.setAppUserModelId('WinampSkin.Player'); // groups the taskbar button / toasts under one identity
   } catch (e) { /* fall back to the default location */ }
 }
+
+// The player's silent placeholder audio must not register as a media session or grab the media keys.
+app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling,MediaSessionService');
 
 // Only one player at a time: a second launch would fight over the helper, the ports and the EQ file.
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
