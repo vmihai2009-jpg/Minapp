@@ -80,6 +80,7 @@ try {
   Start-Process -FilePath $exe -ArgumentList ('"' + $app + '"') -WorkingDirectory $app
 }
 catch {
+  try { New-Item -ItemType Directory -Force (Join-Path $root 'data') | Out-Null; Add-Content -Path (Join-Path $root 'data\setup.log') -Value ((Get-Date -Format s) + ' ' + $_.Exception.Message) } catch {}
   Write-Host ''
   Write-Host "Setup failed: $($_.Exception.Message)" -ForegroundColor Red
   Write-Host 'If you are on a work or school network, it may block github.com or registry.npmjs.org.'
