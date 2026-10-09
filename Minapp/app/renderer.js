@@ -272,6 +272,64 @@
     });
   }, true));
 
+  // ----- corner logo: Minapp's own, with no link -----
+  // The skin paints the Winamp logo into its background image. Cover that spot with a copy of the clean pixels
+  // beside it (so any skin works), draw our logo on top, and make the old "About" link do nothing.
+  const logoImg = new Image(); logoImg.src = 'logo-16.png';
+  const LOGO = { x: 246, y: 87, w: 24, h: 22 };
+  let logoBgUrl = '', logoCanvas = null, logoBg = null;
+  function paintLogo() {
+    const mw = document.querySelector('#main-window');
+    if (!mw) return;
+    const about = document.querySelector('#about');
+    if (about) { // the link that used to open the Webamp project page
+      about.removeAttribute('href'); about.removeAttribute('target'); about.removeAttribute('title'); about.style.cursor = 'default';
+    }
+    const shaded = mw.classList.contains('shade') || mw.getBoundingClientRect().height < 60 * (zoomNow() || 1);
+    if (logoCanvas && logoCanvas.parentNode !== mw) logoCanvas = null;
+    if (!logoCanvas) {
+      logoCanvas = document.createElement('canvas');
+      logoCanvas.width = LOGO.w; logoCanvas.height = LOGO.h;
+      logoCanvas.style.cssText = `position:absolute;left:${LOGO.x}px;top:${LOGO.y}px;width:${LOGO.w}px;height:${LOGO.h}px;pointer-events:none;image-rendering:pixelated;z-index:5`;
+      mw.appendChild(logoCanvas); logoBgUrl = '';
+    }
+    logoCanvas.style.display = shaded ? 'none' : '';
+    const m = /url\(["']?(.*?)["']?\)/.exec(getComputedStyle(mw).backgroundImage || '');
+    const url = m ? m[1] : '';
+    if (url && url !== logoBgUrl) {
+      logoBgUrl = url;
+      const bg = new Image();
+      bg.onload = () => { logoBg = bg; drawLogo(); };
+      bg.src = url;
+    }
+  }
+  function drawLogo() {
+    if (!logoCanvas || !logoBg || !logoImg.complete) return;
+    const c = logoCanvas.getContext('2d'); c.imageSmoothingEnabled = false;
+    c.clearRect(0, 0, LOGO.w, LOGO.h);
+    // repaint the old logo's spot by blending the clean row above it into the clean row below it, column by column,
+    // so the skin's own shading (and the panel edge on the right) carries straight through
+    const tmp = document.createElement('canvas'); tmp.width = logoBg.naturalWidth; tmp.height = logoBg.naturalHeight;
+    const t = tmp.getContext('2d'); t.drawImage(logoBg, 0, 0);
+    const top = t.getImageData(LOGO.x, LOGO.y - 1, LOGO.w, 1).data, bot = t.getImageData(LOGO.x, LOGO.y + LOGO.h, LOGO.w, 1).data;
+    const out = c.createImageData(LOGO.w, LOGO.h);
+    for (let y = 0; y < LOGO.h; y++) {
+      const k = (y + 0.5) / LOGO.h;
+      for (let x = 0; x < LOGO.w; x++) {
+        const i = (y * LOGO.w + x) * 4, j = x * 4;
+        for (let ch = 0; ch < 3; ch++) out.data[i + ch] = Math.round(top[j + ch] * (1 - k) + bot[j + ch] * k);
+        out.data[i + 3] = 255;
+      }
+    }
+    c.putImageData(out, 0, 0);
+    c.drawImage(logoImg, 4, 3, 16, 16);
+  }
+  const zoomNow = () => 1;
+  logoImg.onload = drawLogo;
+  document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('#about')) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); } }, true);
+  document.addEventListener('auxclick', (e) => { if (e.target.closest && e.target.closest('#about')) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); } }, true);
+  setInterval(paintLogo, 400);
+
   // ----- native pop-up menu instead of Webamp's own dropdown (which the small window clips) -----
   const swallow = (e) => { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); };
   ['mousedown', 'mouseup'].forEach((ev) =>

@@ -812,6 +812,7 @@ async function setSource(s) {
   buildMenu();
 }
 
+ipcMain.on('yt:log', (_e, msg) => log('[youtube] ' + String(msg).slice(0, 300)));
 ipcMain.on('yt:state', (_e, s) => { ytState = s || { status: 'closed' }; });
 
 // the renderer talks to whichever source is active

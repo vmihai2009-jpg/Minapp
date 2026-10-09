@@ -59,7 +59,9 @@ PIN, QUEUE, TASKBAR
 - Global hotkeys (Settings to turn off): Ctrl+Alt+Right = next, Ctrl+Alt+Left = previous,
   Ctrl+Alt+Down = play/pause, Ctrl+Alt+W = show/hide the player, Ctrl+Alt+V = show/hide the YouTube video.
 - YouTube video: untick "Show YouTube video" in the menu to hear it without the window (it keeps playing).
-  YouTube asks that its player stays visible, so this is your own choice.
+  Videos whose owner switched embedding off cannot be played by any app: Minapp skips them
+  (a note shows at the bottom of the video window) and logs them in data/bridge.log. YouTube Mixes are always
+  playable; a normal playlist must be public or unlisted. YouTube asks that its player stays visible, so this is your own choice.
 - Settings also has: Snap to screen edges, Song-change notifications, Start with Windows.
 - The player remembers its position, size, pin state, skin and equalizer between runs.
 

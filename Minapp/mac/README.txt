@@ -20,7 +20,9 @@ WHAT WORKS
   Spotify developer app from an account with Premium) what is coming up. CLICK AN UPCOMING TITLE to jump to
   it. SCROLL UP to see what you already played and click one to go back to it.
 - YOUTUBE source: paste a playlist or video link (Player > YouTube link). "Show YouTube video" hides the
-  video window while the sound keeps playing. YouTube asks that its player stays visible; hiding is your choice.
+  video window while the sound keeps playing. Videos whose owner switched embedding off cannot be played by any app: Minapp skips them
+  (a note shows at the bottom of the video window) and logs them in data/bridge.log. YouTube Mixes are always
+  playable; a normal playlist must be public or unlisted. YouTube asks that its player stays visible; hiding is your choice.
 - EQUALIZER SOUND works for the YouTube source (the video's sound goes through the skin's 10 sliders).
   The visualizer / Milkdrop and the equalizer for Spotify need system-audio capture, which macOS does not
   offer without extra software, so they are Windows-only for now.
