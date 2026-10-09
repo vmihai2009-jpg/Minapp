@@ -11,11 +11,27 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyProduct("Minapp")]
 [assembly: AssemblyDescription("Minapp")]
 [assembly: AssemblyCompany("Minapp")]
-[assembly: AssemblyVersion("1.4.0.0")]
+[assembly: AssemblyVersion("1.4.1.0")]
 
 static class Launcher {
   [DllImport("user32.dll", CharSet = CharSet.Unicode)]
   static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
+
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  static extern bool DeleteFileW(string path);
+
+  // Windows tags downloaded files with a "came from the internet" mark (an NTFS stream named Zone.Identifier).
+  // That mark is what triggers the SmartScreen "Windows protected your PC" screen. Once you have chosen to run
+  // Minapp, remove the mark from Minapp's own files so it does not ask again.
+  static void Unblock(string file) {
+    try { DeleteFileW(file + ":Zone.Identifier"); } catch (Exception) { }
+  }
+  static void UnblockFolder(string dir, bool deep) {
+    try {
+      foreach (string f in Directory.GetFiles(dir)) Unblock(f);
+      if (deep) foreach (string d in Directory.GetDirectories(dir)) UnblockFolder(d, true);
+    } catch (Exception) { }
+  }
 
   static int Main() {
     string dir = AppDomain.CurrentDomain.BaseDirectory;
@@ -23,6 +39,9 @@ static class Launcher {
     string webamp = Path.Combine(dir, "app", "node_modules", "webamp", "built", "webamp.bundle.min.js");
     string app = Path.Combine(dir, "app");
     try {
+      UnblockFolder(dir, false);
+      UnblockFolder(app, false);
+      Unblock(Assembly.GetExecutingAssembly().Location);
       if (File.Exists(engine) && File.Exists(webamp)) {
         ProcessStartInfo run = new ProcessStartInfo(engine, "\"" + app + "\"");
         run.WorkingDirectory = app;

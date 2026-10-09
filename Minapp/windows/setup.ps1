@@ -76,6 +76,7 @@ try {
 
   # files from a downloaded zip carry a "blocked" mark that can make Windows or antivirus nag
   Get-ChildItem -Path $app -File -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
+  Get-ChildItem -Path $root -File -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
 
   Start-Process -FilePath $exe -ArgumentList ('"' + $app + '"') -WorkingDirectory $app
 }

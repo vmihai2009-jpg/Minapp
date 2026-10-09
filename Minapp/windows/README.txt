@@ -3,7 +3,9 @@ MINAPP for Windows - no install, no admin
 1. Unzip this folder anywhere you can write to (Desktop, Documents, a USB stick).
 2. Double-click "Minapp.exe" (it has the Minapp icon). "Start Minapp.bat" does the same if you prefer it.
    Neither needs an admin password. Windows may say "Windows protected your PC" because the file is new and
-   unsigned: click More info > Run anyway. (The first run shows a progress window while it downloads; after that no console window appears.)
+   unsigned: click More info > Run anyway. Minapp then removes the "downloaded from the internet" mark from its
+   own files, so it should not ask again. To avoid even the first message: before unzipping, right-click the
+   zip > Properties > tick Unblock > OK, then unzip. (The first run shows a progress window while it downloads; after that no console window appears.)
    - First run downloads about 150 MB into this folder (needs internet, once only).
    - If Windows says "Windows protected your PC", click More info > Run anyway.
      (Or right-click the zip before unzipping > Properties > tick Unblock.)
