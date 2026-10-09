@@ -1,0 +1,50 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Minapp local player</title></head>
+<body>
+<audio id="a"></audio>
+<script>
+  const a = document.getElementById('a');
+  let list = [], idx = -1, shuffle = false, repeat = false, started = false;
+  const url = (p) => encodeURI('file:///' + p.replace(/\\/g, '/').replace(/^\/+/, '')).replace(/#/g, '%23').replace(/\?/g, '%3F');
+  function load(i, play) {
+    if (i < 0 || i >= list.length) { a.pause(); return; }
+    idx = i; a.src = url(list[i].path);
+    if (play !== false) a.play().catch(() => {});
+    push();
+  }
+  function next(auto) {
+    if (!list.length) return;
+    if (shuffle && list.length > 1) { let j; do { j = Math.floor(Math.random() * list.length); } while (j === idx); return load(j); }
+    if (idx + 1 < list.length) return load(idx + 1);
+    if (repeat || !auto) return load(0, true);
+    started = false; a.pause(); push();
+  }
+  a.addEventListener('ended', () => next(true));
+  a.addEventListener('error', () => { window.localBridge.log('cannot play ' + (list[idx] && list[idx].path)); setTimeout(() => next(true), 300); });
+  function push() {
+    const t = list[idx];
+    if (!t) return window.localBridge.state({ status: 'stopped' });
+    window.localBridge.state({
+      status: a.paused ? 'paused' : 'playing', title: t.title, artist: t.artist, id: 'l' + idx + ':' + t.path,
+      duration: isFinite(a.duration) ? a.duration : 0, position: a.currentTime || 0, volume: Math.round(a.volume * 100), index: idx,
+    });
+  }
+  setInterval(push, 500);
+  window.localBridge.onCmd((c, arg) => {
+    const run = {
+      load: () => { list = arg.tracks; shuffle = !!arg.shuffle; load(arg.start || 0, true); },
+      play: () => a.play().catch(() => {}),
+      pause: () => a.pause(),
+      playpause: () => (a.paused ? a.play().catch(() => {}) : a.pause()),
+      next: () => next(false),
+      previous: () => (a.currentTime > 3 ? (a.currentTime = 0) : load(idx > 0 ? idx - 1 : list.length - 1)),
+      volume: () => { a.volume = Math.max(0, Math.min(1, (Number(arg) || 0) / 100)); },
+      seek: () => { a.currentTime = Number(arg) || 0; },
+      jump: () => load(Math.max(0, Math.min(list.length - 1, idx + (Number(arg) || 0)))),
+      shuffle: () => { shuffle = !!arg; },
+      repeat: () => { repeat = !!arg; },
+    }[c];
+    if (run) { try { run(); } catch (e) {} setTimeout(push, 100); }
+  });
+</script>
+</body></html>

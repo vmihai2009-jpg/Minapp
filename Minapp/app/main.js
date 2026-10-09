@@ -28,10 +28,13 @@ app.setName('Minapp');
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
 
 let tray = null;
-let win, ytWin = null, zoom = 1, lastSize = { w: 275, h: 116 };
+let win, ytWin = null, localWin = null, zoom = 1, lastSize = { w: 275, h: 116 };
 let source = 'spotify';
 let ytState = { status: 'closed' };
 let ytServer = null, ytPort = 0;
+let localState = { status: 'closed' }, localList = [], localName = '';
+const isPlayerSrc = () => source === 'youtube' || source === 'local'; // sources played in their own window
+const playerWin = () => (source === 'local' ? localWin : ytWin);
 
 const cfgPath = () => path.join(app.getPath('userData'), 'config.json');
 // Settings are read from disk once and kept in memory (menus and polls ask for them constantly); writes go to a
@@ -237,7 +240,9 @@ let jumping = false, queueHoldUntil = 0;
 // right after a skip Spotify's Web API still reports the old queue for a few seconds: keep our own view, then re-read it
 function holdQueue() { queueHoldUntil = Date.now() + 3500; setTimeout(refreshSpotifyQueue, 3600); }
 async function doCmd(cmd, arg) {
+  if (source === 'youtube' && cmd === 'download') return downloadCurrentYouTube();
   if (source === 'youtube') { if (ytWin) ytWin.webContents.send('yt:cmd', cmd, arg); return; }
+  if (source === 'local') { if (localWin) localWin.webContents.send('local:cmd', cmd, arg); return; }
   if (cmd === 'jump') { // click on an upcoming title: Spotify's desktop app has no "play this one", so skip ahead to it
     const n = Math.max(-30, Math.min(40, Math.round(Number(arg) || 0))); // negative = back through the history
     if (!n || jumping) return;
@@ -301,7 +306,7 @@ function apoDir() {
 }
 const APO_FILE = 'minapp_eq.txt';
 const APO_LEGACY = 'spotifyskin_eq.txt'; // from the first versions: its include line is removed when found
-const apoActive = () => eqOn && source !== 'youtube' && eqPref === 'apo';
+const apoActive = () => eqOn && !isPlayerSrc() && eqPref === 'apo';
 
 function apoEnsureInclude() {
   const d = apoDir();
@@ -359,7 +364,7 @@ ipcMain.on('eq:state', (_e, s) => {
   clearTimeout(apoTimer);
   apoTimer = setTimeout(() => { if (apoActive()) writeApo(); }, 60); // slider drags send many updates
   // pressing ON in the skin's EQ window turns the real equalizer on too, when that needs no setup questions
-  if (eqSeen && !wasOn && s.on !== false && !eqOn && (source === 'youtube' || (isWin && eqPref === 'apo' && apoDir() && apoEnsureInclude().ok))) { eqOn = true; applyAudio(); }
+  if (eqSeen && !wasOn && s.on !== false && !eqOn && (isPlayerSrc() || (isWin && eqPref === 'apo' && apoDir() && apoEnsureInclude().ok))) { eqOn = true; applyAudio(); }
   eqSeen = true;
 });
 ipcMain.handle('cap:prepare', (_e, m) => true);
@@ -372,8 +377,8 @@ function installCaptureHandler() {
   session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
     const m = capMode;
     try {
-      if (m && m.src === 'youtube' && ytWin) {
-        const frame = ytWin.webContents.mainFrame;
+      if (m && m.src === 'youtube' && playerWin()) {
+        const frame = playerWin().webContents.mainFrame;
         callback({ video: frame, audio: frame, enableLocalEcho: m.kind === 'viz' });
       } else if (m && m.src === 'system' && isWin) {
         const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } });
@@ -392,11 +397,11 @@ async function runCapture(mode) {
 }
 
 function desiredMode() {
-  const src = source === 'youtube' ? 'youtube' : 'system';
+  const src = isPlayerSrc() ? 'youtube' : 'system';
   let mode = null;
   if (eqOn && (src === 'youtube' || eqPref === 'capture')) mode = { kind: 'eq', src };
   else if (vizOn && !vizFailed) mode = { kind: 'viz', src };
-  if (mode && mode.src === 'youtube' && !ytWin) mode = null;
+  if (mode && mode.src === 'youtube' && !playerWin()) mode = null;
   if (mode && mode.src === 'system' && !isWin) mode = null;
   return mode;
 }
@@ -439,7 +444,7 @@ async function applyAudio() {
 
 async function toggleEq() {
   if (eqOn) { eqOn = false; return applyAudio(); }
-  if (source === 'youtube') { eqOn = true; return applyAudio(); }
+  if (isPlayerSrc()) { eqOn = true; return applyAudio(); }
   if (!isWin) {
     dialog.showMessageBox(win, { message: 'Equalizer sound for Spotify is only built for Windows.', detail: 'It works for the YouTube source on any system.' });
     return buildMenu();
@@ -818,16 +823,99 @@ function setYtHidden(h) {
   buildMenu();
 }
 
+// ---------- Local playlists + YouTube download (personal use) ----------
+const library = require('./library').create({ dir: path.join(app.getPath('userData'), 'library'), binDir: path.join(app.getPath('userData'), 'bin'), log });
+
+async function playLocal(name, start = 0) {
+  const tracks = library.tracks(name);
+  if (!tracks.length) { dialog.showMessageBox(win, { message: `"${name}" has no songs yet` }); return; }
+  try { await runCapture(null); } catch {}
+  await spotifyCmd('pause');
+  if (ytWin) { ytWin.webContents.send('yt:cmd', 'pause'); ytWin.hide(); }
+  localList = tracks; localName = name; writeCfg({ localPlaylist: name });
+  source = 'local'; writeCfg({ source });
+  localState = { status: 'closed' };
+  if (!localWin) {
+    localWin = new BrowserWindow({ show: false, width: 200, height: 100, webPreferences: { preload: path.join(__dirname, 'local-preload.js'), contextIsolation: true, backgroundThrottling: false } });
+    localWin.on('closed', () => { localWin = null; localState = { status: 'closed' }; });
+    await localWin.loadFile('local.html');
+  }
+  localWin.webContents.send('local:cmd', 'load', { tracks, start });
+  await applyAudio();
+}
+
+async function importIntoPlaylist(folderMode) {
+  const r = await dialog.showOpenDialog(win, folderMode
+    ? { title: 'Import a folder of music', properties: ['openDirectory'] }
+    : { title: 'Import music', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Audio', extensions: ['mp3', 'm4a', 'aac', 'opus', 'ogg', 'oga', 'webm', 'wav', 'flac'] }] });
+  if (r.canceled || !r.filePaths.length) return;
+  let name, files;
+  if (folderMode) { name = path.basename(r.filePaths[0]); files = library.audioIn(r.filePaths[0]); }
+  else {
+    name = await askText({ title: 'Playlist name', label: 'Add these songs to which playlist?', value: localName || 'My music', button: 'Import' });
+    if (!name) return;
+    files = r.filePaths;
+  }
+  const n = library.importFiles(name, files);
+  dialog.showMessageBox(win, { message: n ? `Added ${n} song${n === 1 ? '' : 's'} to "${library.safeName(name)}"` : 'Nothing new to add', detail: n ? '' : 'The files were already there, or are not audio files.' });
+  buildMenu();
+}
+
+let downloading = false;
+async function downloadCurrentYouTube() {
+  const t = readCfg().yt;
+  if (!t) { dialog.showMessageBox(win, { message: 'Open a YouTube link first (menu > YouTube link…)' }); return; }
+  if (downloading) return;
+  if (!library.haveBin() || !readCfg().dlOk) {
+    const r = await dialog.showMessageBox(win, {
+      type: 'question', buttons: ['Download', 'Cancel'], defaultId: 1, cancelId: 1,
+      message: 'Download this ' + (t.list ? 'playlist' : 'video') + ' as audio files?',
+      detail: 'For your personal use only. YouTube\'s terms do not allow downloading, and most music is copyrighted: only keep what you have the right to keep.\n\nThe first time, Minapp fetches the free yt-dlp tool (about 20 MB) into its data folder. Songs land in the local library and play from menu > Local playlists.',
+    });
+    if (r.response !== 0) return;
+    writeCfg({ dlOk: true });
+  }
+  downloading = true;
+  win.webContents.send('download:state', true);
+  const url = t.list ? 'https://www.youtube.com/playlist?list=' + encodeURIComponent(t.list) : 'https://www.youtube.com/watch?v=' + encodeURIComponent(t.v);
+  const note = (m) => { log('[download] ' + m); try { tray && tray.setToolTip(m); win.setTitle(m); } catch {} lastTitle = ''; };
+  try {
+    let res = await library.download(url, !!t.list, note);
+    if (!res.ok) { note('Updating yt-dlp…'); res = await library.download(url, !!t.list, note, true); } // YouTube changes often: a newer yt-dlp usually fixes it
+    if (res.ok) {
+      buildMenu();
+      new Notification({ title: 'Download finished', body: `${res.files.length} song${res.files.length === 1 ? '' : 's'} saved to the local library` }).show();
+      const r = await dialog.showMessageBox(win, { message: `Saved ${res.files.length} song${res.files.length === 1 ? '' : 's'} to your local library`, detail: res.error ? 'Some items were skipped: ' + res.error : '', buttons: ['Play them', 'OK'], defaultId: 1 });
+      if (r.response === 0) await playLocal(path.basename(path.dirname(res.files[0])));
+    } else {
+      dialog.showMessageBox(win, { type: 'error', message: 'Download failed', detail: res.error || 'yt-dlp did not save anything.' });
+    }
+  } catch (e) {
+    dialog.showMessageBox(win, { type: 'error', message: 'Download failed', detail: String((e && e.message) || e) });
+  } finally {
+    downloading = false; lastTitle = '';
+    if (win && !win.isDestroyed()) win.webContents.send('download:state', false);
+  }
+}
+
 async function setSource(s) {
   try {
     try { await runCapture(null); } catch {}
+    if (s === 'local') {
+      const pl = library.playlists();
+      const name = pl.find((p) => p.name === readCfg().localPlaylist && p.count) ? readCfg().localPlaylist : (pl.find((p) => p.count) || {}).name;
+      if (!name) { dialog.showMessageBox(win, { message: 'No local playlists yet', detail: 'Use menu > Local playlists > Import files… or Import folder…, or download a YouTube playlist with the record button.' }); await applyAudio(); return; }
+      return playLocal(name);
+    }
     if (s === 'youtube') {
+      if (localWin) localWin.webContents.send('local:cmd', 'pause');
       if (!readCfg().yt && !(await chooseYouTube())) { await applyAudio(); return; }
       source = 'youtube'; writeCfg({ source });
       await spotifyCmd('pause');
       await openYouTube(readCfg().yt);
     } else {
       source = 'spotify'; writeCfg({ source });
+      if (localWin) localWin.webContents.send('local:cmd', 'pause');
       if (ytWin) { ytWin.webContents.send('yt:cmd', 'pause'); ytWin.hide(); }
       await applyAudio();
     }
@@ -839,11 +927,24 @@ async function setSource(s) {
 
 ipcMain.on('yt:log', (_e, msg) => log('[youtube] ' + String(msg).slice(0, 300)));
 ipcMain.on('yt:state', (_e, s) => { ytState = s || { status: 'closed' }; });
+ipcMain.on('local:log', (_e, msg) => log('[local] ' + String(msg).slice(0, 300)));
+ipcMain.on('local:state', (_e, s) => { localState = s || { status: 'closed' }; });
 
 // the renderer talks to whichever source is active
 ipcMain.handle('spotify:state', async () => {
+  if (source === 'local') {
+    const st = localWin ? { ...localState } : { status: 'closed' };
+    const i = typeof st.index === 'number' ? st.index : -1;
+    const row = (t, k) => ({ id: (k < i ? 'h' : '') + 'l' + k + ':' + t.path, title: t.title, artist: t.artist, duration: 0 });
+    st.queue = i < 0 ? [] : localList.slice(i + 1, i + 31).map((t, k) => row(t, i + 1 + k));
+    st.history = i <= 0 ? [] : localList.slice(Math.max(0, i - 30), i).map((t, k) => row(t, Math.max(0, i - 30) + k));
+    st.source = 'local';
+    onNowPlaying(st);
+    return st;
+  }
   if (source === 'youtube') {
     const st = ytWin ? { ...ytState } : { status: 'closed' };
+    st.source = 'youtube';
     st.queue = ytQueue();
     st.history = ytHistory();
     delete st.playlist;
@@ -1013,7 +1114,7 @@ const cfgOn = (key, dflt) => (readCfg()[key] === undefined ? dflt : !!readCfg()[
 function menuItems() {
   const send = (id) => () => win.webContents.send('window:toggle', id);
   const eqLabel = eqOn
-    ? (source === 'youtube' || eqPref === 'capture' ? 'Equalizer sound (on)' : 'Equalizer sound (on, via Equalizer APO)')
+    ? (isPlayerSrc() || eqPref === 'capture' ? 'Equalizer sound (on)' : 'Equalizer sound (on, via Equalizer APO)')
     : 'Equalizer sound';
   return [
     { label: 'Source', enabled: false },
@@ -1021,6 +1122,17 @@ function menuItems() {
     { label: 'YouTube', type: 'radio', checked: source === 'youtube', click: () => setSource('youtube'), accelerator: 'CmdOrCtrl+Shift+S' },
     { label: 'Show YouTube video', type: 'checkbox', checked: !cfgOn('ytHidden', false), click: () => setYtHidden(!readCfg().ytHidden) },
     { label: 'YouTube link…', accelerator: 'CmdOrCtrl+Shift+Y', click: async () => { if (await chooseYouTube()) await setSource('youtube'); } },
+    { label: 'Local playlists', type: 'radio', checked: source === 'local', click: () => setSource('local') },
+    { label: 'Local library', submenu: [
+      ...(library.playlists().length
+        ? library.playlists().map((p) => ({ label: `${p.name} (${p.count})`, enabled: p.count > 0, type: 'radio', checked: source === 'local' && localName === p.name, click: () => playLocal(p.name) }))
+        : [{ label: 'No playlists yet', enabled: false }]),
+      { type: 'separator' },
+      { label: 'Import files…', click: () => importIntoPlaylist(false) },
+      { label: 'Import folder…', click: () => importIntoPlaylist(true) },
+      ...(source === 'youtube' ? [{ label: 'Download current YouTube link (personal use)…', click: downloadCurrentYouTube }] : []),
+      { label: 'Open library folder', click: () => { fs.mkdirSync(library.dir, { recursive: true }); shell.openPath(library.dir); } },
+    ] },
     { label: 'Open Spotify', click: () => shell.openExternal('spotify:') },
     { type: 'separator' },
     { label: 'Playlist (queue)', click: send('playlist') },
@@ -1130,6 +1242,7 @@ app.whenReady().then(() => {
   app.on('will-quit', () => globalShortcut.unregisterAll());
   // start on YouTube again only if the last session ended there and a link is saved
   if (cfg.source === 'youtube' && cfg.yt) setSource('youtube');
+  else if (cfg.source === 'local') setSource('local');
   else if (eqOn) setTimeout(() => { writeApo(true); }, 1500);
   watchSkinLibrary();
 });

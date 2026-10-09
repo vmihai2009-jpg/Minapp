@@ -144,8 +144,14 @@
       } catch {}
     }, 0);
     // eject used to open Webamp's own file picker, which makes no sense here: open the menu instead
-    if (e.target.closest('#eject')) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); api.showMenu(); }
+    if (e.target.closest('#eject')) {
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      // on YouTube the button is a record button: it downloads the current link (personal use)
+      if (document.documentElement.classList.contains('src-youtube')) api.cmd('download'); else api.showMenu();
+    }
   }, true);
+  api.onDownload((on) => document.documentElement.classList.toggle('downloading', !!on));
+  setInterval(() => { const b = document.getElementById('eject'); if (b) b.title = document.documentElement.classList.contains('src-youtube') ? 'Record: download this YouTube link (personal use)' : ''; }, 1500);
   let modeHoldUntil = 0, holdUntil = 0;
   const followModes = (s) => {
     if (Date.now() < modeHoldUntil) return;
@@ -467,6 +473,7 @@
     try {
       const s = await api.state();
       lastStatus = s.status;
+      document.documentElement.classList.toggle('src-youtube', s.source === 'youtube');
       const status = webamp.getMediaStatus();
       if (s.status === 'closed' || s.status === 'stopped') {
         if (status === 'PLAYING') webamp.pause();

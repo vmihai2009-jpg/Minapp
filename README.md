@@ -17,6 +17,7 @@ The first run downloads about 150 MB (Electron and Webamp) into the folder. Each
 - Play / pause / next / previous / seek / volume / shuffle / repeat control Spotify
 - Playlist window: the playing song, the upcoming queue and the history. Click an upcoming title to jump to it, scroll up and click to go back
 - YouTube source (playlists or videos) with an option to hide the video window
+- Local library source: import MP3s or a whole folder into playlists (menu > Local library) and play them with the same skin, queue and equalizer
 - Windows: working 10-band equalizer for Spotify through [Equalizer APO](https://sourceforge.net/projects/equalizerapo/), real Spotify volume, audio-reactive visualizer and Milkdrop, taskbar buttons, tray menu
 - Global hotkeys, snap to screen edges, remembered position and settings, optional song-change notifications
 <img width="343" height="435" alt="image" src="https://github.com/user-attachments/assets/9c80b083-01a9-42ab-975f-79c6c6e7aa00" />

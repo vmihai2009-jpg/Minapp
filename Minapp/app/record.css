@@ -1,0 +1,10 @@
+/* While the YouTube source is active the eject button becomes a record button: it downloads the current playlist. */
+html.src-youtube #eject {
+  background: radial-gradient(circle at 50% 50%, #e5322d 0 3.2px, #2a2a2a 3.6px 5.4px, #8a8a8a 5.8px 6.6px, transparent 7px) no-repeat center / 100% 100% !important;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px #000;
+  background-color: #3a3a3a !important;
+}
+html.src-youtube #eject:active { filter: brightness(.65); }
+html.src-youtube.downloading #eject { animation: rec-blink 1s steps(2, jump-none) infinite; }
+@keyframes rec-blink { 50% { filter: brightness(.55); } }
