@@ -10,8 +10,12 @@ MINAPP for Mac - no install, no admin
 
 MENU: click the skin's O button (top-left) or right-click the player, or use the "Player" menu at the top
 of the screen. It has: Source (Spotify / YouTube), Playlist, Equalizer window, Milkdrop, Mini mode, Skins,
-Pin on top, Size, Equalizer sound (YouTube), Visualizer, Spotify queue and Settings.
-Drag a .wsz skin from skins.webamp.org onto the window to change the skin. Every skin you load is kept in
+Pin on top, Size (0.5x to 3x), Equalizer sound (YouTube), Visualizer, Spotify queue and Settings.
+SKINS: Skins in the menu lists your skin library (the "skins" folder inside "data"). It fills itself: every skin
+you load (Skins > Load skin from file), drag onto the player, or copy into that folder (Skins > Open skins folder)
+appears in the list within a second. Click one to use it; "Minapp (default skin)" brings back the built-in look.
+Click the Minapp logo in the bottom-right corner (or Skins > Get more skins) to open skins.webamp.org in your
+browser, download a .wsz and drop it on the player. Every skin you load is kept in
 data/skins and listed under Skins (with a Random skin button).
 
 WHAT WORKS
@@ -20,7 +24,9 @@ WHAT WORKS
   Spotify developer app from an account with Premium) what is coming up. CLICK AN UPCOMING TITLE to jump to
   it. SCROLL UP to see what you already played and click one to go back to it.
 - YOUTUBE source: paste a playlist or video link (Player > YouTube link). "Show YouTube video" hides the
-  video window while the sound keeps playing. YouTube asks that its player stays visible; hiding is your choice.
+  video window while the sound keeps playing. Videos whose owner switched embedding off cannot be played by any app: Minapp skips them
+  (a note shows at the bottom of the video window) and logs them in data/bridge.log. YouTube Mixes are always
+  playable; a normal playlist must be public or unlisted. YouTube asks that its player stays visible; hiding is your choice.
 - EQUALIZER SOUND works for the YouTube source (the video's sound goes through the skin's 10 sliders).
   The visualizer / Milkdrop and the equalizer for Spotify need system-audio capture, which macOS does not
   offer without extra software, so they are Windows-only for now.

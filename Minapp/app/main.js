@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, dialog, screen, clipboard, session, desktopCapturer, shell, globalShortcut, Notification } = require('electron');
+const { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, dialog, screen, clipboard, session, desktopCapturer, shell, globalShortcut, Notification, net } = require('electron');
 const { execFile, spawn } = require('child_process');
 const fs = require('fs');
 const http = require('http');
@@ -721,7 +721,7 @@ async function openYouTube(target) {
   ytState = { status: 'closed' };
   if (!ytWin) {
     ytWin = new BrowserWindow({
-      width: 340, height: 230, minWidth: 200, minHeight: 200, title: 'YouTube',
+      width: 340, height: 230, minWidth: 200, minHeight: 200, title: 'YouTube', icon: path.join(__dirname, isWin ? 'icon.ico' : 'icon.png'),
       webPreferences: { preload: path.join(__dirname, 'yt-preload.js'), contextIsolation: true, backgroundThrottling: false },
     });
     ytWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -812,6 +812,7 @@ async function setSource(s) {
   buildMenu();
 }
 
+ipcMain.on('yt:log', (_e, msg) => log('[youtube] ' + String(msg).slice(0, 300)));
 ipcMain.on('yt:state', (_e, s) => { ytState = s || { status: 'closed' }; });
 
 // the renderer talks to whichever source is active
@@ -914,16 +915,44 @@ async function pickSkin() {
   if (last) useSkinFile(last);
 }
 
+// ---------- skin library ----------
+// The library is simply the data/skins folder: skins you load, drag onto the player or copy there by hand all show up.
+const SKIN_WEB = 'https://skins.webamp.org/';
+const openSkinSite = () => shell.openExternal(SKIN_WEB);
+ipcMain.on('skins:open', openSkinSite);   // the corner logo
+let skinWatch = null, skinWatchTimer = null;
+function watchSkinLibrary() {
+  try {
+    fs.mkdirSync(skinsDir(), { recursive: true });
+    if (skinWatch) skinWatch.close();
+    skinWatch = fs.watch(skinsDir(), { persistent: false }, () => {
+      clearTimeout(skinWatchTimer);
+      skinWatchTimer = setTimeout(buildMenu, 300);   // wait until a copy has finished
+    });
+    skinWatch.on('error', () => { skinWatch = null; });
+  } catch (e) { log('could not watch the skins folder: ' + e.message); }
+}
+
 function skinsMenu() {
   const cur = readCfg().skin;
   const skins = listSkins();
   return [
-    { label: 'Load skin…', accelerator: 'CmdOrCtrl+O', click: pickSkin },
+    { label: 'Load skin from file…', accelerator: 'CmdOrCtrl+O', click: pickSkin },
+    { label: 'Get more skins (skins.webamp.org)…', click: openSkinSite },
     { label: 'Random skin', enabled: skins.length > 1, click: () => { const o = skins.filter((f) => path.join(skinsDir(), f) !== cur); useSkinFile(path.join(skinsDir(), o[Math.floor(Math.random() * o.length)])); } },
-    { label: 'Default skin', click: () => { writeCfg({ skin: null }); win.webContents.reload(); } },
+    { label: 'Minapp (default skin)', type: 'radio', checked: !cur, click: () => { writeCfg({ skin: null }); win.webContents.reload(); } },
     { type: 'separator' },
     ...(skins.length
-      ? skins.slice(0, 40).map((f) => ({ label: f.replace(/\.(wsz|zip)$/i, ''), type: 'radio', checked: path.join(skinsDir(), f) === cur, click: () => useSkinFile(path.join(skinsDir(), f)) }))
+      ? (() => {
+          const items = skins.map((f) => ({ label: f.replace(/\.(wsz|zip)$/i, ''), type: 'radio', checked: path.join(skinsDir(), f) === cur, click: () => useSkinFile(path.join(skinsDir(), f)) }));
+          if (items.length <= 20) return items;
+          const groups = [];   // long libraries become a few short submenus, labelled by first letters
+          for (let i = 0; i < items.length; i += 20) {
+            const part = items.slice(i, i + 20);
+            groups.push({ label: `${part[0].label.slice(0, 12)} … ${part[part.length - 1].label.slice(0, 12)}`, submenu: part });
+          }
+          return groups;
+        })()
       : [{ label: 'Skins you load appear here', enabled: false }]),
     { type: 'separator' },
     { label: 'Open skins folder', click: () => { fs.mkdirSync(skinsDir(), { recursive: true }); shell.openPath(skinsDir()); } },
@@ -975,7 +1004,7 @@ function menuItems() {
     { type: 'separator' },
     { label: 'Skins', submenu: skinsMenu() },
     { label: 'Pin on top', type: 'checkbox', checked: pinned, click: () => setPinned(!pinned) },
-    { label: 'Size', submenu: [1, 1.5, 2, 3].map((z) => ({ label: `${z}x`, type: 'radio', checked: z === zoom, click: () => { zoom = z; writeCfg({ zoom, zoomSet: 2 }); applySize(); } })) },
+    { label: 'Size', submenu: [0.5, 0.75, 1, 1.25, 1.5, 2, 3].map((z) => ({ label: `${z}x`, type: 'radio', checked: z === zoom, click: () => { zoom = z; writeCfg({ zoom, zoomSet: 2 }); applySize(); } })) },
     { type: 'separator' },
     { label: eqLabel, type: 'checkbox', checked: eqOn, click: toggleEq },
     ...(isWin ? [{ label: 'Visualizer follows the music', type: 'checkbox', checked: vizOn, click: async () => { vizOn = !vizOn; vizFailed = false; writeCfg({ viz: vizOn }); await applyAudio(); } }] : []),
@@ -1034,6 +1063,8 @@ app.on('activate', () => { if (win && !win.isVisible()) { win.show(); win.focus(
 app.on('second-instance', () => { if (win) { if (!win.isVisible()) win.show(); if (win.isMinimized()) win.restore(); win.focus(); } });
 
 app.whenReady().then(() => {
+  // start the Spotify helper right now, in parallel with the window loading, instead of on the first poll
+  if (isWin && !process.env.SKIN_FAKE) { try { psStart(); } catch (e) { log('helper pre-start failed: ' + e.message); } }
   const cfg = readCfg();
   zoom = cfg.zoomSet === 2 && cfg.zoom ? cfg.zoom : 1; // older versions saved a bigger default
   vizOn = cfg.viz !== false;
@@ -1041,6 +1072,7 @@ app.whenReady().then(() => {
   win = new BrowserWindow({
     width: Math.round(275 * zoom), height: Math.round(116 * zoom), useContentSize: true,
     frame: false, transparent: true, hasShadow: false, resizable: false, backgroundColor: '#00000000', title: 'Minapp',
+    icon: path.join(__dirname, isWin ? 'icon.ico' : 'icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, autoplayPolicy: 'no-user-gesture-required' },
   });
   restorePos(cfg.pos);
@@ -1072,5 +1104,6 @@ app.whenReady().then(() => {
   // start on YouTube again only if the last session ended there and a link is saved
   if (cfg.source === 'youtube' && cfg.yt) setSource('youtube');
   else if (eqOn) setTimeout(() => { writeApo(true); }, 1500);
+  watchSkinLibrary();
 });
 app.on('window-all-closed', () => app.quit());

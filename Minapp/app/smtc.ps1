@@ -132,7 +132,9 @@ function Press-Key([int]$vk) {
 # ---------- Spotify's own volume (Windows Core Audio, per-app session) ----------
 $volOk = $false
 try {
-  Add-Type -TypeDefinition @'
+  $volDll = Join-Path $PSScriptRoot 'skinvol.dll'
+  if (Test-Path $volDll) { Add-Type -Path $volDll }   # precompiled: loads in milliseconds
+  else { Add-Type -TypeDefinition @'
 using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -225,7 +227,7 @@ namespace SkinVol {
     }
   }
 }
-'@
+'@ }
   $volOk = $true
   Log 'volume control ready'
 } catch { Log ('volume control unavailable: ' + $_.Exception.Message) }

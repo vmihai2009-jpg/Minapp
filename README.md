@@ -6,13 +6,13 @@ A Winamp-skinned player that follows the **Spotify** desktop app (and YouTube pl
 
 | Platform | Download | Start with |
 |---|---|---|
-| Windows 10/11 | [`docs/downloads/Minapp-Windows-v1.0.2.zip`](docs/downloads/Minapp-Windows-v1.0.2.zip) | `Start Minapp.bat` |
-| macOS (Apple silicon and Intel) | [`docs/downloads/Minapp-Mac-v1.0.2.zip`](docs/downloads/Minapp-Mac-v1.0.2.zip) | `Start Minapp.command` (right-click > Open the first time) |
+| Windows 10/11 | [`docs/downloads/Minapp-Windows-v1.6.0.zip`](docs/downloads/Minapp-Windows-v1.5.1.zip) | `Minapp.exe` |
+| macOS (Apple silicon and Intel) | [`docs/downloads/Minapp-Mac-v1.5.1.zip`](docs/downloads/Minapp-Mac-v1.5.1.zip) | `Start Minapp.command` (right-click > Open the first time) |
 
 The first run downloads about 150 MB (Electron and Webamp) into the folder. Each zip has its own `README.txt`.
 
 ## Features
-- Any Winamp `.wsz` skin (drag one on, keep a library, random skin), mini mode, always-on-top pin, 1x to 3x size
+- Any Winamp `.wsz` skin, from a skin library menu that fills itself: skins you load, drag onto the player or copy into the skins folder appear in it automatically. The corner logo opens skins.webamp.org to find more. Mini mode, always-on-top pin, 0.5x to 3x size
 - Play / pause / next / previous / seek / volume / shuffle / repeat control Spotify
 - Playlist window: the playing song, the upcoming queue and the history. Click an upcoming title to jump to it, scroll up and click to go back
 - YouTube source (playlists or videos) with an option to hide the video window

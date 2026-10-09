@@ -32,20 +32,47 @@
     } catch (e) {}
   }
 
+  let errRun = 0, total = 0;
+  function note(msg, ms) {
+    let n = document.getElementById('note');
+    if (!n) {
+      n = document.createElement('div'); n.id = 'note';
+      n.style.cssText = 'position:absolute;left:0;right:0;bottom:0;padding:6px 10px;background:rgba(0,0,0,.82);color:#fff;font:12px -apple-system,Segoe UI,sans-serif;z-index:9';
+      document.body.appendChild(n);
+    }
+    n.textContent = msg; n.style.display = '';
+    clearTimeout(n._t); if (ms) n._t = setTimeout(() => { n.style.display = 'none'; }, ms);
+  }
+
+  // Errors 100/101/150 mean ONE video can't be played by apps (private, removed, or its owner switched embedding
+  // off, which is common for music from labels). The rest of a playlist is fine, so skip ahead instead of stopping.
   function showError(e) {
+    const idx = player && player.getPlaylistIndex ? player.getPlaylistIndex() : -1;
+    const vd = (player && player.getVideoData && player.getVideoData()) || {};
+    try { window.ytBridge.log('error ' + e.data + ' index=' + idx + ' video=' + (vd.video_id || '') + ' list=' + (list || '') + ' v=' + (vid || '')); } catch (x) {}
+    const skippable = [2, 5, 100, 101, 150, 153].indexOf(e.data) >= 0;
+    if (list && skippable && errRun < 8) {
+      errRun++; total++;
+      note('This video can\'t be played outside YouTube (error ' + e.data + '). Skipping to the next one…', 2500);
+      setTimeout(() => { try { player.nextVideo(); } catch (x) {} }, 600);
+      return;
+    }
     const hints = {
       2: 'The link looks invalid.', 5: 'The player hit an HTML5 error.',
-      100: 'Video not found or private.', 101: 'The owner does not allow embedding.',
-      150: 'The owner does not allow embedding.', 153: 'The player could not verify where it is embedded.',
+      100: 'Video not found, removed or private.', 101: 'The owner does not allow playing it outside YouTube.',
+      150: 'The owner does not allow playing it outside YouTube.', 153: 'The player could not verify where it is embedded.',
     };
+    const many = list && errRun >= 8
+      ? '<br><br>Many videos in a row were blocked. That playlist is mostly made of videos whose owners switched embedding off, so no app can play it. A YouTube Mix or a playlist of other videos will work.'
+      : '';
     document.body.insertAdjacentHTML('beforeend',
-      '<div style="position:absolute;inset:0;background:#111;color:#eee;font:13px -apple-system,sans-serif;padding:14px">' +
-      'YouTube error ' + e.data + '<br>' + (hints[e.data] || '') + '<br><br>Try another link (Player &gt; YouTube Link…).</div>');
+      '<div style="position:absolute;inset:0;background:#111;color:#eee;font:13px -apple-system,sans-serif;padding:14px;z-index:10">' +
+      'YouTube error ' + e.data + '<br>' + (hints[e.data] || '') + many + '<br><br>Try another link (menu &gt; YouTube link…).</div>');
   }
 
   function onYouTubeIframeAPIReady() {
     const playerVars = { autoplay: 1, playsinline: 1, rel: 0, origin: location.origin };
-    const opts = { width: '100%', height: '100%', playerVars, events: { onReady: push, onStateChange: push, onError: showError } };
+    const opts = { width: '100%', height: '100%', playerVars, events: { onReady: push, onStateChange: (ev) => { if (ev.data === 1) { errRun = 0; const n = document.getElementById('note'); if (n && total) { n.style.display = 'none'; } } push(); }, onError: showError } };
     if (list) { playerVars.listType = 'playlist'; playerVars.list = list; }
     else opts.videoId = vid;
     player = new YT.Player('p', opts);

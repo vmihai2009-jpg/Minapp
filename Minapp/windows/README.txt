@@ -1,7 +1,13 @@
 MINAPP for Windows - no install, no admin
 
 1. Unzip this folder anywhere you can write to (Desktop, Documents, a USB stick).
-2. Double-click "Start Minapp.bat". (The first run shows a progress window while it downloads; after that no console window appears.)
+2. Double-click "Minapp.exe" (it has the Minapp icon). "Start Minapp.bat" does the same if you prefer it.
+   Neither needs an admin password. Windows may say "Windows protected your PC" because the file is new and
+   unsigned: click More info > Run anyway. Minapp then puts a "Minapp" shortcut on your Desktop and in the Start
+   menu. START IT FROM THOSE SHORTCUTS: they run the engine directly, which carries no "downloaded from the
+   internet" mark, so Windows never shows that screen again (it only shows for a freshly unzipped Minapp.exe).
+   The shortcut can be pinned to the taskbar. If you move the folder, run Minapp.exe once to refresh them. To avoid even the first message: before unzipping, right-click the
+   zip > Properties > tick Unblock > OK, then unzip. (The first run shows a progress window while it downloads; after that no console window appears.)
    - First run downloads about 150 MB into this folder (needs internet, once only).
    - If Windows says "Windows protected your PC", click More info > Run anyway.
      (Or right-click the zip before unzipping > Properties > tick Unblock.)
@@ -13,8 +19,12 @@ active source (Shuffle and Repeat follow Spotify's own switches). Eject opens th
 MENU: click the skin's O button (top-left) or right-click the player. The same menu is in the TRAY
 ICON (bottom-right, maybe under the ^ arrow); clicking the tray icon shows/hides the player.
 It has: Source (Spotify / YouTube), Open Spotify, Playlist, Equalizer window, Milkdrop, Mini mode,
-Skins, Pin on top, Size, Equalizer sound, Visualizer, Spotify queue, Settings and Quit.
-Drag a .wsz skin from skins.webamp.org onto the window to change the skin. Every skin you load is
+Skins, Pin on top, Size (0.5x to 3x), Equalizer sound, Visualizer, Spotify queue, Settings and Quit.
+SKINS: Skins in the menu lists your skin library (the "skins" folder inside "data"). It fills itself: every skin
+you load (Skins > Load skin from file), drag onto the player, or copy into that folder (Skins > Open skins folder)
+appears in the list within a second. Click one to use it; "Minapp (default skin)" brings back the built-in look.
+Click the Minapp logo in the bottom-right corner (or Skins > Get more skins) to open skins.webamp.org in your
+browser, download a .wsz and drop it on the player. Every skin you load is
 kept in data\skins and listed under Skins (with a Random skin button).
 
 IF SPOTIFY DOESN'T SHOW UP
@@ -57,7 +67,9 @@ PIN, QUEUE, TASKBAR
 - Global hotkeys (Settings to turn off): Ctrl+Alt+Right = next, Ctrl+Alt+Left = previous,
   Ctrl+Alt+Down = play/pause, Ctrl+Alt+W = show/hide the player, Ctrl+Alt+V = show/hide the YouTube video.
 - YouTube video: untick "Show YouTube video" in the menu to hear it without the window (it keeps playing).
-  YouTube asks that its player stays visible, so this is your own choice.
+  Videos whose owner switched embedding off cannot be played by any app: Minapp skips them
+  (a note shows at the bottom of the video window) and logs them in data/bridge.log. YouTube Mixes are always
+  playable; a normal playlist must be public or unlisted. YouTube asks that its player stays visible, so this is your own choice.
 - Settings also has: Snap to screen edges, Song-change notifications, Start with Windows.
 - The player remembers its position, size, pin state, skin and equalizer between runs.
 
