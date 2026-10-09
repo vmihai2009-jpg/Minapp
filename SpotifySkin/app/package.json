@@ -1,0 +1,15 @@
+{
+  "name": "spotify-skin",
+  "version": "0.3.0",
+  "description": "Winamp-skinned remote for Spotify",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "webamp": "^2.3.1"
+  },
+  "devDependencies": {
+    "electron": "^44.7.0"
+  }
+}

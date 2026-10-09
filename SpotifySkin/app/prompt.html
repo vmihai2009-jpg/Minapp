@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Input</title>
+<style>
+  body { margin: 0; padding: 18px; font: 13px -apple-system, sans-serif; background: #f2f2f2; color: #222; }
+  input { width: 100%; box-sizing: border-box; padding: 8px; font-size: 13px; margin: 8px 0 12px; }
+  .row { display: flex; gap: 8px; justify-content: flex-end; }
+  button { padding: 6px 14px; font-size: 13px; }
+  @media (prefers-color-scheme: dark) { body { background: #2b2b2b; color: #eee; } }
+</style>
+</head>
+<body>
+<div id="lbl"></div>
+<input id="u" autofocus spellcheck="false">
+<div class="row">
+  <button id="cancel">Cancel</button>
+  <button id="ok" style="font-weight:600">OK</button>
+</div>
+<script>
+  const u = document.getElementById('u');
+  const q = new URLSearchParams(location.search);
+  document.title = q.get('t') || 'Input';
+  document.getElementById('lbl').textContent = q.get('l') || '';
+  document.getElementById('ok').textContent = q.get('b') || 'OK';
+  u.placeholder = q.get('p') || '';
+  u.value = q.get('v') || '';
+  u.select();
+  const go = () => window.promptBridge.submit(u.value);
+  document.getElementById('ok').onclick = go;
+  document.getElementById('cancel').onclick = () => window.promptBridge.cancel();
+  u.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); if (e.key === 'Escape') window.promptBridge.cancel(); });
+</script>
+</body>
+</html>

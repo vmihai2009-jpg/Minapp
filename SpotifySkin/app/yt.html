@@ -1,0 +1,71 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>YouTube</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  #p { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="p"></div>
+<script>
+  const q = new URLSearchParams(location.search);
+  const list = q.get('list'), vid = q.get('v');
+  let player = null;
+
+  function push() {
+    if (!player || !player.getPlayerState) return;
+    try {
+      const st = player.getPlayerState();
+      const d = (player.getVideoData && player.getVideoData()) || {};
+      if (!d.video_id) { window.ytBridge.state({ status: 'stopped' }); return; }
+      window.ytBridge.state({
+        status: st === 1 || st === 3 ? 'playing' : 'paused',
+        title: d.title || '', artist: d.author || '', id: d.video_id,
+        duration: player.getDuration() || 0, position: player.getCurrentTime() || 0,
+        volume: player.getVolume(),
+        playlist: (player.getPlaylist && player.getPlaylist()) || [],
+        index: player.getPlaylistIndex ? player.getPlaylistIndex() : -1,
+      });
+    } catch (e) {}
+  }
+
+  function showError(e) {
+    const hints = {
+      2: 'The link looks invalid.', 5: 'The player hit an HTML5 error.',
+      100: 'Video not found or private.', 101: 'The owner does not allow embedding.',
+      150: 'The owner does not allow embedding.', 153: 'The player could not verify where it is embedded.',
+    };
+    document.body.insertAdjacentHTML('beforeend',
+      '<div style="position:absolute;inset:0;background:#111;color:#eee;font:13px -apple-system,sans-serif;padding:14px">' +
+      'YouTube error ' + e.data + '<br>' + (hints[e.data] || '') + '<br><br>Try another link (Player &gt; YouTube Link…).</div>');
+  }
+
+  function onYouTubeIframeAPIReady() {
+    const playerVars = { autoplay: 1, playsinline: 1, rel: 0, origin: location.origin };
+    const opts = { width: '100%', height: '100%', playerVars, events: { onReady: push, onStateChange: push, onError: showError } };
+    if (list) { playerVars.listType = 'playlist'; playerVars.list = list; }
+    else opts.videoId = vid;
+    player = new YT.Player('p', opts);
+    setInterval(push, 500);
+  }
+
+  window.ytBridge.onCmd((c, a) => {
+    if (!player) return;
+    const run = {
+      play: () => player.playVideo(),
+      pause: () => player.pauseVideo(),
+      playpause: () => (player.getPlayerState() === 1 ? player.pauseVideo() : player.playVideo()),
+      next: () => player.nextVideo(),
+      previous: () => player.previousVideo(),
+      volume: () => player.setVolume(Number(a) || 0),
+      seek: () => player.seekTo(Number(a) || 0, true),
+    }[c];
+    if (run) { try { run(); } catch (e) {} setTimeout(push, 120); }
+  });
+</script>
+<script src="https://www.youtube.com/iframe_api"></script>
+</body>
+</html>
