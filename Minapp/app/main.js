@@ -896,17 +896,6 @@ function storeSkin(name, buf) {
     return p;
   } catch (e) { log('could not store skin: ' + e.message); return null; }
 }
-function saveSkinQuiet(name, buf) {
-  try {
-    fs.mkdirSync(skinsDir(), { recursive: true });
-    let base = path.basename(String(name || 'skin.wsz')).replace(/[^\w.\- ()]/g, '_');
-    if (!/\.(wsz|zip)$/i.test(base)) base += '.wsz';
-    const p = path.join(skinsDir(), base);
-    if (fs.existsSync(p)) return false;
-    fs.writeFileSync(p, buf);
-    return true;
-  } catch (e) { log('could not save skin: ' + e.message); return false; }
-}
 function useSkinFile(p) {
   const buf = readSkin(p);
   if (!buf) return;
@@ -926,166 +915,30 @@ async function pickSkin() {
   if (last) useSkinFile(last);
 }
 
-// ---------- skin archive browser (an in-app copy of skins.webamp.org) ----------
-// The archive's own site serves its GraphQL API at /graphql (confirmed in the Webamp source); skins and screenshots
-// come from r2.webampskins.org. Requests go through Electron's network stack, so system proxies and VPNs apply.
-const SKIN_APIS = ['https://skins.webamp.org/graphql', 'https://api.webamp.org/graphql'];
+// ---------- skin library ----------
+// The library is simply the data/skins folder: skins you load, drag onto the player or copy there by hand all show up.
 const SKIN_WEB = 'https://skins.webamp.org/';
-let skinWin = null, skinApiGood = null;
-const netFetch = (url, opts) => (net && net.fetch ? net.fetch(url, opts) : fetch(url, opts));
-const why = (e) => { const c = e && e.cause; return ((e && e.message) || String(e)) + (c ? ` (${c.code || c.message || c})` : ''); };
-async function gql(query, variables) {
-  let lastErr = null;
-  for (const url of skinApiGood ? [skinApiGood] : SKIN_APIS) {
-    try {
-      const r = await netFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, variables }), signal: AbortSignal.timeout(20000) });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      const j = await r.json();
-      if (j.errors && j.errors.length && !j.data) { const err = new Error(j.errors.map((x) => x.message).join('; ').slice(0, 300)); err.api = true; throw err; }
-      if (skinApiGood !== url) { skinApiGood = url; log('skin archive API: ' + url); }
-      return j.data;
-    } catch (e) {
-      lastErr = e;
-      log(`skin archive request to ${url} failed: ${why(e)}`);
-      if (e.api) throw e; // the server answered but disliked the query: another host would say the same
-    }
-  }
-  throw new Error(why(lastErr));
-}
-const skinShot = (md5) => `https://r2.webampskins.org/screenshots/${md5}.png`;
-const skinFile = (md5) => `https://r2.webampskins.org/skins/${md5}.wsz`;
-function skinNode(n) {
-  const md5 = n.md5;
-  return { md5, name: String(n.filename || md5).replace(/\.(wsz|zip)$/i, ''), nsfw: !!n.nsfw,
-    screenshot: n.screenshot_url || skinShot(md5), screenshot2: skinShot(md5), url: n.download_url || skinFile(md5), url2: skinFile(md5) };
-}
-async function listArchiveSkins(query, offset) {
-  const PAGE = 24;
-  if (process.env.SKIN_FAKE_API) { // test data, so the window can be tried offline
-    const items = Array.from({ length: offset >= 72 ? 0 : PAGE }, (_, i) => { const n = offset + i;
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="275" height="116"><rect width="275" height="116" fill="hsl(${(n * 37) % 360},45%,28%)"/><text x="12" y="62" fill="#fff" font-size="22" font-family="monospace">skin ${n}${query ? ' / ' + query : ''}</text></svg>`;
-      return { md5: 'fake' + n, name: 'Fake skin ' + n, screenshot: 'data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64'), url: 'fake' }; });
-    return { items, end: !items.length };
-  }
-  const fields = ['md5 filename nsfw screenshot_url download_url', 'md5 filename nsfw'];
-  const attempts = [];
-  for (const f of fields) {
-    if (query) attempts.push([`query($q:String!,$first:Int!,$offset:Int!){ search_skins(query:$q, first:$first, offset:$offset){ ${f} } }`, { q: query, first: PAGE, offset }, (d) => d.search_skins]);
-    else {
-      attempts.push([`query($first:Int!,$offset:Int!){ skins(first:$first, offset:$offset, sort: MUSEUM, filter: APPROVED){ nodes{ ${f} } } }`, { first: PAGE, offset }, (d) => d.skins.nodes]);
-      attempts.push([`query($first:Int!,$offset:Int!){ skins(first:$first, offset:$offset){ nodes{ ${f} } } }`, { first: PAGE, offset }, (d) => d.skins.nodes]);
-    }
-  }
-  let lastErr = '';
-  for (const [qs, vars, pick] of attempts) {
-    try {
-      const nodes = (pick(await gql(qs, vars)) || []).filter((n) => n && n.md5);
-      return { items: nodes.filter((n) => !n.nsfw).map(skinNode), end: nodes.length < PAGE };
-    } catch (e) { lastErr = e.message; log('skin archive query failed: ' + lastErr); }
-  }
-  return { items: [], error: lastErr || 'no answer' };
-}
-ipcMain.handle('skins:list', async (_e, q, offset) => {
-  try { return await listArchiveSkins(String(q || '').slice(0, 80), Math.max(0, Number(offset) || 0)); }
-  catch (e) { log('skin list error: ' + e.message); return { items: [], error: e.message }; }
-});
-ipcMain.handle('skins:apply', async (_e, item) => {
+const openSkinSite = () => shell.openExternal(SKIN_WEB);
+ipcMain.on('skins:open', openSkinSite);   // the corner logo
+let skinWatch = null, skinWatchTimer = null;
+function watchSkinLibrary() {
   try {
-    if (process.env.SKIN_FAKE_API) { log('fake skin apply: ' + item.name); return { ok: true }; }
-    let buf = null, err = '';
-    for (const u of [item.url, item.url2]) {
-      if (!u || !/^https:\/\/[\w.-]+\//.test(u)) continue;
-      try {
-        const r = await netFetch(u, { signal: AbortSignal.timeout(30000) });
-        if (!r.ok) { err = 'HTTP ' + r.status; continue; }
-        const b = Buffer.from(await r.arrayBuffer());
-        if (b.length > 8 * 1024 * 1024) { err = 'file too large'; continue; }
-        if (b[0] !== 0x50 || b[1] !== 0x4b) { err = 'not a skin file'; continue; } // a .wsz is a zip
-        buf = b; break;
-      } catch (e) { err = why(e); }
-    }
-    if (!buf) return { ok: false, error: err };
-    const p = storeSkin((item.name || item.md5) + '.wsz', buf);
-    if (!p) return { ok: false, error: 'could not save it' };
-    win.webContents.send('skin:load', buf);
-    return { ok: true };
-  } catch (e) { return { ok: false, error: e.message }; }
-});
-// "Get 50 popular skins": the archive lists its skins in "museum order" (the classics and favourites first).
-// Take the first N that are not flagged adult and keep them in the skin library.
-let popularBusy = false;
-async function downloadPopularSkins(n = 50) {
-  if (popularBusy) return;
-  popularBusy = true;
-  let got = 0, fail = 0, firstErr = '';
-  try {
-    const items = [];
-    for (let off = 0; items.length < n && off < 400; off += 24) {
-      const r = await listArchiveSkins('', off);
-      if (r.error) { firstErr = r.error; break; }
-      items.push(...r.items);
-      if (r.end) break;
-    }
-    const list = items.slice(0, n);
-    if (!list.length) throw new Error(firstErr || 'the archive returned no skins');
-    let done = 0, next = 0;
-    const worker = async () => {
-      while (next < list.length) {
-        const it = list[next++];
-        try {
-          let buf = process.env.SKIN_FAKE_API ? Buffer.from('PK\u0003\u0004fake') : null; // test mode
-          for (const u of buf ? [] : [it.url, it.url2]) {
-            if (!u || !/^https:\/\/[\w.-]+\//.test(u)) continue;
-            try {
-              const r = await netFetch(u, { signal: AbortSignal.timeout(30000) });
-              if (!r.ok) continue;
-              const b = Buffer.from(await r.arrayBuffer());
-              if (b.length < 8 * 1024 * 1024 && b[0] === 0x50 && b[1] === 0x4b) { buf = b; break; }
-            } catch {}
-          }
-          if (buf && saveSkinQuiet(it.name + '.wsz', buf)) got++; else if (!buf) fail++;
-        } finally {
-          done++;
-          try { win.setProgressBar(done / list.length); if (tray) tray.setToolTip(`Minapp: downloading skins ${done}/${list.length}`); } catch {}
-        }
-      }
-    };
-    await Promise.all([worker(), worker(), worker(), worker()]);
-    writeCfg({ popularDone: true });
-    buildMenu();
-    dialog.showMessageBox(win, { type: 'info', message: `Added ${got} popular skins`, detail: `They are in Skins in the menu${fail ? `\n${fail} could not be downloaded` : ''}.` });
-  } catch (e) {
-    log('popular skins failed: ' + why(e));
-    dialog.showMessageBox(win, { type: 'warning', message: 'Could not download the popular skins', detail: why(e) + '\n\nCheck your internet connection and try again from Skins > Get 50 popular skins.' });
-  } finally {
-    popularBusy = false;
-    try { win.setProgressBar(-1); if (tray) tray.setToolTip('Minapp'); } catch {}
-  }
+    fs.mkdirSync(skinsDir(), { recursive: true });
+    if (skinWatch) skinWatch.close();
+    skinWatch = fs.watch(skinsDir(), { persistent: false }, () => {
+      clearTimeout(skinWatchTimer);
+      skinWatchTimer = setTimeout(buildMenu, 300);   // wait until a copy has finished
+    });
+    skinWatch.on('error', () => { skinWatch = null; });
+  } catch (e) { log('could not watch the skins folder: ' + e.message); }
 }
-ipcMain.on('skins:popular', () => downloadPopularSkins(50));
-ipcMain.on('skins:web', () => shell.openExternal(SKIN_WEB));
-function openSkinBrowser() {
-  if (skinWin && !skinWin.isDestroyed()) { skinWin.show(); skinWin.focus(); return; }
-  skinWin = new BrowserWindow({
-    width: 760, height: 640, minWidth: 420, minHeight: 360, title: 'Minapp skins', autoHideMenuBar: true,
-    icon: path.join(__dirname, isWin ? 'icon.ico' : 'icon.png'),
-    webPreferences: { preload: path.join(__dirname, 'skins-preload.js'), contextIsolation: true },
-  });
-  skinWin.setMenuBarVisibility(false);
-  skinWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  skinWin.webContents.on('will-navigate', (e) => e.preventDefault());
-  skinWin.on('closed', () => { skinWin = null; });
-  skinWin.loadFile('skins.html');
-}
-ipcMain.on('skins:open', openSkinBrowser);
 
 function skinsMenu() {
   const cur = readCfg().skin;
   const skins = listSkins();
   return [
-    { label: 'Browse skin archive…', accelerator: 'CmdOrCtrl+B', click: openSkinBrowser },
-    { label: popularBusy ? 'Downloading popular skins…' : 'Get 50 popular skins', enabled: !popularBusy, click: () => downloadPopularSkins(50) },
     { label: 'Load skin from file…', accelerator: 'CmdOrCtrl+O', click: pickSkin },
+    { label: 'Get more skins (skins.webamp.org)…', click: openSkinSite },
     { label: 'Random skin', enabled: skins.length > 1, click: () => { const o = skins.filter((f) => path.join(skinsDir(), f) !== cur); useSkinFile(path.join(skinsDir(), o[Math.floor(Math.random() * o.length)])); } },
     { label: 'Minapp (default skin)', type: 'radio', checked: !cur, click: () => { writeCfg({ skin: null }); win.webContents.reload(); } },
     { type: 'separator' },
@@ -1251,12 +1104,6 @@ app.whenReady().then(() => {
   // start on YouTube again only if the last session ended there and a link is saved
   if (cfg.source === 'youtube' && cfg.yt) setSource('youtube');
   else if (eqOn) setTimeout(() => { writeApo(true); }, 1500);
-  // first time only: offer the popular classic skins
-  if (!cfg.popularAsked && !listSkins().length && !process.env.SKIN_FAKE) setTimeout(async () => {
-    writeCfg({ popularAsked: true });
-    const r = await dialog.showMessageBox(win, { type: 'question', buttons: ['Download them', 'Not now'], defaultId: 0, cancelId: 1,
-      message: 'Get 50 popular Winamp skins?', detail: 'Minapp can download 50 of the most-loved classic skins (a few MB) so you can pick them from Skins in the menu. You can do this later from Skins > Get 50 popular skins.' });
-    if (r.response === 0) downloadPopularSkins(50);
-  }, 6000);
+  watchSkinLibrary();
 });
 app.on('window-all-closed', () => app.quit());
