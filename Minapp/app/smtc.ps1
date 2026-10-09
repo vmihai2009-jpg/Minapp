@@ -41,8 +41,8 @@ function Get-SpotifySession {
   foreach ($s in $mgr.GetSessions()) {
     $id = [string]$s.SourceAppUserModelId
     $ids += $id
-    # anything Spotify, except this player's own (older builds registered one called SpotifySkin / WinampSkin)
-    if ($null -eq $found -and $id -match 'Spotify' -and $id -notmatch 'SpotifySkin|WinampSkin') { $found = $s }
+    # anything Spotify, except this player's own (Minapp, or older builds called SpotifySkin / WinampSkin)
+    if ($null -eq $found -and $id -match 'Spotify' -and $id -notmatch 'Minapp|SpotifySkin|WinampSkin') { $found = $s }
   }
   $joined = $ids -join ', '
   if ($joined -ne $script:seenIds) { $script:seenIds = $joined; Log ('media sessions: ' + $(if ($joined) { $joined } else { '(none)' }) + ' -> using ' + $(if ($found) { [string]$found.SourceAppUserModelId } else { 'none' })) }

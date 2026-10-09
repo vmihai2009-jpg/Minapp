@@ -332,6 +332,30 @@
     const hit = (t.closest(PL_BLOCKED) && !t.closest(PL_ALLOWED)) || (e.type === 'drop' && t.closest('#playlist-window'));
     if (hit) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); }
   };
+  // Webamp scrolls the list by a share of its whole length per wheel tick, which is far too fast for a long
+  // queue. Scroll a fixed number of rows instead: one row per mouse-wheel notch (small trackpad movements add up).
+  let wheelAcc = 0;
+  document.addEventListener('wheel', (e) => {
+    const win = e.target.closest && e.target.closest('#playlist-window');
+    if (!win) return;
+    const box = win.querySelector('.playlist-tracks') || win;
+    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+    try {
+      const st = webamp.store.getState();
+      const total = st.playlist.trackOrder.length, visible = Math.max(1, box.querySelectorAll('.playlist-track-titles .track-cell').length || 4); // rows currently shown
+      const overflow = Math.max(0, total - visible);
+      if (!overflow) return;
+      wheelAcc += e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+      const rows = Math.trunc(wheelAcc / 100);
+      if (!rows) return;
+      wheelAcc -= rows * 100;
+      const pos = st.display.playlistScrollPosition;
+      const offset = Math.min(overflow, Math.floor((pos / 100) * (overflow + 1)));
+      const next = Math.max(0, Math.min(overflow, offset + Math.max(-3, Math.min(3, rows))));
+      webamp.store.dispatch({ type: 'SET_PLAYLIST_SCROLL_POSITION', position: ((next + 0.5) / (overflow + 1)) * 100 });
+    } catch {}
+  }, { capture: true, passive: false });
+
   ['mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 'touchstart', 'dragstart', 'drop']
     .forEach((ev) => document.addEventListener(ev, blockPlaylist, true));
 

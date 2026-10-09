@@ -1,7 +1,7 @@
-SPOTIFY SKIN - Windows, no install, no admin
+MINAPP for Windows - no install, no admin
 
 1. Unzip this folder anywhere you can write to (Desktop, Documents, a USB stick).
-2. Double-click "Start Spotify Skin.bat".
+2. Double-click "Start Minapp.bat".
    - First run downloads about 150 MB into this folder (needs internet, once only).
    - If Windows says "Windows protected your PC", click More info > Run anyway.
      (Or right-click the zip before unzipping > Properties > tick Unblock.)
@@ -27,8 +27,8 @@ EQUALIZER SOUND (tray icon > Equalizer Sound)
 - SPOTIFY: needs Equalizer APO, a free system-wide equalizer (https://sourceforge.net/projects/equalizerapo/).
   Install it, tick your speakers/headphones in its Configurator, restart Spotify, then choose
   "Equalizer sound". The skin's 10 sliders + preamp now change what you hear, live, with no delay.
-  The skin adds one "Include: spotifyskin_eq.txt" line to Equalizer APO's config.txt (a backup,
-  config.txt.spotifyskin.bak, is made) and resets the EQ to flat when you quit.
+  Minapp adds one "Include: minapp_eq.txt" line to Equalizer APO's config.txt (a backup,
+  config.txt.minapp.bak, is made) and resets the EQ to flat when you quit.
   Without Equalizer APO you can pick an experimental mode that records the PC's sound and replays it
   through the EQ. It can go silent or squeal on some setups; turn it off from the same menu.
 - YOUTUBE: the video's sound goes through the skin's EQ automatically, no extra software.

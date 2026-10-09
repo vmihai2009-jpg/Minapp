@@ -6,18 +6,20 @@ const crypto = require('crypto');
 const path = require('path');
 
 const isWin = process.platform === 'win32';
-// Windows build is portable: keep settings next to the app instead of in %APPDATA%.
-if (isWin) {
-  try {
-    const dataDir = path.join(path.dirname(__dirname), 'data');
-    fs.mkdirSync(dataDir, { recursive: true });
-    app.setPath('userData', dataDir);
-    app.setAppUserModelId('WinampSkin.Player'); // groups the taskbar button / toasts under one identity
-  } catch (e) { /* fall back to the default location */ }
-}
+const isMac = process.platform === 'darwin';
+// Portable: keep settings next to the app (a "data" folder) instead of in %APPDATA% / Library.
+try {
+  const dataDir = path.join(path.dirname(__dirname), 'data');
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.accessSync(dataDir, fs.constants.W_OK);
+  app.setPath('userData', dataDir);
+} catch (e) { /* fall back to the default location */ }
+if (isWin) app.setAppUserModelId('Minapp.Player'); // groups the taskbar button / toasts under one identity
 
 // The player's silent placeholder audio must not register as a media session or grab the media keys.
 app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling,MediaSessionService');
+
+app.setName('Minapp');
 
 // Only one player at a time: a second launch would fight over the helper, the ports and the EQ file.
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
@@ -55,7 +57,7 @@ if application "Spotify" is running then
     set s to player state as string
     if s is "stopped" then return "stopped"
     set t to current track
-    return s & "|||" & (name of t) & "|||" & (artist of t) & "|||" & (duration of t) & "|||" & player position & "|||" & sound volume & "|||" & (id of t)
+    return s & "|||" & (name of t) & "|||" & (artist of t) & "|||" & (duration of t) & "|||" & player position & "|||" & sound volume & "|||" & (id of t) & "|||" & shuffling & "|||" & repeating
   end tell
 else
   return "closed"
@@ -64,9 +66,12 @@ end if`;
 async function macState() {
   const out = await osa(STATE_SCRIPT);
   if (!out || out === 'closed' || out === 'stopped') return { status: out || 'closed' };
-  const [status, title, artist, dur, pos, vol, id] = out.split('|||');
+  const [status, title, artist, dur, pos, vol, id, shuf, rep] = out.split('|||');
   const num = (x) => parseFloat(String(x).replace(',', '.')) || 0;
-  return { status, title, artist, id, duration: num(dur) / 1000, position: num(pos), volume: num(vol) };
+  const st = { status, title, artist, id, duration: num(dur) / 1000, position: num(pos), volume: num(vol) };
+  if (shuf === 'true' || shuf === 'false') st.shuffle = shuf === 'true';
+  if (rep === 'true' || rep === 'false') st.repeat = rep === 'true';
+  return st;
 }
 
 const CMDS = { play: 'play', pause: 'pause', playpause: 'playpause', next: 'next track', previous: 'previous track' };
@@ -74,6 +79,12 @@ async function macCmd(cmd, arg) {
   let action;
   if (cmd === 'volume') action = `set sound volume to ${Math.max(0, Math.min(100, Math.round(Number(arg) || 0)))}`;
   else if (cmd === 'seek') action = `set player position to ${Number(arg) || 0}`;
+  else if (cmd === 'shuffle') action = `set shuffling to ${arg ? 'true' : 'false'}`;
+  else if (cmd === 'repeat') action = `set repeating to ${arg ? 'true' : 'false'}`;
+  else if (cmd === 'back') { // "previous" only restarts a song that has played a few seconds: rewind first so it really goes back
+    await osa('if application "Spotify" is running then tell application "Spotify" to set player position to 0');
+    action = 'previous track';
+  }
   else action = CMDS[cmd];
   if (!action) return;
   await osa(`if application "Spotify" is running then tell application "Spotify" to ${action}`);
@@ -220,7 +231,7 @@ async function doCmd(cmd, arg) {
         if (!Number.isFinite(done)) done = 0;
         if (done < Math.abs(n)) log(`jump: only ${done} of ${Math.abs(n)} skips registered`);
       } else {
-        for (let i = 0; i < Math.abs(n); i++) { await spotifyCmd(n > 0 ? 'next' : 'previous'); if (i < Math.abs(n) - 1) await new Promise((r) => setTimeout(r, 280)); }
+        for (let i = 0; i < Math.abs(n); i++) { await spotifyCmd(n > 0 ? 'next' : isMac ? 'back' : 'previous'); if (i < Math.abs(n) - 1) await new Promise((r) => setTimeout(r, 280)); }
       }
       // the list itself is updated when the new song shows up in the state (see trackHistory)
     } finally { jumping = false; holdQueue(); }
@@ -267,7 +278,8 @@ function apoDir() {
   }
   return null;
 }
-const APO_FILE = 'spotifyskin_eq.txt';
+const APO_FILE = 'minapp_eq.txt';
+const APO_LEGACY = 'spotifyskin_eq.txt'; // from the first versions: its include line is removed when found
 const apoActive = () => eqOn && source !== 'youtube' && eqPref === 'apo';
 
 function apoEnsureInclude() {
@@ -276,8 +288,10 @@ function apoEnsureInclude() {
   try {
     const cfg = path.join(d, 'config.txt');
     const txt = fs.readFileSync(cfg, 'utf8');
+    const legacy = new RegExp('^[ \\t]*Include:[ \\t]*' + APO_LEGACY.replace('.', '\\.') + '[ \\t]*\\r?\\n?', 'mi');
+    if (legacy.test(txt)) { try { fs.copyFileSync(cfg, cfg + '.minapp.bak'); fs.writeFileSync(cfg, txt.replace(legacy, '')); } catch {} }
     if (!new RegExp('^\\s*Include:\\s*' + APO_FILE.replace('.', '\\.'), 'mi').test(txt)) {
-      try { fs.copyFileSync(cfg, cfg + '.spotifyskin.bak'); } catch {}
+      try { fs.copyFileSync(cfg, cfg + '.minapp.bak'); } catch {}
       fs.appendFileSync(cfg, `\r\nInclude: ${APO_FILE}\r\n`);
     }
     if (!fs.existsSync(path.join(d, APO_FILE))) fs.writeFileSync(path.join(d, APO_FILE), '');
@@ -286,13 +300,13 @@ function apoEnsureInclude() {
 }
 let apoLast = null;
 function apoText() {
-  if (!apoActive() || !eqState || eqState.on === false) return '# Spotify Skin: equalizer off\r\nPreamp: 0 dB\r\n';
+  if (!apoActive() || !eqState || eqState.on === false) return '# Minapp: equalizer off\r\nPreamp: 0 dB\r\n';
   const s = eqState.sliders || {};
   const bands = EQ_HZ.map((hz) => dbOf(s[hz] == null ? 50 : s[hz]));
   const pre = dbOf(s.preamp == null ? 50 : s.preamp);
   // headroom: never let the boost push the signal past full scale
   const lift = Math.max(0, ...bands.map((b) => b + pre));
-  const lines = ['# Written by Spotify Skin. Edit the sliders in the skin, not this file.', `Preamp: ${(pre - lift).toFixed(1)} dB`];
+  const lines = ['# Written by Minapp. Edit the sliders in the skin, not this file.', `Preamp: ${(pre - lift).toFixed(1)} dB`];
   bands.forEach((g, i) => {
     const type = i === 0 ? 'LSC' : i === EQ_HZ.length - 1 ? 'HSC' : 'PK';
     lines.push(`Filter: ON ${type} Fc ${EQ_HZ[i]} Hz Gain ${g.toFixed(1)} dB Q ${i === 0 || i === EQ_HZ.length - 1 ? '0.7' : '1.4'}`);
@@ -310,7 +324,7 @@ function writeApo(force) {
     log('could not write Equalizer APO file: ' + e.message);
     if (!apoErrShown && eqOn) {
       apoErrShown = true;
-      dialog.showMessageBox(win, { type: 'warning', message: 'Could not update Equalizer APO', detail: `${e.message}\n\nGive your user write access to:\n${d}\nor run Spotify Skin once as administrator.` });
+      dialog.showMessageBox(win, { type: 'warning', message: 'Could not update Equalizer APO', detail: `${e.message}\n\nGive your user write access to:\n${d}\nor run Minapp once as administrator.` });
     }
   }
 }
@@ -389,7 +403,7 @@ async function toggleEq() {
   if (apoDir()) {
     const r = apoEnsureInclude();
     if (!r.ok) {
-      dialog.showMessageBox(win, { type: 'warning', message: 'Could not hook into Equalizer APO', detail: `${r.err}\n\nAdd this line to the end of Equalizer APO's config.txt yourself (or run Spotify Skin as administrator once):\nInclude: ${APO_FILE}` });
+      dialog.showMessageBox(win, { type: 'warning', message: 'Could not hook into Equalizer APO', detail: `${r.err}\n\nAdd this line to the end of Equalizer APO's config.txt yourself (or run Minapp as administrator once):\nInclude: ${APO_FILE}` });
       return buildMenu();
     }
     eqPref = 'apo'; eqOn = true;
@@ -448,8 +462,8 @@ function onNowPlaying(st) {
   const playing = st.status === 'playing';
   const label = st.title ? `${st.artist ? st.artist + ' - ' : ''}${st.title}` : '';
   try {
-    if (win && !win.isDestroyed()) win.setTitle(label || 'Spotify Skin');
-    if (tray) tray.setToolTip((label ? label + '\n' : '') + 'Spotify Skin');
+    if (win && !win.isDestroyed()) win.setTitle(label || 'Minapp');
+    if (tray) tray.setToolTip((label ? label + '\n' : '') + 'Minapp');
   } catch {}
   updateThumbar(playing);
   const id = st.id || null;
@@ -929,7 +943,7 @@ function menuItems() {
     { label: 'YouTube', type: 'radio', checked: source === 'youtube', click: () => setSource('youtube'), accelerator: 'CmdOrCtrl+Shift+S' },
     { label: 'Show YouTube video', type: 'checkbox', checked: !cfgOn('ytHidden', false), click: () => setYtHidden(!readCfg().ytHidden) },
     { label: 'YouTube link…', accelerator: 'CmdOrCtrl+Shift+Y', click: async () => { if (await chooseYouTube()) await setSource('youtube'); } },
-    ...(isWin ? [{ label: 'Open Spotify', click: () => shell.openExternal('spotify:') }] : []),
+    { label: 'Open Spotify', click: () => shell.openExternal('spotify:') },
     { type: 'separator' },
     { label: 'Playlist (queue)', click: send('playlist') },
     { label: 'Equalizer window', click: send('equalizer') },
@@ -941,7 +955,7 @@ function menuItems() {
     { label: 'Size', submenu: [1, 1.5, 2, 3].map((z) => ({ label: `${z}x`, type: 'radio', checked: z === zoom, click: () => { zoom = z; writeCfg({ zoom, zoomSet: 2 }); applySize(); } })) },
     { type: 'separator' },
     { label: eqLabel, type: 'checkbox', checked: eqOn, click: toggleEq },
-    { label: 'Visualizer follows the music', type: 'checkbox', checked: vizOn, click: async () => { vizOn = !vizOn; vizFailed = false; writeCfg({ viz: vizOn }); await applyAudio(); } },
+    ...(isWin ? [{ label: 'Visualizer follows the music', type: 'checkbox', checked: vizOn, click: async () => { vizOn = !vizOn; vizFailed = false; writeCfg({ viz: vizOn }); await applyAudio(); } }] : []),
     { label: readCfg().spotRefresh ? 'Disconnect Spotify queue' : 'Connect Spotify queue…', click: () => (readCfg().spotRefresh ? disconnectSpotifyQueue() : connectSpotifyQueue()) },
     { type: 'separator' },
     { label: 'Settings', submenu: [
@@ -966,7 +980,7 @@ ipcMain.on('menu:show', () => {
 function buildMenu() {
   if (!win || win.isDestroyed()) return;
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { label: 'Spotify Skin', submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'quit' }] },
+    { label: 'Minapp', submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'quit' }] },
     { label: 'Player', submenu: menuItems() },
     { label: 'Edit', submenu: [{ role: 'copy' }, { role: 'paste' }] },
   ]));
@@ -975,7 +989,7 @@ function buildMenu() {
     try {
       if (!tray) {
         tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'icon.png')).resize({ width: 16, height: 16 }));
-        tray.setToolTip('Spotify Skin');
+        tray.setToolTip('Minapp');
         tray.on('click', toggleVisible);
       }
       tray.setContextMenu(Menu.buildFromTemplate(menuItems()));
@@ -993,6 +1007,7 @@ function restorePos(pos) {
   if (ok) win.setPosition(Math.round(pos.x), Math.round(pos.y));
 }
 
+app.on('activate', () => { if (win && !win.isVisible()) { win.show(); win.focus(); } });
 app.on('second-instance', () => { if (win) { if (!win.isVisible()) win.show(); if (win.isMinimized()) win.restore(); win.focus(); } });
 
 app.whenReady().then(() => {
@@ -1002,7 +1017,7 @@ app.whenReady().then(() => {
   eqPref = cfg.eqPref === 'capture' ? 'capture' : 'apo';
   win = new BrowserWindow({
     width: Math.round(275 * zoom), height: Math.round(116 * zoom), useContentSize: true,
-    frame: false, transparent: true, hasShadow: false, resizable: false, backgroundColor: '#00000000', title: 'Spotify Skin',
+    frame: false, transparent: true, hasShadow: false, resizable: false, backgroundColor: '#00000000', title: 'Minapp',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, autoplayPolicy: 'no-user-gesture-required' },
   });
   restorePos(cfg.pos);
@@ -1011,6 +1026,7 @@ app.whenReady().then(() => {
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('render-process-gone', (_e, d) => { log('renderer gone: ' + d.reason); if (d.reason !== 'clean-exit') win.webContents.reload(); });
   installCaptureHandler();
+  if (isMac && app.dock) { try { app.dock.setIcon(nativeImage.createFromPath(path.join(__dirname, 'icon.png'))); } catch {} }
   setInterval(() => { if (source === 'spotify') refreshSpotifyQueue(); }, 15000); // plus an immediate refresh whenever the song changes or a skip happens
   pinned = !!cfg.onTop;
   if (pinned) win.setAlwaysOnTop(true, 'screen-saver');
