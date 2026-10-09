@@ -272,6 +272,13 @@
     });
   }, true));
 
+  // The built-in skin's title bars say MINAPP (minapp-skin.css); other skins keep their own artwork.
+  const markDefaultSkin = () => {
+    try { document.documentElement.classList.toggle('minapp-default', Object.keys(webamp.store.getState().display.skinImages || {}).length <= 3); } catch {}
+  };
+  try { webamp.store.subscribe(markDefaultSkin); } catch {}
+  markDefaultSkin();
+
   // ----- corner logo: Minapp's own, with no link -----
   // The skin paints the Winamp logo into its background image. Cover that spot with a copy of the clean pixels
   // beside it (so any skin works), draw our logo on top, and make the old "About" link do nothing.
@@ -283,7 +290,7 @@
     if (!mw) return;
     const about = document.querySelector('#about');
     if (about) { // the link that used to open the Webamp project page
-      about.removeAttribute('href'); about.removeAttribute('target'); about.removeAttribute('title'); about.style.cursor = 'default';
+      about.removeAttribute('href'); about.removeAttribute('target'); about.title = 'Browse skins'; about.style.cursor = 'pointer';
     }
     const shaded = mw.classList.contains('shade') || mw.getBoundingClientRect().height < 60 * (zoomNow() || 1);
     if (logoCanvas && logoCanvas.parentNode !== mw) logoCanvas = null;
@@ -326,7 +333,7 @@
   }
   const zoomNow = () => 1;
   logoImg.onload = drawLogo;
-  document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('#about')) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); } }, true);
+  document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('#about')) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); api.openSkins(); } }, true);
   document.addEventListener('auxclick', (e) => { if (e.target.closest && e.target.closest('#about')) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); } }, true);
   setInterval(paintLogo, 400);
 

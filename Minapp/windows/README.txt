@@ -15,8 +15,11 @@ active source (Shuffle and Repeat follow Spotify's own switches). Eject opens th
 MENU: click the skin's O button (top-left) or right-click the player. The same menu is in the TRAY
 ICON (bottom-right, maybe under the ^ arrow); clicking the tray icon shows/hides the player.
 It has: Source (Spotify / YouTube), Open Spotify, Playlist, Equalizer window, Milkdrop, Mini mode,
-Skins, Pin on top, Size, Equalizer sound, Visualizer, Spotify queue, Settings and Quit.
-Drag a .wsz skin from skins.webamp.org onto the window to change the skin. Every skin you load is
+Skins, Pin on top, Size (0.5x to 3x), Equalizer sound, Visualizer, Spotify queue, Settings and Quit.
+SKINS: click the Minapp logo in the bottom-right corner (or menu > Skins > Browse skin archive) to open the
+skin archive inside Minapp: search, scroll, click a picture to use that skin. It needs internet; the built-in
+Minapp skin and anything you picked before work offline. You can still drag a .wsz from skins.webamp.org
+onto the window. Every skin you load is
 kept in data\skins and listed under Skins (with a Random skin button).
 
 IF SPOTIFY DOESN'T SHOW UP

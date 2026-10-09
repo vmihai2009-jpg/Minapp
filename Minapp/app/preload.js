@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('bridge', {
   onPin: (cb) => ipcRenderer.on('pin:state', (_e, v) => cb(v)),
   showMenu: () => ipcRenderer.send('menu:show'),
   onWindowToggle: (cb) => ipcRenderer.on('window:toggle', (_e, id) => cb(id)),
+  openSkins: () => ipcRenderer.send('skins:open'),
   quit: () => ipcRenderer.send('app:quit'),
   lastSkin: () => ipcRenderer.invoke('skin:last'),
   onSkin: (cb) => ipcRenderer.on('skin:load', (_e, buf) => cb(buf)),

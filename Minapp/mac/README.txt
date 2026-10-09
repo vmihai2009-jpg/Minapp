@@ -10,8 +10,11 @@ MINAPP for Mac - no install, no admin
 
 MENU: click the skin's O button (top-left) or right-click the player, or use the "Player" menu at the top
 of the screen. It has: Source (Spotify / YouTube), Playlist, Equalizer window, Milkdrop, Mini mode, Skins,
-Pin on top, Size, Equalizer sound (YouTube), Visualizer, Spotify queue and Settings.
-Drag a .wsz skin from skins.webamp.org onto the window to change the skin. Every skin you load is kept in
+Pin on top, Size (0.5x to 3x), Equalizer sound (YouTube), Visualizer, Spotify queue and Settings.
+SKINS: click the Minapp logo in the bottom-right corner (or menu > Skins > Browse skin archive) to open the
+skin archive inside Minapp: search, scroll, click a picture to use that skin. It needs internet; the built-in
+Minapp skin and anything you picked before work offline. You can still drag a .wsz from skins.webamp.org
+onto the window. Every skin you load is kept in
 data/skins and listed under Skins (with a Random skin button).
 
 WHAT WORKS

@@ -915,13 +915,100 @@ async function pickSkin() {
   if (last) useSkinFile(last);
 }
 
+// ---------- skin archive browser (an in-app copy of skins.webamp.org) ----------
+const SKIN_API = 'https://api.webampskins.org/graphql';
+const SKIN_WEB = 'https://skins.webamp.org/';
+let skinWin = null;
+async function gql(query, variables) {
+  const r = await fetch(SKIN_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, variables }), signal: AbortSignal.timeout(15000) });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const j = await r.json();
+  if (j.errors && j.errors.length && !j.data) throw new Error(j.errors.map((e) => e.message).join('; ').slice(0, 200));
+  return j.data;
+}
+const skinShot = (md5) => `https://r2.webampskins.org/screenshots/${md5}.png`;
+const skinFile = (md5) => `https://r2.webampskins.org/skins/${md5}.wsz`;
+function skinNode(n) {
+  const md5 = n.md5;
+  return { md5, name: String(n.filename || md5).replace(/\.(wsz|zip)$/i, ''), nsfw: !!n.nsfw,
+    screenshot: n.screenshot_url || skinShot(md5), screenshot2: skinShot(md5), url: n.download_url || skinFile(md5), url2: skinFile(md5) };
+}
+async function listArchiveSkins(query, offset) {
+  const PAGE = 24;
+  if (process.env.SKIN_FAKE_API) { // test data, so the window can be tried offline
+    const items = Array.from({ length: offset >= 72 ? 0 : PAGE }, (_, i) => { const n = offset + i;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="275" height="116"><rect width="275" height="116" fill="hsl(${(n * 37) % 360},45%,28%)"/><text x="12" y="62" fill="#fff" font-size="22" font-family="monospace">skin ${n}${query ? ' / ' + query : ''}</text></svg>`;
+      return { md5: 'fake' + n, name: 'Fake skin ' + n, screenshot: 'data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64'), url: 'fake' }; });
+    return { items, end: !items.length };
+  }
+  const fields = ['md5 filename nsfw screenshot_url download_url', 'md5 filename nsfw'];
+  const attempts = [];
+  for (const f of fields) {
+    if (query) attempts.push([`query($q:String!,$first:Int,$offset:Int){ search_skins(query:$q, first:$first, offset:$offset){ ${f} } }`, { q: query, first: PAGE, offset }, (d) => d.search_skins]);
+    else {
+      attempts.push([`query($first:Int,$offset:Int){ skins(first:$first, offset:$offset, sort: MUSEUM, filter: APPROVED){ nodes{ ${f} } } }`, { first: PAGE, offset }, (d) => d.skins.nodes]);
+      attempts.push([`query($first:Int,$offset:Int){ skins(first:$first, offset:$offset){ nodes{ ${f} } } }`, { first: PAGE, offset }, (d) => d.skins.nodes]);
+    }
+  }
+  let lastErr = '';
+  for (const [qs, vars, pick] of attempts) {
+    try {
+      const nodes = (pick(await gql(qs, vars)) || []).filter((n) => n && n.md5);
+      return { items: nodes.filter((n) => !n.nsfw).map(skinNode), end: nodes.length < PAGE };
+    } catch (e) { lastErr = e.message; log('skin archive query failed: ' + lastErr); }
+  }
+  return { items: [], error: lastErr || 'no answer' };
+}
+ipcMain.handle('skins:list', async (_e, q, offset) => {
+  try { return await listArchiveSkins(String(q || '').slice(0, 80), Math.max(0, Number(offset) || 0)); }
+  catch (e) { log('skin list error: ' + e.message); return { items: [], error: e.message }; }
+});
+ipcMain.handle('skins:apply', async (_e, item) => {
+  try {
+    if (process.env.SKIN_FAKE_API) { log('fake skin apply: ' + item.name); return { ok: true }; }
+    let buf = null, err = '';
+    for (const u of [item.url, item.url2]) {
+      if (!u || !/^https:\/\/[\w.-]+\//.test(u)) continue;
+      try {
+        const r = await fetch(u, { signal: AbortSignal.timeout(30000) });
+        if (!r.ok) { err = 'HTTP ' + r.status; continue; }
+        const b = Buffer.from(await r.arrayBuffer());
+        if (b.length > 8 * 1024 * 1024) { err = 'file too large'; continue; }
+        if (b[0] !== 0x50 || b[1] !== 0x4b) { err = 'not a skin file'; continue; } // a .wsz is a zip
+        buf = b; break;
+      } catch (e) { err = e.message; }
+    }
+    if (!buf) return { ok: false, error: err };
+    const p = storeSkin((item.name || item.md5) + '.wsz', buf);
+    if (!p) return { ok: false, error: 'could not save it' };
+    win.webContents.send('skin:load', buf);
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.on('skins:web', () => shell.openExternal(SKIN_WEB));
+function openSkinBrowser() {
+  if (skinWin && !skinWin.isDestroyed()) { skinWin.show(); skinWin.focus(); return; }
+  skinWin = new BrowserWindow({
+    width: 760, height: 640, minWidth: 420, minHeight: 360, title: 'Minapp skins', autoHideMenuBar: true,
+    icon: path.join(__dirname, isWin ? 'icon.ico' : 'icon.png'),
+    webPreferences: { preload: path.join(__dirname, 'skins-preload.js'), contextIsolation: true },
+  });
+  skinWin.setMenuBarVisibility(false);
+  skinWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  skinWin.webContents.on('will-navigate', (e) => e.preventDefault());
+  skinWin.on('closed', () => { skinWin = null; });
+  skinWin.loadFile('skins.html');
+}
+ipcMain.on('skins:open', openSkinBrowser);
+
 function skinsMenu() {
   const cur = readCfg().skin;
   const skins = listSkins();
   return [
-    { label: 'Load skin…', accelerator: 'CmdOrCtrl+O', click: pickSkin },
+    { label: 'Browse skin archive…', accelerator: 'CmdOrCtrl+B', click: openSkinBrowser },
+    { label: 'Load skin from file…', accelerator: 'CmdOrCtrl+O', click: pickSkin },
     { label: 'Random skin', enabled: skins.length > 1, click: () => { const o = skins.filter((f) => path.join(skinsDir(), f) !== cur); useSkinFile(path.join(skinsDir(), o[Math.floor(Math.random() * o.length)])); } },
-    { label: 'Default skin', click: () => { writeCfg({ skin: null }); win.webContents.reload(); } },
+    { label: 'Minapp (default skin)', type: 'radio', checked: !cur, click: () => { writeCfg({ skin: null }); win.webContents.reload(); } },
     { type: 'separator' },
     ...(skins.length
       ? skins.slice(0, 40).map((f) => ({ label: f.replace(/\.(wsz|zip)$/i, ''), type: 'radio', checked: path.join(skinsDir(), f) === cur, click: () => useSkinFile(path.join(skinsDir(), f)) }))
@@ -976,7 +1063,7 @@ function menuItems() {
     { type: 'separator' },
     { label: 'Skins', submenu: skinsMenu() },
     { label: 'Pin on top', type: 'checkbox', checked: pinned, click: () => setPinned(!pinned) },
-    { label: 'Size', submenu: [1, 1.5, 2, 3].map((z) => ({ label: `${z}x`, type: 'radio', checked: z === zoom, click: () => { zoom = z; writeCfg({ zoom, zoomSet: 2 }); applySize(); } })) },
+    { label: 'Size', submenu: [0.5, 0.75, 1, 1.25, 1.5, 2, 3].map((z) => ({ label: `${z}x`, type: 'radio', checked: z === zoom, click: () => { zoom = z; writeCfg({ zoom, zoomSet: 2 }); applySize(); } })) },
     { type: 'separator' },
     { label: eqLabel, type: 'checkbox', checked: eqOn, click: toggleEq },
     ...(isWin ? [{ label: 'Visualizer follows the music', type: 'checkbox', checked: vizOn, click: async () => { vizOn = !vizOn; vizFailed = false; writeCfg({ viz: vizOn }); await applyAudio(); } }] : []),

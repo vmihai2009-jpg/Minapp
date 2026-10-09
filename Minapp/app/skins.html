@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Minapp skins</title>
+<style>
+  :root { --bg:#14161b; --card:#1d2027; --line:#2c313b; --text:#e8eaed; --muted:#9aa3ad; --accent:#1ed760; }
+  @media (prefers-color-scheme: light) { :root { --bg:#f3f4f6; --card:#fff; --line:#d9dde3; --text:#14171a; --muted:#59636e; --accent:#16a34a; } }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text); font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  header { position:sticky; top:0; z-index:2; display:flex; gap:10px; align-items:center; padding:12px 14px; background:var(--bg); border-bottom:1px solid var(--line); }
+  header h1 { font-size:16px; margin:0 6px 0 0; }
+  input { flex:1; min-width:0; padding:8px 12px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--text); font:inherit; }
+  button { padding:8px 12px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--text); font:inherit; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  #grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(275px,1fr)); gap:14px; padding:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:8px; cursor:pointer; text-align:left; color:inherit; }
+  .card:hover, .card:focus-visible { border-color:var(--accent); outline:none; }
+  .card img { display:block; width:100%; height:auto; aspect-ratio:275/116; image-rendering:pixelated; background:#000; border-radius:4px; }
+  .card span { display:block; margin-top:6px; font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .card.busy { opacity:.5; }
+  #msg { padding:18px 16px; color:var(--muted); }
+  #toast { position:fixed; left:50%; bottom:16px; transform:translateX(-50%); background:var(--accent); color:#04210e; padding:8px 14px; border-radius:999px; font-weight:600; opacity:0; transition:opacity .2s; pointer-events:none; }
+  #toast.on { opacity:1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Skins</h1>
+  <input id="q" type="search" placeholder="Search the Winamp skin archive (try: green, anime, matrix)" autofocus>
+  <button id="web" title="Open skins.webamp.org in your browser">skins.webamp.org</button>
+</header>
+<div id="msg">Loading skins…</div>
+<div id="grid"></div>
+<div id="more" style="height:1px"></div>
+<div id="toast"></div>
+<script>
+  const grid = document.getElementById('grid'), msg = document.getElementById('msg'), q = document.getElementById('q'), toast = document.getElementById('toast');
+  let query = '', offset = 0, loading = false, done = false, gen = 0;
+  const say = (t) => { toast.textContent = t; toast.classList.add('on'); clearTimeout(say.t); say.t = setTimeout(() => toast.classList.remove('on'), 2200); };
+
+  async function load() {
+    if (loading || done) return;
+    loading = true; const my = gen;
+    const r = await window.skinsBridge.list(query, offset);
+    if (my !== gen) { loading = false; return; }
+    if (r.error && !grid.children.length) {
+      msg.innerHTML = 'Could not load the skin archive (' + r.error.replace(/</g, '&lt;') + ').<br>Check your internet connection, or use the skins.webamp.org button to browse in your browser and drop a .wsz file on the player.';
+    } else if (!r.items.length && !grid.children.length) {
+      msg.textContent = query ? 'No skins found for "' + query + '".' : 'No skins found.';
+    } else msg.textContent = '';
+    for (const it of r.items) {
+      const b = document.createElement('button'); b.className = 'card'; b.title = 'Click to use this skin';
+      const img = document.createElement('img'); img.loading = 'lazy'; img.alt = ''; img.src = it.screenshot;
+      img.onerror = () => { if (!img.dataset.t && it.screenshot2) { img.dataset.t = 1; img.src = it.screenshot2; } };
+      const sp = document.createElement('span'); sp.textContent = it.name;
+      b.append(img, sp);
+      b.onclick = async () => {
+        b.classList.add('busy');
+        const res = await window.skinsBridge.apply(it);
+        b.classList.remove('busy');
+        say(res && res.ok ? 'Skin applied: ' + it.name : 'Could not load that skin' + (res && res.error ? ' (' + res.error + ')' : ''));
+      };
+      grid.appendChild(b);
+    }
+    offset += r.items.length;
+    if (r.items.length < 1 || r.end) done = true;
+    loading = false;
+    // keep filling until the page can scroll
+    if (!done && document.documentElement.scrollHeight <= window.innerHeight + 200) load();
+  }
+  const reset = () => { gen++; grid.innerHTML = ''; offset = 0; done = false; loading = false; msg.textContent = 'Loading skins…'; load(); };
+  let t; q.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { query = q.value.trim(); reset(); }, 350); });
+  document.getElementById('web').onclick = () => window.skinsBridge.openWeb();
+  new IntersectionObserver((e) => { if (e[0].isIntersecting) load(); }, { rootMargin: '600px' }).observe(document.getElementById('more'));
+  load();
+</script>
+</body>
+</html>
