@@ -28,3 +28,8 @@ chmod +x "$D/Minapp.app/Contents/MacOS/Minapp" "$D/Uninstall Minapp.command" "$R
 Z="$OUT/Minapp-Mac-v$V.zip"; rm -f "$Z"; (cd "$T" && zip -qrX "$Z" "Minapp-Mac"); echo "built $Z"
 
 rm -rf "$T"
+
+# keep every download link and version label in the repo pointing at the zips just built
+cd ..
+sed -i -E "s#Minapp-(Windows|Mac)-v[0-9]+\.[0-9]+\.[0-9]+\.zip#Minapp-\1-v$V.zip#g" README.md docs/index.html
+sed -i -E "s#Version [0-9]+\.[0-9]+\.[0-9]+#Version $V#g" docs/index.html
