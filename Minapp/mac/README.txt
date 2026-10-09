@@ -37,7 +37,7 @@ you load (Skins > Load skin from file), drag onto the player, or copy into that 
 appears in the list within a second. Click one to use it; "Minapp (default skin)" brings back the built-in look.
 Click the Minapp logo in the bottom-right corner (or Skins > Get more skins) to open skins.webamp.org in your
 browser, download a .wsz and drop it on the player. Every skin you load is kept in
-data/skins and listed under Skins (with a Random skin button).
+its skins folder and listed under Skins (with a Random skin button).
 
 WHAT WORKS
 - Play / pause / next / previous / position bar / volume / shuffle / repeat control the Spotify desktop app.
