@@ -34,14 +34,19 @@ try {
   Log 'media-session API ready'
 } catch { Log ('media-session API unavailable: ' + $_.Exception.Message) }
 
+$script:seenIds = ''
 function Get-SpotifySession {
   if (-not $smtc) { return $null }
+  $found = $null; $ids = @()
   foreach ($s in $mgr.GetSessions()) {
-    # the real Spotify only (desktop: Spotify.exe, Store: SpotifyAB.SpotifyMusic...), never this player's own session
     $id = [string]$s.SourceAppUserModelId
-    if ($id -match '^Spotify(\.exe)?$' -or $id -match '^SpotifyAB\.SpotifyMusic') { return $s }
+    $ids += $id
+    # anything Spotify, except this player's own (older builds registered one called SpotifySkin / WinampSkin)
+    if ($null -eq $found -and $id -match 'Spotify' -and $id -notmatch 'SpotifySkin|WinampSkin') { $found = $s }
   }
-  return $null
+  $joined = $ids -join ', '
+  if ($joined -ne $script:seenIds) { $script:seenIds = $joined; Log ('media sessions: ' + $(if ($joined) { $joined } else { '(none)' }) + ' -> using ' + $(if ($found) { [string]$found.SourceAppUserModelId } else { 'none' })) }
+  return $found
 }
 
 function Get-SmtcState($s) {
