@@ -901,6 +901,7 @@ ipcMain.on('win:dragstart', () => {
 });
 ipcMain.on('win:dragend', () => { if (dragTimer) { clearInterval(dragTimer); dragTimer = null; savePos(); } });
 ipcMain.on('app:quit', () => app.quit());
+ipcMain.handle('app:version', () => app.getVersion());
 ipcMain.on('app:log', (_e, msg) => log('[ui] ' + String(msg).slice(0, 600)));
 
 // Skins are copied into data/skins so the library travels with the folder and survives the original being moved.
@@ -944,7 +945,7 @@ async function pickSkin() {
 // The library is simply the data/skins folder: skins you load, drag onto the player or copy there by hand all show up.
 const SKIN_WEB = 'https://skins.webamp.org/';
 const openSkinSite = () => shell.openExternal(SKIN_WEB);
-ipcMain.on('skins:open', openSkinSite);   // the corner logo
+ipcMain.on('skins:open', () => { log('logo clicked: opening ' + SKIN_WEB); openSkinSite(); });   // the corner logo
 let skinWatch = null, skinWatchTimer = null;
 function watchSkinLibrary() {
   try {
