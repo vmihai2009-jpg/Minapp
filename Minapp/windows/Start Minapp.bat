@@ -1,8 +1,8 @@
 @echo off
 cd /d "%~dp0"
 rem Already set up: start Minapp straight away, with no console window.
-if exist "runtime\electron.exe" if exist "app\node_modules\webamp\built\webamp.bundle.min.js" (
-  start "" "runtime\electron.exe" "app"
+if exist "runtime\Minapp.exe" if exist "app\node_modules\webamp\built\webamp.bundle.min.js" (
+  start "" "runtime\Minapp.exe" "app"
   exit /b 0
 )
 rem First run: download the player engine (this window shows the progress, then closes by itself).

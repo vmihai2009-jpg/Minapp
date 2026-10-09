@@ -27,7 +27,7 @@ $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
 
 try {
   $exe = Join-Path $rt 'electron.exe'
-  if (-not (Test-Path $exe)) {
+  if (-not (Test-Path $exe) -and -not (Test-Path (Join-Path $rt 'Minapp.exe'))) {
     Write-Host 'First run: downloading the player engine (about 120 MB). This only happens once...'
     $zip = Join-Path $root 'electron.zip'
     $tmp = Join-Path $root 'runtime.tmp'
@@ -56,6 +56,23 @@ try {
     Remove-Item -Recurse -Force $tmp
     Remove-Item $tgz
   }
+
+  # Brand the engine: name + icon inside the exe, and rename it to Minapp.exe, so the taskbar, Task Manager and
+  # Alt-Tab say Minapp instead of Electron. Failure here only costs the label; the app still runs.
+  $mx = Join-Path $rt 'Minapp.exe'
+  if (-not (Test-Path $mx) -and (Test-Path $exe)) {
+    try {
+      $rc = Join-Path $root 'rcedit.exe'
+      Get-File 'https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe' $rc
+      & $rc $exe --set-icon (Join-Path $app 'icon.ico') --set-version-string FileDescription 'Minapp' `
+        --set-version-string ProductName 'Minapp' --set-version-string InternalName 'Minapp' `
+        --set-version-string OriginalFilename 'Minapp.exe' --set-version-string CompanyName 'Minapp'
+      if ($LASTEXITCODE -ne 0) { Write-Host 'Could not set the Minapp icon on the engine (continuing).' }
+    } catch { Write-Host "Could not brand the engine: $($_.Exception.Message) (continuing)." }
+    finally { Remove-Item -Force (Join-Path $root 'rcedit.exe') -ErrorAction SilentlyContinue }
+    try { Rename-Item -Path $exe -NewName 'Minapp.exe' -ErrorAction Stop } catch { Write-Host 'Could not rename the engine (is Minapp still running?).' }
+  }
+  if (Test-Path $mx) { $exe = $mx }
 
   # files from a downloaded zip carry a "blocked" mark that can make Windows or antivirus nag
   Get-ChildItem -Path $app -File -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue

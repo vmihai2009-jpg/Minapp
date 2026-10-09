@@ -721,7 +721,7 @@ async function openYouTube(target) {
   ytState = { status: 'closed' };
   if (!ytWin) {
     ytWin = new BrowserWindow({
-      width: 340, height: 230, minWidth: 200, minHeight: 200, title: 'YouTube',
+      width: 340, height: 230, minWidth: 200, minHeight: 200, title: 'YouTube', icon: path.join(__dirname, isWin ? 'icon.ico' : 'icon.png'),
       webPreferences: { preload: path.join(__dirname, 'yt-preload.js'), contextIsolation: true, backgroundThrottling: false },
     });
     ytWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -1041,6 +1041,7 @@ app.whenReady().then(() => {
   win = new BrowserWindow({
     width: Math.round(275 * zoom), height: Math.round(116 * zoom), useContentSize: true,
     frame: false, transparent: true, hasShadow: false, resizable: false, backgroundColor: '#00000000', title: 'Minapp',
+    icon: path.join(__dirname, isWin ? 'icon.ico' : 'icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, autoplayPolicy: 'no-user-gesture-required' },
   });
   restorePos(cfg.pos);
