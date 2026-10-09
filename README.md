@@ -4,8 +4,8 @@ A Winamp-skinned player that follows the **Spotify** desktop app (and YouTube pl
 
 | Platform | Download | Start with |
 |---|---|---|
-| Windows 10/11 | [`releases/Minapp-Windows-v1.0.0.zip`](releases/Minapp-Windows-v1.0.0.zip) | `Start Minapp.bat` |
-| macOS (Apple silicon and Intel) | [`releases/Minapp-Mac-v1.0.0.zip`](releases/Minapp-Mac-v1.0.0.zip) | `Start Minapp.command` (right-click > Open the first time) |
+| Windows 10/11 | [`releases/Minapp-Windows-v1.0.1.zip`](releases/Minapp-Windows-v1.0.1.zip) | `Start Minapp.bat` |
+| macOS (Apple silicon and Intel) | [`releases/Minapp-Mac-v1.0.1.zip`](releases/Minapp-Mac-v1.0.1.zip) | `Start Minapp.command` (right-click > Open the first time) |
 
 The first run downloads about 150 MB (Electron and Webamp) into the folder. Each zip has its own `README.txt`.
 
