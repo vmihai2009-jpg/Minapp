@@ -92,10 +92,11 @@
   let lw = 0, lh = 0;
   setInterval(() => {
     restack();
-    const els = [...document.querySelectorAll('#main-window, #equalizer-window, #playlist-window, #milkdrop-window, canvas, ul')];
-    [...document.body.children].forEach((c) => {
-      if (c.id !== 'app' && !['SCRIPT', 'STYLE'].includes(c.tagName)) els.push(c, ...c.querySelectorAll('*'));
-    });
+    // only the few top-level boxes are measured (cheap); a full-tree scan every tick made the playlist feel laggy
+    const els = [...document.querySelectorAll('#main-window, #equalizer-window, #playlist-window, #milkdrop-window')];
+    for (const c of document.body.children) {
+      if (c.id !== 'app' && !['SCRIPT', 'STYLE'].includes(c.tagName)) els.push(c);
+    }
     if (document.querySelector('.context-menu, #webamp-context-menu')) expand(); // menu still open
     let right = 0, bottom = 0;
     els.forEach((el) => {
@@ -109,7 +110,7 @@
     let w = Math.round(right), h = Math.round(bottom);
     if (Date.now() < expandUntil) { w = Math.max(w, 420); h = Math.max(h, 400); }
     if (w && h && (w !== lw || h !== lh)) { lw = w; lh = h; api.size(w, h); }
-  }, 100);
+  }, 150);
 
   // menu item / Cmd+Shift+K -> show or hide the Milkdrop window
   api.onMilkdrop(() => {
@@ -131,7 +132,27 @@
   document.addEventListener('click', (e) => {
     const b = e.target.closest('#play, #pause, #stop, #next, #previous');
     if (b && MAP[b.id]) api.cmd(MAP[b.id]);
+    // shuffle / repeat: Webamp flips its own switch, then the source is told the new value
+    const sr = e.target.closest('#shuffle, #repeat');
+    if (sr) setTimeout(() => {
+      try {
+        const m = webamp.store.getState().media;
+        modeHoldUntil = Date.now() + 3000;
+        api.cmd(sr.id, sr.id === 'shuffle' ? m.shuffle : m.repeat);
+      } catch {}
+    }, 0);
+    // eject used to open Webamp's own file picker, which makes no sense here: open the menu instead
+    if (e.target.closest('#eject')) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); api.showMenu(); }
   }, true);
+  let modeHoldUntil = 0, holdUntil = 0;
+  const followModes = (s) => {
+    if (Date.now() < modeHoldUntil) return;
+    try {
+      const m = webamp.store.getState().media;
+      if (typeof s.shuffle === 'boolean' && s.shuffle !== !!m.shuffle) webamp.store.dispatch({ type: 'TOGGLE_SHUFFLE' });
+      if (typeof s.repeat === 'boolean' && s.repeat !== !!m.repeat) webamp.store.dispatch({ type: 'TOGGLE_REPEAT' });
+    } catch {}
+  };
 
   // ----- audio routing: equalizer + visualizer -----
   // Captured sound (YouTube window, or the whole PC for Spotify) is fed into Webamp's own audio chain, so the
@@ -144,9 +165,12 @@
     if (!cap) return;
     clearInterval(cap.guard);
     try { cap.src.disconnect(); } catch {}
-    try { cap.tap && cap.tap.disconnect(); } catch {}
+    try { cap.tap && media._gainNode.disconnect(cap.tap); } catch {}
     try { cap.stream.getTracks().forEach((t) => t.stop()); } catch {}
+    const wasEq = cap.kind === 'eq';
     cap = null;
+    // hand loudness back to the source at the level the slider shows
+    if (wasEq) try { api.cmd('volume', webamp.store.getState().media.volume); } catch {}
   }
   async function startCapture(mode) {
     await api.capPrepare(mode);
@@ -158,6 +182,7 @@
     const src = ctx.createMediaStreamSource(stream);
     let guard = null, tap = null;
     if (mode.kind === 'eq') {
+      api.cmd('volume', 100); // the slider now sets the level of the equalized sound, so the source plays at full
       src.connect(media._staticSource);
       // safety: if our own output is being re-captured we get a runaway squeal; shut down
       tap = ctx.createAnalyser(); tap.fftSize = 2048;
@@ -281,9 +306,24 @@
   // ----- the playlist window is a read-only queue view: no playing, removing, adding or reordering -----
   const PL_BLOCKED = '#playlist-window .playlist-tracks, #playlist-window .playlist-bottom-left, #playlist-window .playlist-bottom-right';
   const PL_ALLOWED = '#playlist-scroll-up-button, #playlist-scroll-down-button, [class*="resize" i]';
+  // A click on an upcoming title jumps to it (rows are numbered "12. Artist - Title"; the first row is the playing song).
+  let rowDown = null;
+  const rowIndex = (cell) => { const m = /^\s*(\d+)\./.exec((cell.textContent || '').replace(/\u00a0/g, ' ')); return m ? Number(m[1]) - 1 : -1; };
   const blockPlaylist = (e) => {
     const t = e.target;
     if (!t || !t.closest) return;
+    const cell = t.closest('#playlist-window .playlist-track-titles .track-cell');
+    if (cell) {
+      if (e.type === 'mousedown') rowDown = cell;
+      if (e.type === 'click' && rowDown === cell) {
+        const i = rowIndex(cell);
+        if (i >= 1) {
+          api.cmd('jump', i);
+          holdUntil = Date.now() + 2500; // ignore the old position while the skip happens
+          cell.style.opacity = '0.5'; setTimeout(() => { cell.style.opacity = ''; }, 400);
+        }
+      }
+    }
     const hit = (t.closest(PL_BLOCKED) && !t.closest(PL_ALLOWED)) || (e.type === 'drop' && t.closest('#playlist-window'));
     if (hit) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); }
   };
@@ -291,7 +331,6 @@
     .forEach((ev) => document.addEventListener(ev, blockPlaylist, true));
 
   // position bar -> Spotify seek
-  let holdUntil = 0;
   document.addEventListener('mouseup', (e) => {
     if (!e.target.closest('#position')) return;
     setTimeout(() => {
@@ -327,6 +366,7 @@
         return; // next tick syncs position/play state once the track has loaded
       }
       followVolume(s.volume);
+      followModes(s);
       const playing = s.status === 'playing';
       if (playing && status !== 'PLAYING') webamp.play();
       if (!playing && status === 'PLAYING') webamp.pause();

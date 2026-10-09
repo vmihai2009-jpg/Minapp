@@ -158,6 +158,7 @@ async function winCmd(cmd, arg) {
   // Spotify's own volume, through the Windows per-app volume (Core Audio). Quietly ignored if unavailable.
   if (cmd === 'volume') return void (await psCall('vol ' + Math.max(0, Math.min(100, Math.round(Number(arg) || 0)))));
   if (cmd === 'seek') return void (await psCall('seek ' + (Number(arg) || 0)));
+  if (cmd === 'shuffle' || cmd === 'repeat') return void (await psCall(`${cmd} ${arg ? 1 : 0}`));
   if (['play', 'pause', 'playpause', 'next', 'previous'].includes(cmd)) await psCall('cmd ' + cmd);
 }
 
@@ -182,13 +183,36 @@ async function checkSpotify() {
 }
 
 
-const spotifyState = isWin ? winState : macState;
-const spotifyCmd = isWin ? winCmd : macCmd;
+// SKIN_FAKE=1 pretends Spotify is playing, so the UI can be tried and tested without it
+const fake = { i: 0, t0: Date.now(), names: ['Intro', 'Skyline', 'Night Drive', 'Echoes', 'Parallel', 'Afterglow', 'Static', 'Harbor'] };
+async function fakeState() {
+  const dur = 200, pos = ((Date.now() - fake.t0) / 1000) % dur;
+  const at = (k) => fake.names[((fake.i + k) % fake.names.length + fake.names.length) % fake.names.length];
+  spotifyQueue = { err: '', items: [1, 2, 3, 4, 5, 6, 7].map((k) => ({ id: 'f' + (fake.i + k), title: at(k), artist: 'Test Artist', duration: dur })) };
+  return { status: 'playing', title: at(0), artist: 'Test Artist', id: 'f' + fake.i, duration: dur, position: pos, volume: 60, shuffle: false, repeat: false };
+}
+async function fakeCmd(cmd) { if (cmd === 'next') fake.i++; if (cmd === 'previous') fake.i--; log('fake cmd ' + cmd); }
+const spotifyState = process.env.SKIN_FAKE ? fakeState : isWin ? winState : macState;
+const spotifyCmd = process.env.SKIN_FAKE ? fakeCmd : isWin ? winCmd : macCmd;
 
 // one entry point for every control: skin buttons, taskbar buttons, hotkeys
+let jumping = false;
 async function doCmd(cmd, arg) {
   if (source === 'youtube') { if (ytWin) ytWin.webContents.send('yt:cmd', cmd, arg); return; }
-  return spotifyCmd(cmd, arg);
+  if (cmd === 'next' && spotifyQueue.items.length) spotifyQueue.items = spotifyQueue.items.slice(1); // show it at once
+  if (cmd === 'jump') { // click on an upcoming title: Spotify's desktop app has no "play this one", so skip ahead to it
+    const n = Math.max(0, Math.min(40, Math.round(Number(arg) || 0)));
+    if (!n || jumping) return;
+    jumping = true;
+    try {
+      spotifyQueue.items = spotifyQueue.items.slice(n);
+      for (let i = 0; i < n; i++) { await spotifyCmd('next'); if (i < n - 1) await new Promise((r) => setTimeout(r, 280)); }
+    } finally { jumping = false; setTimeout(refreshSpotifyQueue, 700); }
+    return;
+  }
+  const r = await spotifyCmd(cmd, arg);
+  if (cmd === 'next' || cmd === 'previous') setTimeout(refreshSpotifyQueue, 900);
+  return r;
 }
 
 
@@ -277,7 +301,16 @@ function writeApo(force) {
 // leave the system sound as we found it
 app.on('before-quit', () => { eqOn = false; writeApo(true); });
 
-ipcMain.on('eq:state', (_e, s) => { eqState = s; if (apoActive()) writeApo(); });
+let apoTimer = null, eqSeen = false;
+ipcMain.on('eq:state', (_e, s) => {
+  const wasOn = eqState ? eqState.on !== false : true;
+  eqState = s;
+  clearTimeout(apoTimer);
+  apoTimer = setTimeout(() => { if (apoActive()) writeApo(); }, 60); // slider drags send many updates
+  // pressing ON in the skin's EQ window turns the real equalizer on too, when that needs no setup questions
+  if (eqSeen && !wasOn && s.on !== false && !eqOn && (source === 'youtube' || (isWin && eqPref === 'apo' && apoDir() && apoEnsureInclude().ok))) { eqOn = true; applyAudio(); }
+  eqSeen = true;
+});
 ipcMain.handle('cap:prepare', (_e, m) => true);
 ipcMain.on('eq:message', (_e, text) => {
   eqOn = false; writeCfg({ eq: false }); buildMenu();
@@ -421,13 +454,15 @@ async function fetchYtTitles(ids) {
   if (ytFetching) return;
   ytFetching = true;
   try {
-    for (const id of ids) {
-      if (ytTitles.has(id)) continue;
-      try {
-        const r = await fetch('https://www.youtube.com/oembed?format=json&url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + id));
-        if (r.ok) { const j = await r.json(); ytTitles.set(id, { title: j.title || id, artist: j.author_name || '' }); }
-        else ytTitles.set(id, { title: '(unavailable)', artist: '' });
-      } catch { break; }
+    const todo = ids.filter((id) => !ytTitles.has(id));
+    for (let i = 0; i < todo.length; i += 6) { // a few at a time: much quicker than one by one
+      await Promise.all(todo.slice(i, i + 6).map(async (id) => {
+        try {
+          const r = await fetch('https://www.youtube.com/oembed?format=json&url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + id));
+          if (r.ok) { const j = await r.json(); ytTitles.set(id, { title: j.title || id, artist: j.author_name || '' }); }
+          else ytTitles.set(id, { title: '(unavailable)', artist: '' });
+        } catch {}
+      }));
     }
   } finally { ytFetching = false; }
 }
@@ -598,7 +633,7 @@ async function openYouTube(target) {
   if (!ytWin) {
     ytWin = new BrowserWindow({
       width: 340, height: 230, minWidth: 200, minHeight: 200, title: 'YouTube',
-      webPreferences: { preload: path.join(__dirname, 'yt-preload.js'), contextIsolation: true },
+      webPreferences: { preload: path.join(__dirname, 'yt-preload.js'), contextIsolation: true, backgroundThrottling: false },
     });
     ytWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     ytWin.on('closed', () => { ytWin = null; ytState = { status: 'closed' }; if (source === 'youtube') applyAudio(); });
@@ -607,7 +642,7 @@ async function openYouTube(target) {
   }
   ytWin.webContents.once('did-finish-load', () => { if (eqOn || vizOn) setTimeout(applyAudio, 1500); });
   ytWin.loadURL(url);
-  ytWin.show();
+  if (readCfg().ytHidden) ytWin.hide(); else ytWin.show();
 }
 
 // Small window with a text box, prefilled from the clipboard when it holds a YouTube link.
@@ -660,6 +695,13 @@ async function chooseYouTube() {
   }
   writeCfg({ yt: target });
   return true;
+}
+
+// The video can be hidden: it keeps playing, only the window goes away.
+function setYtHidden(h) {
+  writeCfg({ ytHidden: !!h });
+  if (ytWin && source === 'youtube') { if (h) ytWin.hide(); else ytWin.show(); }
+  buildMenu();
 }
 
 async function setSource(s) {
@@ -801,6 +843,7 @@ function registerHotkeys() {
     'Control+Alt+Left': () => doCmd('previous'),
     'Control+Alt+Down': () => doCmd('playpause'),
     'Control+Alt+W': () => toggleVisible(),
+    'Control+Alt+V': () => { if (source === 'youtube') setYtHidden(!readCfg().ytHidden); },
   };
   for (const [k, fn] of Object.entries(keys)) {
     try { if (!globalShortcut.register(k, fn)) log('hotkey taken by another app: ' + k); } catch (e) { log('hotkey failed: ' + k); }
@@ -825,6 +868,7 @@ function menuItems() {
     { label: 'Source', enabled: false },
     { label: 'Spotify', type: 'radio', checked: source === 'spotify', click: () => setSource('spotify') },
     { label: 'YouTube', type: 'radio', checked: source === 'youtube', click: () => setSource('youtube'), accelerator: 'CmdOrCtrl+Shift+S' },
+    { label: 'Show YouTube video', type: 'checkbox', checked: !cfgOn('ytHidden', false), click: () => setYtHidden(!readCfg().ytHidden) },
     { label: 'YouTube link…', accelerator: 'CmdOrCtrl+Shift+Y', click: async () => { if (await chooseYouTube()) await setSource('youtube'); } },
     ...(isWin ? [{ label: 'Open Spotify', click: () => shell.openExternal('spotify:') }] : []),
     { type: 'separator' },
@@ -842,7 +886,7 @@ function menuItems() {
     { label: readCfg().spotRefresh ? 'Disconnect Spotify queue' : 'Connect Spotify queue…', click: () => (readCfg().spotRefresh ? disconnectSpotifyQueue() : connectSpotifyQueue()) },
     { type: 'separator' },
     { label: 'Settings', submenu: [
-      { label: 'Global hotkeys (Ctrl+Alt+←/→/↓, W)', type: 'checkbox', checked: cfgOn('hotkeys', true), click: () => { toggleCfg('hotkeys', true)(); registerHotkeys(); } },
+      { label: 'Global hotkeys (Ctrl+Alt+←/→/↓, W, V)', type: 'checkbox', checked: cfgOn('hotkeys', true), click: () => { toggleCfg('hotkeys', true)(); registerHotkeys(); } },
       { label: 'Snap to screen edges', type: 'checkbox', checked: cfgOn('snap', true), click: toggleCfg('snap', true) },
       { label: 'Song-change notifications', type: 'checkbox', checked: cfgOn('toasts', false), click: toggleCfg('toasts', false) },
       ...(isWin ? [{ label: 'Start with Windows', type: 'checkbox', checked: app.getLoginItemSettings({ path: process.execPath }).openAtLogin,
@@ -908,7 +952,7 @@ app.whenReady().then(() => {
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('render-process-gone', (_e, d) => { log('renderer gone: ' + d.reason); if (d.reason !== 'clean-exit') win.webContents.reload(); });
   installCaptureHandler();
-  setInterval(() => { if (source === 'spotify') refreshSpotifyQueue(); }, 6000);
+  setInterval(() => { if (source === 'spotify') refreshSpotifyQueue(); }, 15000); // plus an immediate refresh whenever the song changes or a skip happens
   pinned = !!cfg.onTop;
   if (pinned) win.setAlwaysOnTop(true, 'screen-saver');
   win.setVisibleOnAllWorkspaces(true);

@@ -7,6 +7,9 @@ SPOTIFY SKIN - Windows, no install, no admin
      (Or right-click the zip before unzipping > Properties > tick Unblock.)
 3. Open the Spotify desktop app and play something. The skin follows it.
 
+BUTTONS: Previous / Play / Pause / Stop / Next, Shuffle, Repeat and the position bar all control the
+active source (Shuffle and Repeat follow Spotify's own switches). Eject opens the menu.
+
 MENU: click the skin's O button (top-left) or right-click the player. The same menu is in the TRAY
 ICON (bottom-right, maybe under the ^ arrow); clicking the tray icon shows/hides the player.
 It has: Source (Spotify / YouTube), Open Spotify, Playlist, Equalizer window, Milkdrop, Mini mode,
@@ -29,7 +32,7 @@ EQUALIZER SOUND (tray icon > Equalizer Sound)
   Without Equalizer APO you can pick an experimental mode that records the PC's sound and replays it
   through the EQ. It can go silent or squeal on some setups; turn it off from the same menu.
 - YOUTUBE: the video's sound goes through the skin's EQ automatically, no extra software.
-- The EQ window's ON button bypasses it. Your slider settings are remembered.
+- The EQ window's ON button bypasses it, and pressing it again switches the equalizer sound back on. Your slider settings are remembered.
 
 VISUALIZER / MILKDROP
 "Visualizer follows the music" (on by default) listens to what the PC plays (it never mutes or
@@ -43,12 +46,16 @@ you change it in Spotify. When the Spotify equalizer is on, the slider is the ou
 PIN, QUEUE, TASKBAR
 - The LEFT of the three top-right buttons on the skin pins the player above all other apps
   (it turns green while pinned). Same switch: tray icon > Pin on Top.
-- Open the playlist (PL) window to see the current song and what's coming up. It is view-only.
+- Open the playlist (PL) window to see the current song and what's coming up. CLICK AN UPCOMING TITLE
+  to jump to it (Spotify: the player skips ahead to it; YouTube: plays it directly). Adding, removing
+  and reordering stay disabled.
   YouTube playlists work straight away. For Spotify: tray icon > Connect Spotify Queue... (one-time
   setup with a free Spotify developer app; the account that creates it needs Premium).
 - The taskbar button shows the song, with Previous / Play-Pause / Next buttons on its preview.
 - Global hotkeys (Settings to turn off): Ctrl+Alt+Right = next, Ctrl+Alt+Left = previous,
-  Ctrl+Alt+Down = play/pause, Ctrl+Alt+W = show/hide the player.
+  Ctrl+Alt+Down = play/pause, Ctrl+Alt+W = show/hide the player, Ctrl+Alt+V = show/hide the YouTube video.
+- YouTube video: untick "Show YouTube video" in the menu to hear it without the window (it keeps playing).
+  YouTube asks that its player stays visible, so this is your own choice.
 - Settings also has: Snap to screen edges, Song-change notifications, Start with Windows.
 - The player remembers its position, size, pin state, skin and equalizer between runs.
 

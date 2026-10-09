@@ -62,6 +62,9 @@
       previous: () => player.previousVideo(),
       volume: () => player.setVolume(Number(a) || 0),
       seek: () => player.seekTo(Number(a) || 0, true),
+      jump: () => player.playVideoAt(Math.max(0, player.getPlaylistIndex() + (Number(a) || 0))),
+      shuffle: () => player.setShuffle(!!a),
+      repeat: () => player.setLoop(!!a),
     }[c];
     if (run) { try { run(); } catch (e) {} setTimeout(push, 120); }
   });

@@ -25,6 +25,7 @@ try {
     $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
   [void][Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager,Windows.Media.Control,ContentType=WindowsRuntime]
   [void][Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties,Windows.Media.Control,ContentType=WindowsRuntime]
+  [void][Windows.Media.MediaPlaybackAutoRepeatMode,Windows.Media,ContentType=WindowsRuntime]
   $mgrType  = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]
   $propType = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties]
   $mgr = Await ($mgrType::RequestAsync()) $mgrType
@@ -55,7 +56,11 @@ function Get-SmtcState($s) {
   if ($pos -lt 0) { $pos = 0 }
   $title = [string]$p.Title
   $artist = [string]$p.Artist
-  return @{
+  $pi = $s.GetPlaybackInfo()
+  $shuf = $null; $rep = $null
+  try { if ($null -ne $pi.IsShuffleActive) { $shuf = [bool]$pi.IsShuffleActive } } catch {}
+  try { if ($null -ne $pi.AutoRepeatMode) { $rep = ([string]$pi.AutoRepeatMode -ne 'None') } } catch {}
+  $out = @{
     status   = $(if ($st -eq 'Playing') { 'playing' } else { 'paused' })
     title    = $title
     artist   = $artist
@@ -65,6 +70,9 @@ function Get-SmtcState($s) {
     volume   = 0
     via      = 'media-session'
   }
+  if ($null -ne $shuf) { $out.shuffle = $shuf }
+  if ($null -ne $rep) { $out.repeat = $rep }
+  return $out
 }
 
 # ---------- fallback: Spotify window title + media keys ----------
@@ -210,8 +218,16 @@ namespace SkinVol {
   $volOk = $true
   Log 'volume control ready'
 } catch { Log ('volume control unavailable: ' + $_.Exception.Message) }
-function Get-SpotifyVolume { if (-not $volOk) { return -1 }; try { return [double][SkinVol.AppVolume]::Run('Spotify', -1.0) } catch { return -1 } }
-function Set-SpotifyVolume([double]$pct) { if (-not $volOk) { return }; try { [void][SkinVol.AppVolume]::Run('Spotify', $pct / 100.0) } catch {} }
+$script:volCache = -1.0; $script:volAt = [DateTime]::MinValue
+# reading the volume walks the audio sessions: do it at most every 2 seconds, not on every poll
+function Get-SpotifyVolume {
+  if (-not $volOk) { return -1 }
+  if (([DateTime]::UtcNow - $script:volAt).TotalSeconds -lt 2) { return $script:volCache }
+  try { $script:volCache = [double][SkinVol.AppVolume]::Run('Spotify', -1.0) } catch { $script:volCache = -1.0 }
+  $script:volAt = [DateTime]::UtcNow
+  return $script:volCache
+}
+function Set-SpotifyVolume([double]$pct) { if (-not $volOk) { return }; try { $script:volCache = [double][SkinVol.AppVolume]::Run('Spotify', $pct / 100.0); $script:volAt = [DateTime]::UtcNow } catch {} }
 
 # ---------- request handlers ----------
 function Get-State {
@@ -230,6 +246,8 @@ function Send-Command($name, $arg) {
       'playpause' { [void](Await ($s.TryTogglePlayPauseAsync()) ([bool])) }
       'next'      { [void](Await ($s.TrySkipNextAsync()) ([bool])) }
       'previous'  { [void](Await ($s.TrySkipPreviousAsync()) ([bool])) }
+      'shuffle'   { [void](Await ($s.TryChangeShuffleActiveAsync([bool][int]$arg)) ([bool])) }
+      'repeat'    { $mode = $(if ([int]$arg) { [Windows.Media.MediaPlaybackAutoRepeatMode]::List } else { [Windows.Media.MediaPlaybackAutoRepeatMode]::None }); [void](Await ($s.TryChangeAutoRepeatModeAsync($mode)) ([bool])) }
       'seek'      { [void](Await ($s.TryChangePlaybackPositionAsync([int64]([double]$arg * 10000000))) ([bool])) }
     }
     return
@@ -255,6 +273,7 @@ while ($true) {
   try {
     if ($bits[1] -eq 'state') { $out = To-AsciiJson (Get-State) }
     elseif ($bits[1] -eq 'cmd')  { Send-Command $bits[2] $null; $out = '{"ok":true}' }
+    elseif ($bits[1] -eq 'shuffle' -or $bits[1] -eq 'repeat') { Send-Command $bits[1] $bits[2]; $out = '{"ok":true}' }
     elseif ($bits[1] -eq 'seek') { Send-Command 'seek' $bits[2]; $out = '{"ok":true}' }
     elseif ($bits[1] -eq 'vol')  { Set-SpotifyVolume ([double]::Parse($bits[2], [Globalization.CultureInfo]::InvariantCulture)); $out = '{"ok":true}' }
   } catch {
