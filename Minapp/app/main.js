@@ -28,13 +28,13 @@ app.setName('Minapp');
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
 
 let tray = null;
-let win, ytWin = null, localWin = null, zoom = 1, lastSize = { w: 275, h: 116 };
+let win, ytWin = null, ytmWin = null, localWin = null, zoom = 1, lastSize = { w: 275, h: 116 };
 let source = 'spotify';
-let ytState = { status: 'closed' };
+let ytState = { status: 'closed' }, ytmState = { status: 'closed' };
 let ytServer = null, ytPort = 0;
 let localState = { status: 'closed' }, localList = [], localName = '';
-const isPlayerSrc = () => source === 'youtube' || source === 'local'; // sources played in their own window
-const playerWin = () => (source === 'local' ? localWin : ytWin);
+const isPlayerSrc = () => source === 'youtube' || source === 'ytmusic' || source === 'local'; // sources played in their own window
+const playerWin = () => (source === 'local' ? localWin : source === 'ytmusic' ? ytmWin : ytWin);
 
 const cfgPath = () => path.join(app.getPath('userData'), 'config.json');
 // Settings are read from disk once and kept in memory (menus and polls ask for them constantly); writes go to a
@@ -242,6 +242,7 @@ function holdQueue() { queueHoldUntil = Date.now() + 3500; setTimeout(refreshSpo
 async function doCmd(cmd, arg) {
   if (source === 'youtube' && cmd === 'download') return downloadCurrentYouTube();
   if (source === 'youtube') { if (ytWin) ytWin.webContents.send('yt:cmd', cmd, arg); return; }
+  if (source === 'ytmusic') { if (ytmWin && cmd !== 'download') ytmWin.webContents.send('ytm:cmd', cmd, arg); return; }
   if (source === 'local') { if (localWin) localWin.webContents.send('local:cmd', cmd, arg); return; }
   if (cmd === 'jump') { // click on an upcoming title: Spotify's desktop app has no "play this one", so skip ahead to it
     const n = Math.max(-30, Math.min(40, Math.round(Number(arg) || 0))); // negative = back through the history
@@ -752,7 +753,7 @@ async function openYouTube(target) {
   if (!ytWin) {
     ytWin = new BrowserWindow({
       width: 340, height: 230, minWidth: 200, minHeight: 200, title: 'YouTube', icon: path.join(__dirname, isWin ? 'icon.ico' : 'icon.png'),
-      webPreferences: { preload: path.join(__dirname, 'yt-preload.js'), contextIsolation: true, backgroundThrottling: false },
+      webPreferences: { partition: ytAccount.partition, preload: path.join(__dirname, 'yt-preload.js'), contextIsolation: true, backgroundThrottling: false },
     });
     ytWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     ytWin.on('closed', () => { ytWin = null; ytState = { status: 'closed' }; if (source === 'youtube') applyAudio(); });
@@ -823,6 +824,43 @@ function setYtHidden(h) {
   buildMenu();
 }
 
+// ---------- YouTube account + YouTube Music (experiment) ----------
+const ytAccount = require('./ytaccount').create({ log, onChange: () => buildMenu(), icon: path.join(__dirname, isWin ? 'icon.ico' : 'icon.png') });
+
+// "Play in Minapp" in the browse window: a playlist or video page of the signed-in YouTube
+ipcMain.on('ytb:play', async (_e, url) => {
+  const target = parseYouTube(url);
+  if (!target) {
+    dialog.showMessageBox({ type: 'info', message: 'Open a playlist or a video first', detail: 'Click one of your playlists (or a video), then press "Play in Minapp".' });
+    return;
+  }
+  if (['WL', 'LL', 'LM'].includes(target.list)) {
+    dialog.showMessageBox({ type: 'info', message: "YouTube doesn't let apps play this list", detail: 'Watch later, Liked videos and Liked music are private lists that only youtube.com itself can play. Add the songs to a normal playlist and open that one instead.' });
+    return;
+  }
+  writeCfg({ yt: target });
+  ytAccount.close();
+  await setSource('youtube');
+});
+
+async function openYouTubeMusic() {
+  if (!ytmWin) {
+    ytmWin = new BrowserWindow({
+      width: 1000, height: 700, minWidth: 400, minHeight: 300, title: 'YouTube Music', icon: path.join(__dirname, isWin ? 'icon.ico' : 'icon.png'),
+      webPreferences: { partition: ytAccount.partition, preload: path.join(__dirname, 'ytm-preload.js'), contextIsolation: true, backgroundThrottling: false },
+    });
+    ytmWin.setMenuBarVisibility(false);
+    ytmWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\/(music|accounts)\.(youtube|google)\.com\//.test(url)) ytmWin.loadURL(url); return { action: 'deny' }; });
+    ytmWin.on('closed', () => { ytmWin = null; ytmState = { status: 'closed' }; if (source === 'ytmusic') applyAudio(); });
+    ytmWin.webContents.once('did-finish-load', () => { if (eqOn || vizOn) setTimeout(applyAudio, 1500); });
+    ytmWin.loadURL('https://music.youtube.com/');
+  }
+  ytmWin.show();
+  ytmWin.focus();
+}
+
+ipcMain.on('ytm:state', (_e, s) => { ytmState = s || { status: 'closed' }; });
+
 // ---------- Local playlists + YouTube download (personal use) ----------
 const library = require('./library').create({ dir: path.join(app.getPath('userData'), 'library'), binDir: path.join(app.getPath('userData'), 'bin'), log });
 
@@ -832,6 +870,7 @@ async function playLocal(name, start = 0) {
   try { await runCapture(null); } catch {}
   await spotifyCmd('pause');
   if (ytWin) { ytWin.webContents.send('yt:cmd', 'pause'); ytWin.hide(); }
+  if (ytmWin) ytmWin.webContents.send('ytm:cmd', 'pause');
   localList = tracks; localName = name; writeCfg({ localPlaylist: name });
   source = 'local'; writeCfg({ source });
   localState = { status: 'closed' };
@@ -901,13 +940,21 @@ async function downloadCurrentYouTube() {
 async function setSource(s) {
   try {
     try { await runCapture(null); } catch {}
-    if (s === 'local') {
+    if (s !== 'ytmusic' && ytmWin) ytmWin.webContents.send('ytm:cmd', 'pause');
+    if (s === 'ytmusic') {
+      if (localWin) localWin.webContents.send('local:cmd', 'pause');
+      if (ytWin) { ytWin.webContents.send('yt:cmd', 'pause'); ytWin.hide(); }
+      source = 'ytmusic'; writeCfg({ source });
+      await spotifyCmd('pause');
+      await openYouTubeMusic();
+      await applyAudio();
+    } else if (s === 'local') {
       const pl = library.playlists();
       const name = pl.find((p) => p.name === readCfg().localPlaylist && p.count) ? readCfg().localPlaylist : (pl.find((p) => p.count) || {}).name;
       if (!name) { dialog.showMessageBox(win, { message: 'No local playlists yet', detail: 'Use menu > Local playlists > Import files… or Import folder…, or download a YouTube playlist with the record button.' }); await applyAudio(); return; }
       return playLocal(name);
     }
-    if (s === 'youtube') {
+    else if (s === 'youtube') {
       if (localWin) localWin.webContents.send('local:cmd', 'pause');
       if (!readCfg().yt && !(await chooseYouTube())) { await applyAudio(); return; }
       source = 'youtube'; writeCfg({ source });
@@ -939,6 +986,13 @@ ipcMain.handle('spotify:state', async () => {
     st.queue = i < 0 ? [] : localList.slice(i + 1, i + 31).map((t, k) => row(t, i + 1 + k));
     st.history = i <= 0 ? [] : localList.slice(Math.max(0, i - 30), i).map((t, k) => row(t, Math.max(0, i - 30) + k));
     st.source = 'local';
+    onNowPlaying(st);
+    return st;
+  }
+  if (source === 'ytmusic') {
+    const st = ytmWin ? { ...ytmState } : { status: 'closed' };
+    st.source = 'ytmusic';
+    st.queue = []; st.history = [];
     onNowPlaying(st);
     return st;
   }
@@ -1122,6 +1176,12 @@ function menuItems() {
     { label: 'YouTube', type: 'radio', checked: source === 'youtube', click: () => setSource('youtube'), accelerator: 'CmdOrCtrl+Shift+S' },
     { label: 'Show YouTube video', type: 'checkbox', checked: !cfgOn('ytHidden', false), click: () => setYtHidden(!readCfg().ytHidden) },
     { label: 'YouTube link…', accelerator: 'CmdOrCtrl+Shift+Y', click: async () => { if (await chooseYouTube()) await setSource('youtube'); } },
+    { label: 'YouTube Music (experiment)', type: 'radio', checked: source === 'ytmusic', click: () => setSource('ytmusic') },
+    { label: 'YouTube account', submenu: [
+      { label: ytAccount.isSignedIn() ? 'Signed in' : 'Not signed in', enabled: false },
+      { label: ytAccount.isSignedIn() ? 'My playlists…' : 'Sign in…', click: () => ytAccount.open() },
+      { label: 'Sign out', enabled: ytAccount.isSignedIn(), click: () => ytAccount.signOut() },
+    ] },
     { label: 'Local playlists', type: 'radio', checked: source === 'local', click: () => setSource('local') },
     { label: 'Local library', submenu: [
       ...(library.playlists().length
@@ -1242,6 +1302,7 @@ app.whenReady().then(() => {
   app.on('will-quit', () => globalShortcut.unregisterAll());
   // start on YouTube again only if the last session ended there and a link is saved
   if (cfg.source === 'youtube' && cfg.yt) setSource('youtube');
+  else if (cfg.source === 'ytmusic') setSource('ytmusic');
   else if (cfg.source === 'local') setSource('local');
   else if (eqOn) setTimeout(() => { writeApo(true); }, 1500);
   watchSkinLibrary();
