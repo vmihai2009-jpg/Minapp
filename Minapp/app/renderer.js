@@ -84,10 +84,43 @@
     } catch (e) { console.warn('restack failed', e); }
   }
 
+  // Webamp shoves its windows back into view when the viewport shrinks (the small widget is smaller than the player),
+  // which would slide the skin out of the crop: put everything back at the corner after every resize.
+  window.addEventListener('resize', () => { if (widgetMode === 'off') return; for (const ms of [0, 60, 250]) setTimeout(() => { lastSig = ''; restack(); }, ms); });
+
   // Webamp clamps menus to the viewport, so open the viewport up *before* the
   // menu appears (O button / right-click), then shrink back once it closes.
   let expandUntil = 0;
   const expand = () => { expandUntil = Date.now() + 1500; };
+
+
+  // ----- widget mode: compact, always-on-top versions of the player (set from the menu) -----
+  //  small: only the clock and the live visualizer, cropped out of the skin's main window
+  //  large: the main window with the queue below it (no equalizer / Milkdrop)
+  // Both are the real player, so every button, animation and skin keeps working.
+  const SMALL = { w: 108, h: 62 };
+  let widgetMode = 'off';
+  const windowOpen = (id) => { try { const g = webamp.store.getState().windows.genWindows[id]; return !!(g && g.open); } catch { return false; } };
+  function setWidget(mode, fromUser) {
+    mode = mode === 'small' || mode === 'large' ? mode : 'off';
+    widgetMode = mode;
+    const root = document.documentElement, app = document.getElementById('app');
+    root.classList.toggle('widget-small', mode === 'small');
+    root.classList.toggle('widget-large', mode === 'large');
+    app.style.cssText = mode === 'small' ? `width:${SMALL.w}px;height:${SMALL.h}px;overflow:hidden;box-shadow:0 0 0 1px rgba(0,0,0,.55)` : '';
+    if (mode !== 'off') {
+      for (const id of ['milkdrop', 'equalizer']) if (windowOpen(id)) webamp.store.dispatch({ type: 'TOGGLE_WINDOW', windowId: id });
+      const shaded = document.querySelector('#main-window.shade');
+      if (shaded) document.querySelector('#shade')?.click();
+    }
+    // the queue is open in the large widget, closed in the small one; leaving widget mode keeps whatever is open
+    if (mode === 'large' && !windowOpen('playlist')) webamp.store.dispatch({ type: 'TOGGLE_WINDOW', windowId: 'playlist' });
+    if (mode === 'small' && windowOpen('playlist')) webamp.store.dispatch({ type: 'TOGGLE_WINDOW', windowId: 'playlist' });
+    lastSig = ''; lw = 0; lh = 0;
+    if (fromUser) api.widgetSet(mode);
+  }
+  api.onWidget((m) => setWidget(m, false));
+  api.widgetGet().then((m) => { if (m && m !== 'off') setWidget(m, false); }).catch(() => {});
 
   // keep the Electron window sized to the Winamp windows (and any open menu)
   let lw = 0, lh = 0;
@@ -110,7 +143,8 @@
       if (m && m.open) { right = Math.max(right, 275 + 275); bottom = Math.max(bottom, 232); }
     } catch {}
     let w = Math.round(right), h = Math.round(bottom);
-    if (Date.now() < expandUntil) { w = Math.max(w, 420); h = Math.max(h, 400); }
+    if (widgetMode === 'small') { w = SMALL.w; h = SMALL.h; }
+    else if (Date.now() < expandUntil) { w = Math.max(w, 420); h = Math.max(h, 400); }
     if (w && h && (w !== lw || h !== lh)) { lw = w; lh = h; api.size(w, h); }
   }, 150);
 
@@ -122,7 +156,8 @@
 
   // drag the window by the skin's title bar (no CSS drag regions, so menus stay clickable)
   document.addEventListener('mousedown', (e) => {
-    if (e.button !== 0 || !e.target.closest('#title-bar') || e.target.closest('#option, #minimize, #shade, #close')) return;
+    const grab = widgetMode === 'small' ? e.target.closest('#main-window') && !e.target.closest('#time, #visualizer') : e.target.closest('#title-bar');
+    if (e.button !== 0 || !grab || e.target.closest('#option, #minimize, #shade, #close')) return;
     e.stopPropagation();
     api.dragStart();
   }, true);
