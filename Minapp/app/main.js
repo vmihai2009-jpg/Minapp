@@ -380,7 +380,7 @@ function installCaptureHandler() {
       if (m && m.src === 'youtube' && playerWin()) {
         const frame = playerWin().webContents.mainFrame;
         callback({ video: frame, audio: frame, enableLocalEcho: m.kind === 'viz' });
-      } else if (m && m.src === 'system' && isWin) {
+      } else if (m && m.src === 'system' && (isWin || isMac)) { // macOS 13+ also offers system audio; it asks for Screen Recording / audio permission once
         const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } });
         callback({ video: sources[0], audio: m.kind === 'eq' ? 'loopbackWithMute' : 'loopback' });
       } else {
@@ -402,7 +402,7 @@ function desiredMode() {
   if (eqOn && (src === 'youtube' || eqPref === 'capture')) mode = { kind: 'eq', src };
   else if (vizOn && !vizFailed) mode = { kind: 'viz', src };
   if (mode && mode.src === 'youtube' && !playerWin()) mode = null;
-  if (mode && mode.src === 'system' && !isWin) mode = null;
+  if (mode && mode.src === 'system' && !isWin && !(isMac && mode.kind === 'viz')) mode = null; // on a Mac only the listen-only visualizer capture, never the mute-and-replay equalizer
   return mode;
 }
 
@@ -1145,7 +1145,7 @@ function menuItems() {
     { label: 'Size', submenu: [0.5, 0.75, 1, 1.25, 1.5, 2, 3].map((z) => ({ label: `${z}x`, type: 'radio', checked: z === zoom, click: () => { zoom = z; writeCfg({ zoom, zoomSet: 2 }); applySize(); } })) },
     { type: 'separator' },
     { label: eqLabel, type: 'checkbox', checked: eqOn, click: toggleEq },
-    ...(isWin ? [{ label: 'Visualizer follows the music', type: 'checkbox', checked: vizOn, click: async () => { vizOn = !vizOn; vizFailed = false; writeCfg({ viz: vizOn }); await applyAudio(); } }] : []),
+    ...(isWin || isMac ? [{ label: 'Visualizer follows the music', type: 'checkbox', checked: vizOn, click: async () => { vizOn = !vizOn; vizFailed = false; writeCfg({ viz: vizOn }); await applyAudio(); } }] : []),
     { label: readCfg().spotRefresh ? 'Disconnect Spotify queue' : 'Connect Spotify queue…', click: () => (readCfg().spotRefresh ? disconnectSpotifyQueue() : connectSpotifyQueue()) },
     { type: 'separator' },
     { label: 'Settings', submenu: [

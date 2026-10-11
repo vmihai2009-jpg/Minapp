@@ -542,7 +542,7 @@
     try {
       const s = await api.state();
       lastStatus = s.status;
-      setSynth(isMacUi && !cap && s.status === 'playing');
+      if (s.status !== 'playing') setSynth(false);
       document.documentElement.classList.toggle('src-youtube', s.source === 'youtube');
       const status = webamp.getMediaStatus();
       if (s.status === 'closed' || s.status === 'stopped') {
@@ -556,7 +556,9 @@
         let peak = 0; for (let i = 0; i < d.length; i++) if (d[i] > peak) peak = d[i];
         cap.quiet = peak === 0 ? cap.quiet + 1 : 0;
         if (cap.quiet > 40) { stopCapture(); api.capLost('no sound reached the visualizer for 30 s'); }
+        else if (isMacUi && cap.quiet >= 4) cap.useSynth = true; // capture is running but silent (permission refused?): fake the beat until it restarts
       }
+      setSynth(isMacUi && s.status === 'playing' && (!cap || cap.useSynth));
       if (pendingFix) {
         // Webamp starts the first row; with history above, move playback and the view to the playing song
         const st = webamp.store.getState(), order = st.playlist.trackOrder;
