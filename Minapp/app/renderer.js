@@ -43,6 +43,42 @@
   webamp.onClose(() => api.quit());
   await webamp.renderWhenReady(document.getElementById('app'));
 
+  // ----- macOS: keep Milkdrop (WebGL) cheap -----
+  // On a Retina screen with the window scaled up, Butterchurn would render at DPR x zoom (up to 4x per axis) inside a
+  // transparent window, which the Mac compositor handles badly (stutter, tearing, everything slows down). While the
+  // Milkdrop window is open, Butterchurn gets a 1:1 pixel ratio and animation frames are paced to 30 fps.
+  const isMacUi = /Mac/i.test(navigator.platform || '');
+  let milkOpen = false;
+  if (isMacUi) {
+    const dprDesc = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
+    if (dprDesc && dprDesc.get) {
+      Object.defineProperty(window, 'devicePixelRatio', { configurable: true, get: () => (milkOpen ? Math.min(dprDesc.get.call(window), 1) : dprDesc.get.call(window)) });
+    }
+    const nativeRaf = window.requestAnimationFrame.bind(window), nativeCaf = window.cancelAnimationFrame.bind(window);
+    let nextId = 1, lastAdmit = 0;
+    const live = new Map(); // our id -> the native id currently standing in for it
+    window.requestAnimationFrame = (cb) => {
+      const id = nextId++;
+      const run = (ts) => {
+        if (milkOpen && ts !== lastAdmit) { // callbacks sharing a frame share its timestamp, so they pass or wait together
+          if (ts - lastAdmit < 30) { live.set(id, nativeRaf(run)); return; }
+          lastAdmit = ts;
+        }
+        live.delete(id);
+        cb(ts);
+      };
+      live.set(id, nativeRaf(run));
+      return id;
+    };
+    window.cancelAnimationFrame = (id) => { if (live.has(id)) { nativeCaf(live.get(id)); live.delete(id); } };
+    try {
+      webamp.store.subscribe(() => {
+        const m = webamp.store.getState().windows.genWindows.milkdrop;
+        milkOpen = !!(m && m.open);
+      });
+    } catch (e) { console.warn('milkdrop pacing unavailable', e); }
+  }
+
   // ----- skins -----
   const loadSkinBuf = (buf) => {
     const url = URL.createObjectURL(new Blob([buf], { type: 'application/zip' }));
@@ -217,6 +253,39 @@
     await startCapture(mode);
     return mode.kind;
   };
+
+  // Spotify on a Mac can't be listened to (Electron only offers system-audio capture on Windows), so the analyser would
+  // sit silent and neither the bars under the timer nor Milkdrop would move. While a song plays with nothing captured,
+  // feed the analyser a soft pulsing noise instead, so both animate. It never reaches the speakers (the analyser is a side branch).
+  let synth = null;
+  function setSynth(on) {
+    if (!on) {
+      if (!synth) return;
+      clearInterval(synth.timer);
+      try { synth.src.stop(); synth.src.disconnect(); synth.lp.disconnect(); synth.g.disconnect(); } catch {}
+      synth = null;
+      return;
+    }
+    if (synth) return;
+    const ctx = media._context;
+    if (ctx.state !== 'running') ctx.resume().catch(() => {});
+    const n = ctx.sampleRate * 2, buf = ctx.createBuffer(1, n, ctx.sampleRate), ch = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) ch[i] = Math.random() * 2 - 1;
+    const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2000;
+    const g = ctx.createGain(); g.gain.value = 0;
+    src.connect(lp); lp.connect(g); g.connect(media._analyser); src.start();
+    let phase = 0, level = 0.5, bright = 2000;
+    const timer = setInterval(() => {
+      phase += 0.06 * (2 * Math.PI) * 2.1; // roughly a beat every 0.48 s
+      const beat = Math.pow(Math.max(0, Math.sin(phase)), 3);
+      level += (0.55 + 0.45 * Math.random() - level) * 0.3;
+      bright += ((500 + Math.random() * 6000) - bright) * 0.25;
+      g.gain.setTargetAtTime(0.04 + 0.5 * beat * level, ctx.currentTime, 0.03);
+      lp.frequency.setTargetAtTime(bright, ctx.currentTime, 0.05);
+    }, 60);
+    synth = { src, lp, g, timer };
+  }
   const eqRouted = () => !!cap && cap.kind === 'eq'; // Webamp's own volume already controls what is heard
 
   // the EQ sliders drive Equalizer APO (Spotify on Windows) through the main process, and are remembered
@@ -473,6 +542,7 @@
     try {
       const s = await api.state();
       lastStatus = s.status;
+      setSynth(isMacUi && !cap && s.status === 'playing');
       document.documentElement.classList.toggle('src-youtube', s.source === 'youtube');
       const status = webamp.getMediaStatus();
       if (s.status === 'closed' || s.status === 'stopped') {
