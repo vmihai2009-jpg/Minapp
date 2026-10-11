@@ -748,12 +748,13 @@ async function openYouTube(target) {
   const qs = new URLSearchParams();
   if (target.list) qs.set('list', target.list);
   if (target.v) qs.set('v', target.v);
+  if (target.ids) qs.set('ids', target.ids.join(','));
   const url = `http://localhost:${ytPort}/yt.html?${qs}`;
   ytState = { status: 'closed' };
   if (!ytWin) {
     ytWin = new BrowserWindow({
       width: 340, height: 230, minWidth: 200, minHeight: 200, title: 'YouTube', icon: path.join(__dirname, isWin ? 'icon.ico' : 'icon.png'),
-      webPreferences: { partition: ytAccount.partition, preload: path.join(__dirname, 'yt-preload.js'), contextIsolation: true, backgroundThrottling: false },
+      webPreferences: { preload: path.join(__dirname, 'yt-preload.js'), contextIsolation: true, backgroundThrottling: false },
     });
     ytWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     ytWin.on('closed', () => { ytWin = null; ytState = { status: 'closed' }; if (source === 'youtube') applyAudio(); });
@@ -825,29 +826,40 @@ function setYtHidden(h) {
 }
 
 // ---------- YouTube account + YouTube Music (experiment) ----------
-const ytAccount = require('./ytaccount').create({ log, onChange: () => buildMenu(), icon: path.join(__dirname, isWin ? 'icon.ico' : 'icon.png') });
-
-// "Play in Minapp" in the browse window: a playlist or video page of the signed-in YouTube
-ipcMain.on('ytb:play', async (_e, url) => {
-  const target = parseYouTube(url);
-  if (!target) {
-    dialog.showMessageBox({ type: 'info', message: 'Open a playlist or a video first', detail: 'Click one of your playlists (or a video), then press "Play in Minapp".' });
-    return;
-  }
-  if (['WL', 'LL', 'LM'].includes(target.list)) {
-    dialog.showMessageBox({ type: 'info', message: "YouTube doesn't let apps play this list", detail: 'Watch later, Liked videos and Liked music are private lists that only youtube.com itself can play. Add the songs to a normal playlist and open that one instead.' });
-    return;
-  }
-  writeCfg({ yt: target });
-  ytAccount.close();
-  await setSource('youtube');
+// Sign-in goes through the user's normal browser (see ytapi.js); the playlists it lists are played by the YouTube player.
+const ytApi = require('./ytapi').create({
+  shell, dialog, readCfg, writeCfg, askText, log, getWin: () => win, onChange: () => buildMenu(),
 });
+
+async function playMyPlaylist(p) {
+  try {
+    const ids = await ytApi.videoIds(p.id);
+    if (!ids.length) { dialog.showMessageBox(win, { message: `"${p.title}" has no videos`, detail: 'Nothing to play.' }); return; }
+    writeCfg({ yt: { ids, list: null, v: null, name: p.title } });
+    await setSource('youtube');
+  } catch (e) {
+    dialog.showMessageBox(win, { type: 'warning', message: 'Could not open that playlist', detail: String((e && e.message) || e) });
+  }
+}
+
+function accountMenu() {
+  if (!ytApi.signedIn()) return [{ label: 'Sign in with your browser…', click: () => ytApi.signIn() }];
+  const pl = ytApi.playlists();
+  return [
+    { label: 'Signed in to YouTube', enabled: false },
+    { label: ytApi.loading() ? 'Loading playlists…' : (ytApi.error() ? 'Could not load: ' + ytApi.error().slice(0, 60) : 'Your playlists'), enabled: false },
+    ...pl.map((p) => ({ label: p.title + (p.count != null ? ` (${p.count})` : ''), click: () => playMyPlaylist(p) })),
+    { type: 'separator' },
+    { label: 'Refresh playlists', click: () => ytApi.refreshPlaylists() },
+    { label: 'Sign out', click: () => ytApi.signOut() },
+  ];
+}
 
 async function openYouTubeMusic() {
   if (!ytmWin) {
     ytmWin = new BrowserWindow({
       width: 1000, height: 700, minWidth: 400, minHeight: 300, title: 'YouTube Music', icon: path.join(__dirname, isWin ? 'icon.ico' : 'icon.png'),
-      webPreferences: { partition: ytAccount.partition, preload: path.join(__dirname, 'ytm-preload.js'), contextIsolation: true, backgroundThrottling: false },
+      webPreferences: { preload: path.join(__dirname, 'ytm-preload.js'), contextIsolation: true, backgroundThrottling: false },
     });
     ytmWin.setMenuBarVisibility(false);
     ytmWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\/(music|accounts)\.(youtube|google)\.com\//.test(url)) ytmWin.loadURL(url); return { action: 'deny' }; });
@@ -904,6 +916,7 @@ let downloading = false;
 async function downloadCurrentYouTube() {
   const t = readCfg().yt;
   if (!t) { dialog.showMessageBox(win, { message: 'Open a YouTube link first (menu > YouTube link…)' }); return; }
+  if (t.ids) { dialog.showMessageBox(win, { message: 'Downloading needs a pasted link', detail: 'Playlists opened from your account can be played but not downloaded. Paste a playlist or video link (menu > YouTube link…) to download it.' }); return; }
   if (downloading) return;
   if (!library.haveBin() || !readCfg().dlOk) {
     const r = await dialog.showMessageBox(win, {
@@ -1177,11 +1190,7 @@ function menuItems() {
     { label: 'Show YouTube video', type: 'checkbox', checked: !cfgOn('ytHidden', false), click: () => setYtHidden(!readCfg().ytHidden) },
     { label: 'YouTube link…', accelerator: 'CmdOrCtrl+Shift+Y', click: async () => { if (await chooseYouTube()) await setSource('youtube'); } },
     { label: 'YouTube Music (experiment)', type: 'radio', checked: source === 'ytmusic', click: () => setSource('ytmusic') },
-    { label: 'YouTube account', submenu: [
-      { label: ytAccount.isSignedIn() ? 'Signed in' : 'Not signed in', enabled: false },
-      { label: ytAccount.isSignedIn() ? 'My playlists…' : 'Sign in…', click: () => ytAccount.open() },
-      { label: 'Sign out', enabled: ytAccount.isSignedIn(), click: () => ytAccount.signOut() },
-    ] },
+    { label: 'YouTube account', submenu: accountMenu() },
     { label: 'Local playlists', type: 'radio', checked: source === 'local', click: () => setSource('local') },
     { label: 'Local library', submenu: [
       ...(library.playlists().length
@@ -1298,6 +1307,7 @@ app.whenReady().then(() => {
   // The experimental mute-and-replay capture is always opt-in.
   if (cfg.eq && ((cfg.source === 'youtube' && cfg.yt) || (cfg.eqPref !== 'capture' && apoDir() && apoEnsureInclude().ok))) eqOn = true;
   buildMenu();
+  if (ytApi.signedIn()) ytApi.refreshPlaylists();
   registerHotkeys();
   app.on('will-quit', () => globalShortcut.unregisterAll());
   // start on YouTube again only if the last session ended there and a link is saved
