@@ -168,21 +168,47 @@ struct MinappWidgetView: View {
     private func frameView(_ img: NSImage) -> some View {
         GeometryReader { g in
             if small {
-                let crop = CGSize(width: 108, height: 62)
-                let k = max(g.size.width / crop.width, g.size.height / crop.height)
-                Button(intent: MinappCommandIntent("playpause")) {
-                    Image(nsImage: img).resizable().interpolation(.none).widgetFull()
-                        .frame(width: 275 * k, height: 116 * k)
-                        .frame(width: g.size.width, height: g.size.height, alignment: .topLeading)
-                        .clipped()
-                }.buttonStyle(.plain)
+                // square layout: the real LCD, title line and transport buttons cut from the skin and stacked
+                let w = g.size.width - 12
+                let k1 = w / 108, k2 = w / 156, k3 = w / 118
+                VStack(spacing: 5) {
+                    ZStack(alignment: .topLeading) {
+                        piece(img, x: 0, y: 8, w: 108, h: 54, k: k1)
+                        liveClock(x: 47, y: 24 - 8, w: 56, h: 17, k: k1)
+                    }
+                    piece(img, x: 109, y: 22, w: 156, h: 17, k: k2)
+                    ZStack(alignment: .topLeading) {
+                        piece(img, x: 14, y: 84, w: 118, h: 26, k: k3)
+                        hit("previous", 2, 2, 23, k3); hit("playpause", 25, 2, 23, k3); hit("playpause", 48, 2, 23, k3); hit("next", 94, 2, 22, k3)
+                    }
+                }
+                .padding(6).frame(width: g.size.width, height: g.size.height)
+                .background(Skin.panel)
             } else {
                 let k = min(g.size.width / 275, g.size.height / 116)
                 ZStack(alignment: .topLeading) {
                     Image(nsImage: img).resizable().interpolation(.none).widgetFull().frame(width: 275 * k, height: 116 * k)
+                    liveClock(x: 47, y: 24, w: 56, h: 17, k: k)
                     hit("previous", 16, 88, 23, k); hit("playpause", 39, 88, 23, k); hit("playpause", 62, 88, 23, k); hit("next", 108, 88, 22, k)
                 }.frame(width: g.size.width, height: g.size.height)
             }
+        }
+    }
+    /// a cut-out of the skin picture, scaled without smoothing
+    private func piece(_ img: NSImage, x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat, k: CGFloat) -> some View {
+        Image(nsImage: img).resizable().interpolation(.none).widgetFull()
+            .frame(width: 275 * k, height: 116 * k)
+            .offset(x: -x * k, y: -y * k)
+            .frame(width: w * k, height: h * k, alignment: .topLeading).clipped()
+    }
+    /// the picture's clock is a still from a few seconds ago; draw a ticking one over it
+    @ViewBuilder private func liveClock(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat, k: CGFloat) -> some View {
+        if let range, s.playing, !entry.stale {
+            ZStack {
+                Skin.lcd
+                Text(timerInterval: range, countsDown: false).font(.system(size: h * k * 0.95, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Skin.led).monospacedDigit().minimumScaleFactor(0.5).lineLimit(1)
+            }.frame(width: w * k, height: h * k).offset(x: x * k, y: y * k)
         }
     }
     private func hit(_ cmd: String, _ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ k: CGFloat) -> some View {
