@@ -382,11 +382,15 @@ function installCaptureHandler() {
         callback({ video: frame, audio: frame, enableLocalEcho: m.kind === 'viz' });
       } else if (m && m.src === 'system' && (isWin || isMac)) { // macOS 13+ also offers system audio; it asks for Screen Recording / audio permission once
         const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } });
+        if (!sources.length) throw new Error('no screen source (permission not granted)');
         callback({ video: sources[0], audio: m.kind === 'eq' ? 'loopbackWithMute' : 'loopback' });
       } else {
-        callback({});
+        try { callback({}); } catch {}
       }
-    } catch (e) { log('capture handler failed: ' + e.message); callback({}); }
+    } catch (e) {
+      log('capture handler failed: ' + ((e && e.message) || String(e)) + (isMac ? ' (on a Mac, allow Minapp under System Settings > Privacy & Security > Screen & System Audio Recording; the visualizer uses a generic beat until then)' : ''));
+      try { callback({}); } catch { /* Electron throws when no stream is given; the capture request is rejected either way */ }
+    }
   });
 }
 
@@ -431,7 +435,7 @@ async function applyAudio() {
   try { await runCapture(mode); }
   catch (e) {
     const why = String((e && e.message) || e);
-    log('audio capture failed (' + (mode && mode.kind) + '): ' + why);
+    log('audio capture failed (' + (mode && mode.kind) + '): ' + (e && e.message ? why : JSON.stringify(e) || why));
     if (mode && mode.kind === 'eq') {
       eqOn = false;
       dialog.showMessageBox(win, { type: 'warning', message: 'Could not start the equalizer sound', detail: why });
