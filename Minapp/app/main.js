@@ -1269,6 +1269,14 @@ app.whenReady().then(() => {
   else if (eqOn) setTimeout(() => { writeApo(true); }, 1500);
   watchSkinLibrary();
   ipcMain.on('viz:bars', (_e, b) => widgetBridge.setBars(b));
-  widgetBridge.init({ doCmd, log }); // macOS desktop widget (mac/widget); a no-op elsewhere
+  widgetBridge.init({
+    doCmd, log,
+    // a picture of the player's main window (top-left 275x116 of the page, scaled by the Size setting) for the widget
+    capture: async () => {
+      if (!win || win.isDestroyed() || !win.isVisible() || win.isMinimized()) return null;
+      const img = await win.webContents.capturePage({ x: 0, y: 0, width: Math.round(275 * zoom), height: Math.round(116 * zoom) }, { stayHidden: true });
+      return img.isEmpty() ? null : img.toPNG();
+    },
+  }); // macOS desktop widget (mac/widget); a no-op elsewhere
 });
 app.on('window-all-closed', () => app.quit());

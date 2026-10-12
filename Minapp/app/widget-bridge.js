@@ -2,6 +2,7 @@
 // over loopback HTTP (127.0.0.1:47831 only) guarded by a shared secret kept in
 // ~/Library/Application Support/Minapp/widget-secret (the widget is built with the same secret):
 //   GET  /state          what is playing
+//   GET  /frame          PNG of the player's own main window (same skin, live bars), so the widget looks exactly like the app
 //   POST /cmd?c=playpause|next|previous
 // Nothing here touches audio or the visualizer. It does nothing off macOS.
 const fs = require('fs');
@@ -14,7 +15,7 @@ const { execFile } = require('child_process');
 const PORT = 47831;
 const ALLOWED = new Set(['playpause', 'next', 'previous']);
 const HOST_APPS = ['/Applications/Minapp Widget.app', path.join(os.homedir(), 'Applications', 'Minapp Widget.app')];
-let bars = [], secret = null, current = null, lastWrite = 0, doCmd = null, log = () => {};
+let capture = null, frame = null, frameAt = 0, bars = [], secret = null, current = null, lastWrite = 0, doCmd = null, log = () => {};
 
 function loadSecret(file) {
   try { secret = fs.readFileSync(file, 'utf8').trim(); } catch {}
@@ -49,8 +50,18 @@ function setBars(b) {
   if (Array.isArray(b)) bars = b.slice(0, 12).map((v) => Math.max(0, Math.min(100, Math.round(Number(v) || 0))));
 }
 
+// The widget shows a picture of the real player window. Re-take it at most every 1.5 s, only when a widget asks.
+async function currentFrame() {
+  if (frame && Date.now() - frameAt < 1500) return frame;
+  try {
+    const png = capture ? await capture() : null;
+    if (png && png.length) { frame = png; frameAt = Date.now(); }
+  } catch (e) { log('widget frame failed: ' + e.message); }
+  return frame;
+}
+
 function serve() {
-  const srv = http.createServer((req, res) => {
+  const srv = http.createServer(async (req, res) => {
     const ok = secret && req.headers['x-minapp-token'] === secret;
     if (!ok) { res.writeHead(403); return res.end(); }
     const url = new URL(req.url, 'http://127.0.0.1');
@@ -60,6 +71,12 @@ function serve() {
       out.bars = current && current.playing ? bars : [];
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(out));
+    }
+    if (req.method === 'GET' && url.pathname === '/frame') {
+      const png = await currentFrame();
+      if (!png) { res.writeHead(404); return res.end(); }
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': png.length, 'Cache-Control': 'no-store' });
+      return res.end(png);
     }
     if (req.method === 'POST' && url.pathname === '/cmd') {
       const cmd = url.searchParams.get('c');
@@ -76,7 +93,7 @@ function serve() {
 
 function init(opts) {
   if (process.platform !== 'darwin') return;
-  doCmd = opts.doCmd; log = opts.log || log;
+  doCmd = opts.doCmd; capture = opts.capture || null; log = opts.log || log;
   loadSecret(path.join(os.homedir(), 'Library', 'Application Support', 'Minapp', 'widget-secret'));
   serve();
   launchHost();
