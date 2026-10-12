@@ -64,7 +64,7 @@ struct Provider: TimelineProvider {
             }
             // one fetch, no waiting: one entry per second (the clock is drawn per entry from the same picture)
             let t0 = Date.now
-            let entries = (0..<4).map { i in NowEntry(date: t0.addingTimeInterval(Double(i) * 15), state: e.state, frame: e.frame, frameData: nil) }
+            let entries = (0..<60).map { i in NowEntry(date: t0.addingTimeInterval(Double(i)), state: e.state, frame: e.frame, frameData: nil) }
             completion(Timeline(entries: entries, policy: .after(t0.addingTimeInterval(60))))
         }
     }
@@ -248,15 +248,7 @@ struct MinappWidgetView: View {
                 Skin.lcd
                 ZStack(alignment: .leading) {
                     Text("88:88").font(.custom("MinappLEDGhost", fixedSize: 13 * k)).foregroundColor(ghost)
-                    if let range, s.playing {
-                        // ticked by the system between pictures: no reload budget, no fade
-                        HStack(spacing: 0) {
-                            if lead { Text("0").font(.custom("MinappLED", fixedSize: 13 * k)).foregroundColor(lit) }
-                            Text(timerInterval: range, countsDown: false, showsHours: false).font(.custom("MinappLED", fixedSize: 13 * k)).foregroundColor(lit).monospacedDigit().lineLimit(1)
-                        }.fixedSize()
-                    } else {
-                        Text(txt).font(.custom("MinappLED", fixedSize: 13 * k)).foregroundColor(lit)
-                    }
+                    Text(txt).font(.custom("MinappLED", fixedSize: 13 * k)).foregroundColor(lit)
                 }
                 .fixedSize().offset(x: 1 * k, y: 2 * k)
             }
