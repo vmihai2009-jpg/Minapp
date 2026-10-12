@@ -31,6 +31,13 @@ struct NowEntry: TimelineEntry {
     var frameData: Data? = nil
 }
 
+/// tiny diagnostic log next to the cached frame: when the system calls us and what came back
+func wlog(_ m: String) {
+    guard let d = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("widget.log") else { return }
+    let line = "\(Date().formatted(.iso8601)) \(m)\n"
+    if let h = try? FileHandle(forWritingTo: d) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() } else { try? Data(line.utf8).write(to: d) }
+}
+
 enum Fonts {
     static let registered: Bool = {
         for n in ["MinappLED", "MinappLEDGhost"] {
@@ -49,7 +56,9 @@ struct Provider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<NowEntry>) -> Void) {
         // never block: every network call has a short timeout and falls back to "not playing", so the widget cannot end up blank
         Task {
+            let t = Date()
             let e = await load()
+            wlog("getTimeline \(context.family.rawValue) took \(Int(Date().timeIntervalSince(t) * 1000)) ms live=\(e.state.isLive) playing=\(e.state.playing) frame=\(e.frame != nil) stale=\(e.stale)")
             guard e.state.playing, !e.stale else {
                 return completion(Timeline(entries: [e], policy: .after(.now.addingTimeInterval(20))))
             }
