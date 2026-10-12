@@ -55,8 +55,8 @@ struct Provider: TimelineProvider {
             }
             // one fetch, no waiting: one entry per second (the clock is drawn per entry from the same picture)
             let t0 = Date.now
-            let entries = (0..<10).map { i in NowEntry(date: t0.addingTimeInterval(Double(i)), state: e.state, frame: e.frame, frameData: nil) }
-            completion(Timeline(entries: entries, policy: .after(t0.addingTimeInterval(10))))
+            let entries = (0..<4).map { i in NowEntry(date: t0.addingTimeInterval(Double(i) * 15), state: e.state, frame: e.frame, frameData: nil) }
+            completion(Timeline(entries: entries, policy: .after(t0.addingTimeInterval(60))))
         }
     }
     private func load() async -> NowEntry {
@@ -231,13 +231,23 @@ struct MinappWidgetView: View {
         if live, !entry.stale {
             let pos = s.position + (s.playing ? max(0, entry.date.timeIntervalSince1970 - s.updated) : 0)
             let t = Int(min(pos, 5999))
+            let lead = t / 60 < 10          // the system's timer prints m:ss; add the skin's leading zero
             let txt = String(format: "%02d:%02d", t / 60, t % 60)
+            let ghost = Color(red: 24 / 255, green: 33 / 255, blue: 41 / 255), lit = Color(red: 0, green: 248 / 255, blue: 0)
             // black patch at (x, y) over the old digits; the skin's digits start 1 pt right and 2 pt below the patch corner
             ZStack(alignment: .topLeading) {
                 Skin.lcd
                 ZStack(alignment: .leading) {
-                    Text(txt).font(.custom("MinappLEDGhost", fixedSize: 13 * k)).foregroundColor(Color(red: 24 / 255, green: 33 / 255, blue: 41 / 255))
-                    Text(txt).font(.custom("MinappLED", fixedSize: 13 * k)).foregroundColor(Color(red: 0, green: 248 / 255, blue: 0))
+                    Text("88:88").font(.custom("MinappLEDGhost", fixedSize: 13 * k)).foregroundColor(ghost)
+                    if let range, s.playing {
+                        // ticked by the system between pictures: no reload budget, no fade
+                        HStack(spacing: 0) {
+                            if lead { Text("0").font(.custom("MinappLED", fixedSize: 13 * k)).foregroundColor(lit) }
+                            Text(timerInterval: range, countsDown: false, showsHours: false).font(.custom("MinappLED", fixedSize: 13 * k)).foregroundColor(lit).monospacedDigit().lineLimit(1)
+                        }.fixedSize()
+                    } else {
+                        Text(txt).font(.custom("MinappLED", fixedSize: 13 * k)).foregroundColor(lit)
+                    }
                 }
                 .fixedSize().offset(x: 1 * k, y: 2 * k)
             }
@@ -329,7 +339,7 @@ struct MinappWidget: Widget {
     let kind = "MinappNowPlaying"
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: Provider()) { entry in
-            MinappWidgetView(entry: entry).containerBackground(Skin.panelLo, for: .widget)
+            MinappWidgetView(entry: entry).transaction { $0.animation = nil }.contentTransition(.identity).containerBackground(Skin.panelLo, for: .widget)
         }
         .configurationDisplayName("Minapp")
         .description("What Minapp is playing, with play, pause, next and previous.")
