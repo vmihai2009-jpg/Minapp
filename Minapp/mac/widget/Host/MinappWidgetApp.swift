@@ -18,7 +18,6 @@ final class Agent: NSObject, NSApplicationDelegate {
     private var lastSeen = Date()
 
     func applicationDidFinishLaunching(_ n: Notification) {
-        _ = Shared.container // creates the App Group folder Minapp looks for
         WidgetCenter.shared.reloadAllTimelines()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
         // Opened by hand (not by Minapp): show a note instead of vanishing.

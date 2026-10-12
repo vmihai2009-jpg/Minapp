@@ -1,6 +1,6 @@
 import Foundation
 
-/// What Minapp (the Electron player) writes to the shared App Group container, and where.
+/// What Minapp (the Electron player) serves over loopback HTTP.
 struct NowPlayingState: Codable, Equatable {
     var status: String = "closed"
     var title: String = ""
@@ -18,28 +18,32 @@ struct NowPlayingState: Codable, Equatable {
 }
 
 enum Shared {
-    /// "<TEAMID>.com.minapp.widget", filled in from the build's signing team (see Info.plist).
-    static var groupID: String {
-        Bundle.main.object(forInfoDictionaryKey: "MinappAppGroup") as? String ?? "com.minapp.widget"
+    /// Minapp serves on loopback only; the shared secret is baked into both bundles at build time (see README).
+    static let base = "http://127.0.0.1:47831"
+    static var secret: String { Bundle.main.object(forInfoDictionaryKey: "MinappSecret") as? String ?? "" }
+
+    private static func request(_ path: String, method: String) -> (Data?, Bool) {
+        guard let url = URL(string: base + path) else { return (nil, false) }
+        var r = URLRequest(url: url, timeoutInterval: 2)
+        r.httpMethod = method
+        r.setValue(secret, forHTTPHeaderField: "X-Minapp-Token")
+        let sem = DispatchSemaphore(value: 0)
+        var out: Data?, ok = false
+        URLSession.shared.dataTask(with: r) { d, resp, _ in
+            out = d; ok = ((resp as? HTTPURLResponse)?.statusCode ?? 0) < 300
+            sem.signal()
+        }.resume()
+        _ = sem.wait(timeout: .now() + 3)
+        return (out, ok)
     }
-    static var container: URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: groupID)
-    }
-    static var stateURL: URL? { container?.appendingPathComponent("state.json") }
-    static var commandsDir: URL? { container?.appendingPathComponent("commands", isDirectory: true) }
 
     static func readState() -> NowPlayingState {
-        guard let url = stateURL, let data = try? Data(contentsOf: url),
-              let s = try? JSONDecoder().decode(NowPlayingState.self, from: data) else { return NowPlayingState() }
+        let (d, ok) = request("/state", method: "GET")
+        guard ok, let d, let s = try? JSONDecoder().decode(NowPlayingState.self, from: d) else { return NowPlayingState() }
         return s
     }
 
-    /// Drops a command file for Minapp to pick up (it polls the folder).
     static func send(_ command: String) {
-        guard let dir = commandsDir else { return }
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let name = String(format: "%013.0f-%@.json", Date().timeIntervalSince1970 * 1000, UUID().uuidString)
-        let body = try? JSONSerialization.data(withJSONObject: ["command": command])
-        try? body?.write(to: dir.appendingPathComponent(name), options: .atomic)
+        _ = request("/cmd?c=" + command, method: "POST")
     }
 }

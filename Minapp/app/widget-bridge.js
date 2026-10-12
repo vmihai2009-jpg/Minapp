@@ -1,35 +1,37 @@
 // macOS desktop widget bridge. The native widget (mac/widget) lives in a sandboxed extension, so the two sides talk
-// through files in the widget's App Group container (~/Library/Group Containers/<TEAM>.com.minapp.widget):
-//   state.json            written here on every poll: what is playing
-//   commands/<id>.json    written by the widget's buttons: { "command": "playpause" | "next" | "previous" }
-// Nothing here touches audio or the visualizer. It does nothing unless the widget app has been run once (that is
-// what creates the container).
+// over loopback HTTP (127.0.0.1:47831 only) guarded by a shared secret kept in
+// ~/Library/Application Support/Minapp/widget-secret (the widget is built with the same secret):
+//   GET  /state          what is playing
+//   POST /cmd?c=playpause|next|previous
+// Nothing here touches audio or the visualizer. It does nothing off macOS.
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const http = require('http');
+const crypto = require('crypto');
 const { execFile } = require('child_process');
 
+const PORT = 47831;
 const ALLOWED = new Set(['playpause', 'next', 'previous']);
 const HOST_APPS = ['/Applications/Minapp Widget.app', path.join(os.homedir(), 'Applications', 'Minapp Widget.app')];
-let dir = null, lastJson = '', lastWrite = 0, doCmd = null, log = () => {};
+let secret = null, current = null, lastWrite = 0, doCmd = null, log = () => {};
 
-function findDir() {
-  const root = path.join(os.homedir(), 'Library', 'Group Containers');
-  try {
-    const name = fs.readdirSync(root).find((n) => /\.com\.minapp\.widget$/.test(n));
-    return name ? path.join(root, name) : null;
-  } catch { return null; }
+function loadSecret(file) {
+  try { secret = fs.readFileSync(file, 'utf8').trim(); } catch {}
+  if (!secret) {
+    secret = crypto.randomBytes(24).toString('hex');
+    try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, secret, { mode: 0o600 }); } catch (e) { log('widget secret write failed: ' + e.message); }
+  }
 }
 
 function launchHost() {
   const app = HOST_APPS.find((p) => fs.existsSync(p));
-  if (app) execFile('open', ['-g', '-a', app], () => {});
+  if (app) execFile('open', ['-g', '-a', app, '--args', '-background'], () => {});
 }
 
 function publish(st) {
-  if (!dir || !st) return;
-  const playing = st.status === 'playing';
-  const out = {
+  if (!st) return;
+  current = {
     status: st.status || 'closed',
     title: st.title || '',
     artist: st.artist || '',
@@ -37,48 +39,42 @@ function publish(st) {
     source: st.source || 'spotify',
     duration: Number(st.duration) || 0,
     position: Number(st.position) || 0,
-    playing,
+    playing: st.status === 'playing',
+    updated: Date.now() / 1000,
   };
-  const key = JSON.stringify([out.status, out.title, out.artist, out.id, out.duration, playing]);
-  const now = Date.now();
-  // the position only matters as a starting point for the widget's own running timer: rewrite it when something else
-  // changed, or as a heartbeat every few seconds (the widget treats a silent file as "Minapp closed")
-  if (key === lastJson && now - lastWrite < 4000) return;
-  lastJson = key; lastWrite = now;
-  out.updated = now / 1000;
-  try {
-    const tmp = path.join(dir, 'state.json.tmp');
-    fs.writeFileSync(tmp, JSON.stringify(out));
-    fs.renameSync(tmp, path.join(dir, 'state.json'));
-  } catch (e) { log('widget state write failed: ' + e.message); }
 }
 
-function pollCommands() {
-  const cdir = path.join(dir, 'commands');
-  let files;
-  try { files = fs.readdirSync(cdir).filter((f) => f.endsWith('.json')).sort(); } catch { return; }
-  for (const f of files) {
-    const p = path.join(cdir, f);
-    try {
-      const age = Date.now() - fs.statSync(p).mtimeMs;
-      const cmd = JSON.parse(fs.readFileSync(p, 'utf8')).command;
-      fs.unlinkSync(p);
-      if (age < 10000 && ALLOWED.has(cmd)) { log('widget command: ' + cmd); doCmd(cmd); }
-    } catch { try { fs.unlinkSync(p); } catch {} }
-  }
+function serve() {
+  const srv = http.createServer((req, res) => {
+    const ok = secret && req.headers['x-minapp-token'] === secret;
+    if (!ok) { res.writeHead(403); return res.end(); }
+    const url = new URL(req.url, 'http://127.0.0.1');
+    if (req.method === 'GET' && url.pathname === '/state') {
+      // "updated" is refreshed on read so a long song with no state changes still counts as live while Minapp runs
+      const out = Object.assign({}, current || { status: 'closed', title: '', artist: '', id: '', source: 'spotify', duration: 0, position: 0, playing: false }, current ? { updated: Date.now() / 1000, position: current.position + (current.playing ? (Date.now() / 1000 - current.updated) : 0) } : { updated: Date.now() / 1000 });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(out));
+    }
+    if (req.method === 'POST' && url.pathname === '/cmd') {
+      const cmd = url.searchParams.get('c');
+      if (!ALLOWED.has(cmd)) { res.writeHead(400); return res.end(); }
+      log('widget command: ' + cmd);
+      try { doCmd(cmd); } catch (e) { log('widget command failed: ' + e.message); }
+      res.writeHead(204); return res.end();
+    }
+    res.writeHead(404); res.end();
+  });
+  srv.on('error', (e) => log('widget server: ' + e.message));
+  srv.listen(PORT, '127.0.0.1');
 }
 
 function init(opts) {
   if (process.platform !== 'darwin') return;
   doCmd = opts.doCmd; log = opts.log || log;
-  const look = () => {
-    const d = findDir();
-    if (d && d !== dir) { dir = d; try { fs.mkdirSync(path.join(dir, 'commands'), { recursive: true }); } catch {} log('widget container: ' + dir); }
-    if (dir) launchHost();
-  };
-  look();
-  setInterval(look, 60000);
-  setInterval(() => { if (dir) pollCommands(); }, 700);
+  loadSecret(path.join(os.homedir(), 'Library', 'Application Support', 'Minapp', 'widget-secret'));
+  serve();
+  launchHost();
+  setInterval(launchHost, 60000);
 }
 
 module.exports = { init, publish };

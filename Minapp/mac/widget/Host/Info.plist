@@ -10,5 +10,5 @@
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
-  <key>MinappAppGroup</key><string>$(TeamIdentifierPrefix)com.minapp.widget</string>
+  <key>MinappSecret</key><string>$(MINAPP_WIDGET_SECRET)</string>
 </dict></plist>
