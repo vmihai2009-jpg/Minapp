@@ -39,28 +39,28 @@ enum Shared {
     static let base = "http://127.0.0.1:47831"
     static var secret: String { Bundle.main.object(forInfoDictionaryKey: "MinappSecret") as? String ?? "" }
 
-    private static func request(_ path: String, method: String) -> (Data?, Bool) {
+    private static func request(_ path: String, method: String) async -> (Data?, Bool) {
         guard let url = URL(string: base + path) else { return (nil, false) }
         var r = URLRequest(url: url, timeoutInterval: 2)
         r.httpMethod = method
         r.setValue(secret, forHTTPHeaderField: "X-Minapp-Token")
-        let sem = DispatchSemaphore(value: 0)
-        var out: Data?, ok = false
-        URLSession.shared.dataTask(with: r) { d, resp, _ in
-            out = d; ok = ((resp as? HTTPURLResponse)?.statusCode ?? 0) < 300
-            sem.signal()
-        }.resume()
-        _ = sem.wait(timeout: .now() + 3)
-        return (out, ok)
+        guard let (d, resp) = try? await URLSession.shared.data(for: r) else { return (nil, false) }
+        return (d, ((resp as? HTTPURLResponse)?.statusCode ?? 0) < 300)
     }
 
-    static func readState() -> NowPlayingState {
-        let (d, ok) = request("/state", method: "GET")
+    static func readState() async -> NowPlayingState {
+        let (d, ok) = await request("/state", method: "GET")
         guard ok, let d, let s = try? JSONDecoder().decode(NowPlayingState.self, from: d) else { return NowPlayingState() }
         return s
     }
 
-    static func send(_ command: String) {
-        _ = request("/cmd?c=" + command, method: "POST")
+    /// PNG of the real player window (404 when it is hidden or Minapp is old).
+    static func readFrame() async -> Data? {
+        let (d, ok) = await request("/frame", method: "GET")
+        return ok ? d : nil
+    }
+
+    static func send(_ command: String) async {
+        _ = await request("/cmd?c=" + command, method: "POST")
     }
 }
