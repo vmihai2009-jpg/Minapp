@@ -14,7 +14,7 @@ struct MinappCommandIntent: AppIntent {
     init(_ command: String) { self.command = command }
 
     func perform() async throws -> some IntentResult {
-        Shared.send(command)
+        await Shared.send(command)
         try? await Task.sleep(nanoseconds: 1_000_000_000)
         WidgetCenter.shared.reloadAllTimelines()
         return .result()
@@ -26,27 +26,43 @@ struct MinappCommandIntent: AppIntent {
 struct NowEntry: TimelineEntry {
     let date: Date
     let state: NowPlayingState
+    var frame: NSImage? = nil
+    var stale = false
 }
 
 struct Provider: TimelineProvider {
     func placeholder(in context: Context) -> NowEntry { NowEntry(date: .now, state: sample) }
     func getSnapshot(in context: Context, completion: @escaping (NowEntry) -> Void) {
-        completion(context.isPreview ? NowEntry(date: .now, state: sample) : NowEntry(date: .now, state: Shared.readState()))
+        if context.isPreview { return completion(NowEntry(date: .now, state: sample)) }
+        Task { completion(await load()) }
     }
     func getTimeline(in context: Context, completion: @escaping (Timeline<NowEntry>) -> Void) {
-        let s = Shared.readState()
-        // WidgetKit cannot animate continuously: several short entries, each with the bars nudged, give small steps between
-        // refreshes (the host app also asks for a reload every few seconds while music plays).
-        var entries = [NowEntry(date: .now, state: s)]
-        if s.playing && !s.bars.isEmpty {
-            for i in 1...8 {
-                var t = s
-                t.bars = s.bars.enumerated().map { j, v in max(4, min(100, v + Int(sin(Double(i * 2 + j * 3)) * 18))) }
-                entries.append(NowEntry(date: .now.addingTimeInterval(Double(i) * 1.5), state: t))
+        // never block: every network call has a short timeout and falls back to "not playing", so the widget cannot end up blank
+        Task {
+            let e = await load()
+            var entries = [e]
+            if e.state.playing && e.frame == nil && !e.state.bars.isEmpty {
+                for i in 1...8 {
+                    var t = e.state
+                    t.bars = e.state.bars.enumerated().map { j, v in max(4, min(100, v + Int(sin(Double(i * 2 + j * 3)) * 18))) }
+                    entries.append(NowEntry(date: .now.addingTimeInterval(Double(i) * 1.5), state: t))
+                }
             }
+            entries.append(NowEntry(date: .now.addingTimeInterval(25), state: e.state, frame: e.frame))
+            completion(Timeline(entries: entries, policy: .after(.now.addingTimeInterval(e.state.playing ? 5 : 20))))
         }
-        entries.append(NowEntry(date: .now.addingTimeInterval(25), state: s))
-        completion(Timeline(entries: entries, policy: .after(.now.addingTimeInterval(20))))
+    }
+    private func load() async -> NowEntry {
+        async let st = Shared.readState()
+        async let fr = Shared.readFrame()
+        let state = await st
+        let data = await fr
+        let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("last-frame.png")
+        if state.isLive, let data, let cache { try? data.write(to: cache) }
+        if state.isLive { return NowEntry(date: .now, state: state, frame: data.flatMap { NSImage(data: $0) }) }
+        // Minapp closed or the Mac just woke: keep the last picture, dimmed by the view, instead of going blank
+        let old = cache.flatMap { try? Data(contentsOf: $0) }.flatMap { NSImage(data: $0) }
+        return NowEntry(date: .now, state: state, frame: old, stale: old != nil)
     }
     private var sample: NowPlayingState {
         var s = NowPlayingState()
@@ -55,6 +71,13 @@ struct Provider: TimelineProvider {
         s.bars = [30, 55, 80, 65, 90, 50, 70, 40, 60, 35, 25, 15]
         s.updated = Date().timeIntervalSince1970
         return s
+    }
+}
+
+extension Image {
+    /// desktop widgets drop to accented/monochrome rendering when the desktop is idle or unfocused, which flattens pictures to white
+    @ViewBuilder func widgetFull() -> some View {
+        if #available(macOS 15.0, *) { self.widgetAccentedRenderingMode(.fullColor) } else { self }
     }
 }
 
@@ -138,6 +161,62 @@ struct MinappWidgetView: View {
     private var small: Bool { family == .systemSmall }
 
     var body: some View {
+        if let img = entry.frame { frameView(img).opacity(entry.stale ? 0.45 : 1).overlay(alignment: .bottom) { if entry.stale { Text("MINAPP IS NOT PLAYING").font(Skin.led(8)).foregroundStyle(Skin.led).padding(2).background(Skin.lcd) } } } else { drawn }
+    }
+
+    /// the real player picture: whole window for medium, the clock + visualizer corner for small
+    private func frameView(_ img: NSImage) -> some View {
+        GeometryReader { g in
+            if small {
+                // square layout: the real LCD, title line and transport buttons cut from the skin and stacked
+                let w = g.size.width - 12
+                let k1 = w / 102, k2 = w / 156, k3 = w / 118
+                VStack(spacing: 5) {
+                    ZStack(alignment: .topLeading) {
+                        piece(img, x: 6, y: 15, w: 102, h: 52, k: k1)
+                        liveClock(x: 47 - 6, y: 24 - 15, w: 56, h: 17, k: k1)
+                    }
+                    piece(img, x: 109, y: 22, w: 156, h: 17, k: k2)
+                    ZStack(alignment: .topLeading) {
+                        piece(img, x: 14, y: 84, w: 118, h: 26, k: k3)
+                        hit("previous", 2, 2, 23, k3); hit("playpause", 25, 2, 23, k3); hit("playpause", 48, 2, 23, k3); hit("next", 94, 2, 22, k3)
+                    }
+                }
+                .padding(6).frame(width: g.size.width, height: g.size.height)
+                .background(Skin.panel)
+            } else {
+                let k = min(g.size.width / 275, g.size.height / 116)
+                ZStack(alignment: .topLeading) {
+                    Image(nsImage: img).resizable().interpolation(.none).widgetFull().frame(width: 275 * k, height: 116 * k)
+                    liveClock(x: 47, y: 24, w: 56, h: 17, k: k)
+                    hit("previous", 16, 88, 23, k); hit("playpause", 39, 88, 23, k); hit("playpause", 62, 88, 23, k); hit("next", 108, 88, 22, k)
+                }.frame(width: g.size.width, height: g.size.height)
+            }
+        }
+    }
+    /// a cut-out of the skin picture, scaled without smoothing
+    private func piece(_ img: NSImage, x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat, k: CGFloat) -> some View {
+        Image(nsImage: img).resizable().interpolation(.none).widgetFull()
+            .frame(width: 275 * k, height: 116 * k)
+            .offset(x: -x * k, y: -y * k)
+            .frame(width: w * k, height: h * k, alignment: .topLeading).clipped()
+    }
+    /// the picture's clock is a still from a few seconds ago; draw a ticking one over it
+    @ViewBuilder private func liveClock(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat, k: CGFloat) -> some View {
+        if let range, s.playing, !entry.stale {
+            ZStack {
+                Skin.lcd
+                Text(timerInterval: range, countsDown: false).font(.system(size: h * k * 0.95, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Skin.led).monospacedDigit().minimumScaleFactor(0.5).lineLimit(1)
+            }.frame(width: w * k, height: h * k).offset(x: x * k, y: y * k)
+        }
+    }
+    private func hit(_ cmd: String, _ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ k: CGFloat) -> some View {
+        Button(intent: MinappCommandIntent(cmd)) { Color.clear.frame(width: w * k, height: 18 * k).contentShape(Rectangle()) }
+            .buttonStyle(.plain).offset(x: x * k, y: y * k)
+    }
+
+    private var drawn: some View {
         VStack(spacing: 0) {
             HStack {
                 Text("MINAPP").font(.system(size: 9, weight: .heavy, design: .monospaced)).foregroundStyle(.white.opacity(0.9)).tracking(3)

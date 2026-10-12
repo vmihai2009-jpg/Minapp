@@ -277,7 +277,7 @@ let pinned = false;
 let widget = 'off';
 function applyOnTop() {
   if (!win || win.isDestroyed()) return;
-  if (pinned || widget !== 'off') win.setAlwaysOnTop(true, 'screen-saver'); else win.setAlwaysOnTop(false);
+  if (pinned || (widget !== 'off' && readCfg().widgetTop !== false)) win.setAlwaysOnTop(true, 'screen-saver'); else win.setAlwaysOnTop(false);
 }
 function setWidget(mode, tell) {
   widget = mode === 'small' || mode === 'large' ? mode : 'off';
@@ -1233,6 +1233,8 @@ function menuItems() {
       { label: 'Off (full player)', type: 'radio', checked: widget === 'off', click: () => setWidget('off', true) },
       { label: 'Small: timer + visualizer', type: 'radio', checked: widget === 'small', accelerator: 'CmdOrCtrl+Shift+W', click: () => setWidget('small', true) },
       { label: 'Large: timer + playlist', type: 'radio', checked: widget === 'large', accelerator: 'CmdOrCtrl+Alt+W', click: () => setWidget('large', true) },
+      { type: 'separator' },
+      { label: 'Stay on top of other windows', type: 'checkbox', checked: readCfg().widgetTop !== false, click: () => { writeCfg({ widgetTop: readCfg().widgetTop === false }); applyOnTop(); buildMenu(); } },
     ] },
     { type: 'separator' },
     { label: 'Skins', submenu: skinsMenu() },

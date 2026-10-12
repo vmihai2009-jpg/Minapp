@@ -36,14 +36,18 @@ final class Agent: NSObject, NSApplicationDelegate {
     }
 
     private func tick() {
-        let s = Shared.readState()
+        Task { await check() }
+    }
+
+    private func check() async {
+        let s = await Shared.readState()
         if s.isLive { lastSeen = Date() }
         let changed = last == nil
             || last?.id != s.id || last?.title != s.title || last?.playing != s.playing
             || last?.status != s.status || last?.isLive != s.isLive
         tickCount += 1
         // bars move constantly while playing: ask WidgetKit for a redraw every few seconds
-        let barsMoved = s.playing && s.bars != last?.bars && tickCount % 3 == 0
+        let barsMoved = s.playing && s.bars != last?.bars && tickCount % 2 == 0
         if changed || barsMoved { WidgetCenter.shared.reloadAllTimelines() }
         last = s
         if Date().timeIntervalSince(lastSeen) > 45 { // Minapp closed
