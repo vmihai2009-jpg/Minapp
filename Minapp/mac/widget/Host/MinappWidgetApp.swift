@@ -48,7 +48,7 @@ final class Agent: NSObject, NSApplicationDelegate {
         tickCount += 1
         // bars move constantly while playing: ask WidgetKit for a redraw every few seconds
         let barsMoved = s.playing && s.bars != last?.bars && tickCount % 2 == 0
-        let periodic = s.playing && tickCount % 15 == 0   // refresh the picture (bars, title) every ~15 s
+        let periodic = false
         if changed || periodic { WidgetCenter.shared.reloadAllTimelines() }
         last = s
         if Date().timeIntervalSince(lastSeen) > 45 { // Minapp closed

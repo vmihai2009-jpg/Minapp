@@ -38,6 +38,9 @@ func wlog(_ m: String) {
     if let h = try? FileHandle(forWritingTo: d) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() } else { try? Data(line.utf8).write(to: d) }
 }
 
+let MINIMAL = false
+let CLOCK = true  // sprite digits, no custom fonts
+
 enum Fonts {
     static let registered: Bool = {
         for n in ["MinappLED", "MinappLEDGhost"] {
@@ -64,8 +67,8 @@ struct Provider: TimelineProvider {
             }
             // one fetch, no waiting: one entry per second (the clock is drawn per entry from the same picture)
             let t0 = Date.now
-            let entries = (0..<2).map { i in NowEntry(date: t0.addingTimeInterval(Double(i) * 15), state: e.state, frame: e.frame, frameData: nil) }
-            completion(Timeline(entries: entries, policy: .after(t0.addingTimeInterval(30))))
+            let entries = (0..<60).map { i in NowEntry(date: t0.addingTimeInterval(Double(i)), state: e.state, frame: e.frame, frameData: nil) }
+            completion(Timeline(entries: entries, policy: .after(t0.addingTimeInterval(55))))
         }
     }
     private func load() async -> NowEntry {
@@ -192,12 +195,10 @@ struct MinappWidgetView: View {
     private var start: Date { Date(timeIntervalSince1970: s.updated).addingTimeInterval(-s.position) }
     private var range: ClosedRange<Date>? { s.duration > 0 ? start...start.addingTimeInterval(s.duration) : nil }
     private var small: Bool { family == .systemSmall }
-    private let _f = Fonts.registered
 
     var body: some View {
-        let _ = wlog("body \(family.rawValue) frame=\(entry.frame.map { "\($0.size.width)x\($0.size.height)" } ?? "nil") date=\(entry.date.formatted(.iso8601))")
-        if let img = entry.frame { frameView(img).opacity(entry.stale ? 0.45 : 1)
-            .overlay(alignment: .topTrailing) { Text("R\(Int(entry.date.timeIntervalSince1970) % 100)").font(.system(size: 7)).foregroundColor(.white).padding(1).background(Color.red) }
+        // let _ = wlog("body \(family.rawValue) frame=\(entry.frame.map { "\($0.size.width)x\($0.size.height)" } ?? "nil") date=\(entry.date.formatted(.iso8601))")
+        if MINIMAL { VStack { Text(s.title).font(.headline); Text("R \(Int(entry.date.timeIntervalSince1970) % 1000)"); Rectangle().fill(.green).frame(height: 20) }.foregroundColor(.white) } else if let img = entry.frame { frameView(img).opacity(entry.stale ? 0.45 : 1)
             .overlay(alignment: .bottom) { if entry.stale { Text("MINAPP IS NOT PLAYING").font(Skin.led(8)).foregroundStyle(Skin.led).padding(2).background(Skin.lcd) } } } else { drawn }
     }
 
@@ -240,23 +241,19 @@ struct MinappWidgetView: View {
     }
     /// the picture's clock is a still from a moment ago: draw the skin's own LED digits (MinappLED fonts) for this entry's time
     @ViewBuilder private func liveClock(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat, k: CGFloat) -> some View {
-        if live, !entry.stale {
+        if CLOCK, live, !entry.stale {
             let pos = s.position + (s.playing ? max(0, entry.date.timeIntervalSince1970 - s.updated) : 0)
-            let t = Int(min(pos, 5999))
-            let lead = t / 60 < 10          // the system's timer prints m:ss; add the skin's leading zero
-            let txt = String(format: "%02d:%02d", t / 60, t % 60)
-            let ghost = Color(red: 24 / 255, green: 33 / 255, blue: 41 / 255), lit = Color(red: 0, green: 248 / 255, blue: 0)
-            // black patch at (x, y) over the old digits; the skin's digits start 1 pt right and 2 pt below the patch corner
+            let t = Int(min(max(pos, 0), 5999))
+            let d = [t / 60 / 10, t / 60 % 10, t % 60 / 10, t % 60 % 10]
+            // the skin's digit cells: x 48, 60, 78, 90 and y 26 (the clock block starts at skin x47 y24)
             ZStack(alignment: .topLeading) {
-                Skin.lcd
-                ZStack(alignment: .leading) {
-                    Text("88:88").font(.custom("MinappLEDGhost", fixedSize: 13 * k)).foregroundColor(ghost)
-                    Text(txt).font(.custom("MinappLED", fixedSize: 13 * k)).foregroundColor(lit)
+                ForEach(0..<4, id: \.self) { i in
+                    Image(nsImage: Digits.images[d[i]]).resizable().interpolation(.none)
+                        .frame(width: 9 * k, height: 13 * k)
+                        .offset(x: (x + [1.0, 13, 31, 43][i]) * k, y: (y + 2) * k)
                 }
-                .fixedSize().offset(x: 1 * k, y: 2 * k)
             }
-            .frame(width: w * k, height: h * k, alignment: .topLeading).clipped()
-            .offset(x: x * k, y: y * k).allowsHitTesting(false)
+            .frame(width: 1, height: 1, alignment: .topLeading).allowsHitTesting(false)
         }
     }
     private func hit(_ cmd: String, _ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ k: CGFloat) -> some View {
