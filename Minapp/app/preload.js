@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('bridge', {
   quit: () => ipcRenderer.send('app:quit'),
   lastSkin: () => ipcRenderer.invoke('skin:last'),
   onSkin: (cb) => ipcRenderer.on('skin:load', (_e, buf) => cb(buf)),
+  vizBars: (b) => ipcRenderer.send('viz:bars', b),
   widgetGet: () => ipcRenderer.invoke('widget:get'),
   widgetSet: (m) => ipcRenderer.send('widget:set', m),
   onWidget: (cb) => ipcRenderer.on('widget:mode', (_e, m) => cb(m)),
