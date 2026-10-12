@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AAAA0000000000000000D002 = {isa = PBXBuildFile; fileRef = AAAA0000000000000000D001; };
+		AAAA0000000000000000D003 = {isa = PBXBuildFile; fileRef = AAAA0000000000000000D001; };
+		AAAA0000000000000000B001 = {isa = PBXBuildFile; fileRef = AAAA0000000000000000F001; };
+		AAAA0000000000000000B002 = {isa = PBXBuildFile; fileRef = AAAA0000000000000000F002; };
 		11800714ACF313BCA947122D = {isa = PBXBuildFile; fileRef = 9E81E7B963C71363E2FB3EEF; };
 		83FFA3AC16C8DBB949C9654B = {isa = PBXBuildFile; fileRef = 9E81E7B963C71363E2FB3EEF; };
 		A3DDF331F9A07E0A3F92CF53 = {isa = PBXBuildFile; fileRef = F521E481E0E5BC7AFE57509B; };
@@ -23,6 +27,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AAAA0000000000000000D001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Shared/Digits.swift"; sourceTree = "<group>"; };
+		AAAA0000000000000000F001 = {isa = PBXFileReference; lastKnownFileType = file; path = "Extension/Fonts/MinappLED.ttf"; sourceTree = "<group>"; };
+		AAAA0000000000000000F002 = {isa = PBXFileReference; lastKnownFileType = file; path = "Extension/Fonts/MinappLEDGhost.ttf"; sourceTree = "<group>"; };
 		9E81E7B963C71363E2FB3EEF = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Shared/Shared.swift"; sourceTree = "<group>"; };
 		F521E481E0E5BC7AFE57509B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Host/MinappWidgetApp.swift"; sourceTree = "<group>"; };
 		8574805573E034A9F1C77124 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Extension/MinappWidget.swift"; sourceTree = "<group>"; };
@@ -40,22 +47,26 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		63A9F0EA7BB98050796B649E = {isa = PBXGroup; children = (9E81E7B963C71363E2FB3EEF, F521E481E0E5BC7AFE57509B, A3C8588BBAA4DB3B93C59557, D6528E199903B89D20C7E24E, 8574805573E034A9F1C77124, 8A87EDAB2BF952CBBE2369FD, 0793046CD12DB418149C2B68, F82C06BF29B68F0EB5A72E1D, ); sourceTree = "<group>"; };
+		63A9F0EA7BB98050796B649E = {isa = PBXGroup; children = (AAAA0000000000000000D001, AAAA0000000000000000F001, AAAA0000000000000000F002, 9E81E7B963C71363E2FB3EEF, F521E481E0E5BC7AFE57509B, A3C8588BBAA4DB3B93C59557, D6528E199903B89D20C7E24E, 8574805573E034A9F1C77124, 8A87EDAB2BF952CBBE2369FD, 0793046CD12DB418149C2B68, F82C06BF29B68F0EB5A72E1D, ); sourceTree = "<group>"; };
 		F82C06BF29B68F0EB5A72E1D = {isa = PBXGroup; children = (87AB5880F0599E9E143202D0, 7224446F3EA5D5A8B5BE1CD9, ); name = Products; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
 		F2BEAC489AE2471F4280DFF0 = {isa = PBXNativeTarget; buildConfigurationList = 448C1C256505AEA835D5D4F0; buildPhases = (EE7F144C81948F17D71D7662, 5D050B49E230C4E888B0A8E3, 425893CE4AEDF359C5F0F0D7, ); buildRules = (); dependencies = (2254342BECCEAFBD04538E0A, ); name = MinappWidget; productName = MinappWidget; productReference = 87AB5880F0599E9E143202D0; productType = "com.apple.product-type.application"; };
-		3E619C83DFD0065535F5566E = {isa = PBXNativeTarget; buildConfigurationList = D6D410834ACAAE39EEB17FD4; buildPhases = (5880004FD42076377F2E6453, B269F109C563662CBF4CAC72, ); buildRules = (); dependencies = (); name = MinappWidgetExtension; productName = MinappWidgetExtension; productReference = 7224446F3EA5D5A8B5BE1CD9; productType = "com.apple.product-type.app-extension"; };
+		3E619C83DFD0065535F5566E = {isa = PBXNativeTarget; buildConfigurationList = D6D410834ACAAE39EEB17FD4; buildPhases = (5880004FD42076377F2E6453, B269F109C563662CBF4CAC72, AAAA0000000000000000C001, ); buildRules = (); dependencies = (); name = MinappWidgetExtension; productName = MinappWidgetExtension; productReference = 7224446F3EA5D5A8B5BE1CD9; productType = "com.apple.product-type.app-extension"; };
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
 		4DC844ABCCFC0D132D087C1C = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 1500; LastUpgradeCheck = 1500; }; buildConfigurationList = 9873F885523C5B8D7C91F5AE; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base, ); mainGroup = 63A9F0EA7BB98050796B649E; productRefGroup = F82C06BF29B68F0EB5A72E1D; projectDirPath = ""; projectRoot = ""; targets = (F2BEAC489AE2471F4280DFF0, 3E619C83DFD0065535F5566E, ); };
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		AAAA0000000000000000C001 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (AAAA0000000000000000B001, AAAA0000000000000000B002, ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
-		EE7F144C81948F17D71D7662 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A3DDF331F9A07E0A3F92CF53, 11800714ACF313BCA947122D, ); runOnlyForDeploymentPostprocessing = 0; };
-		5880004FD42076377F2E6453 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (0F2820BDD1C566CCBAC745E0, 83FFA3AC16C8DBB949C9654B, ); runOnlyForDeploymentPostprocessing = 0; };
+		EE7F144C81948F17D71D7662 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A3DDF331F9A07E0A3F92CF53, 11800714ACF313BCA947122D, AAAA0000000000000000D002, ); runOnlyForDeploymentPostprocessing = 0; };
+		5880004FD42076377F2E6453 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (0F2820BDD1C566CCBAC745E0, 83FFA3AC16C8DBB949C9654B, AAAA0000000000000000D003, ); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */

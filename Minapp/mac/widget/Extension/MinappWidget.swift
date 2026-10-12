@@ -28,6 +28,26 @@ struct NowEntry: TimelineEntry {
     let state: NowPlayingState
     var frame: NSImage? = nil
     var stale = false
+    var frameData: Data? = nil
+}
+
+/// tiny diagnostic log next to the cached frame: when the system calls us and what came back
+func wlog(_ m: String) {
+    guard let d = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("widget.log") else { return }
+    let line = "\(Date().formatted(.iso8601)) \(m)\n"
+    if let h = try? FileHandle(forWritingTo: d) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() } else { try? Data(line.utf8).write(to: d) }
+}
+
+let MINIMAL = false
+let CLOCK = true  // sprite digits, no custom fonts
+
+enum Fonts {
+    static let registered: Bool = {
+        for n in ["MinappLED", "MinappLEDGhost"] {
+            if let u = Bundle.main.url(forResource: n, withExtension: "ttf") { CTFontManagerRegisterFontsForURL(u as CFURL, .process, nil) }
+        }
+        return true
+    }()
 }
 
 struct Provider: TimelineProvider {
@@ -39,17 +59,27 @@ struct Provider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<NowEntry>) -> Void) {
         // never block: every network call has a short timeout and falls back to "not playing", so the widget cannot end up blank
         Task {
+            let t = Date()
             let e = await load()
-            var entries = [e]
-            if e.state.playing && e.frame == nil && !e.state.bars.isEmpty {
-                for i in 1...8 {
-                    var t = e.state
-                    t.bars = e.state.bars.enumerated().map { j, v in max(4, min(100, v + Int(sin(Double(i * 2 + j * 3)) * 18))) }
-                    entries.append(NowEntry(date: .now.addingTimeInterval(Double(i) * 1.5), state: t))
-                }
+            wlog("getTimeline \(context.family.rawValue) took \(Int(Date().timeIntervalSince(t) * 1000)) ms live=\(e.state.isLive) playing=\(e.state.playing) frame=\(e.frame != nil) stale=\(e.stale)")
+            guard e.state.playing, !e.stale else {
+                return completion(Timeline(entries: [e], policy: .after(.now.addingTimeInterval(20))))
             }
-            entries.append(NowEntry(date: .now.addingTimeInterval(25), state: e.state, frame: e.frame))
-            completion(Timeline(entries: entries, policy: .after(.now.addingTimeInterval(e.state.playing ? 5 : 20))))
+            // Grab a run of pictures about 1.4 s apart (Minapp takes a new one at most every 1.5 s) and show them in order:
+            // entries inside one timeline play on schedule without using the reload budget. A tail of one-per-second entries
+            // keeps the clock ticking if the next reload is late.
+            var frames: [NSImage] = e.frame.map { [$0] } ?? []
+            for _ in 0..<9 {
+                try? await Task.sleep(nanoseconds: 1_400_000_000)
+                if let d = await Shared.readFrame(), let im = NSImage(data: d) { frames.append(im) }
+            }
+            let t0 = Date.now
+            let entries = (0..<60).map { i -> NowEntry in
+                let fi = min(frames.count - 1, Int(Double(i) / 1.45))
+                return NowEntry(date: t0.addingTimeInterval(Double(i)), state: e.state, frame: fi >= 0 ? frames[fi] : e.frame)
+            }
+            wlog("timeline built: \(frames.count) frames, \(Int(Date().timeIntervalSince(t)*1000)) ms")
+            completion(Timeline(entries: entries, policy: .after(t0.addingTimeInterval(14))))
         }
     }
     private func load() async -> NowEntry {
@@ -59,7 +89,7 @@ struct Provider: TimelineProvider {
         let data = await fr
         let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("last-frame.png")
         if state.isLive, let data, let cache { try? data.write(to: cache) }
-        if state.isLive { return NowEntry(date: .now, state: state, frame: data.flatMap { NSImage(data: $0) }) }
+        if state.isLive { return NowEntry(date: .now, state: state, frame: data.flatMap { NSImage(data: $0) }, frameData: data) }
         // Minapp closed or the Mac just woke: keep the last picture, dimmed by the view, instead of going blank
         let old = cache.flatMap { try? Data(contentsOf: $0) }.flatMap { NSImage(data: $0) }
         return NowEntry(date: .now, state: state, frame: old, stale: old != nil)
@@ -79,6 +109,23 @@ extension Image {
     @ViewBuilder func widgetFull() -> some View {
         if #available(macOS 15.0, *) { self.widgetAccentedRenderingMode(.fullColor) } else { self }
     }
+}
+
+/// the skin's thin 9x13 seven-segment digits, drawn one skin pixel at a time
+func drawDigit(_ ctx: inout GraphicsContext, _ n: Int, x: CGFloat, y: CGFloat, k: CGFloat) {
+    //           top    upper-left upper-right middle lower-left lower-right bottom
+    let seg: [[Bool]] = [
+        [true, true, true, false, true, true, true], [false, false, true, false, false, true, false],
+        [true, false, true, true, true, false, true], [true, false, true, true, false, true, true],
+        [false, true, true, true, false, true, false], [true, true, false, true, false, true, true],
+        [true, true, false, true, true, true, true], [true, false, true, false, false, true, false],
+        [true, true, true, true, true, true, true], [true, true, true, true, false, true, true]]
+    let on = seg[max(0, min(9, n))]
+    let c = GraphicsContext.Shading.color(Color(red: 0.30, green: 0.96, blue: 0.38))
+    func px(_ rx: CGFloat, _ ry: CGFloat, _ rw: CGFloat, _ rh: CGFloat) { ctx.fill(Path(CGRect(x: x + rx * k, y: y + ry * k, width: rw * k, height: rh * k)), with: c) }
+    if on[0] { px(1, 0, 7, 1) }; if on[3] { px(1, 6, 7, 1) }; if on[6] { px(1, 12, 7, 1) }
+    if on[1] { px(0, 0, 1, 7) }; if on[4] { px(0, 6, 1, 7) }
+    if on[2] { px(8, 0, 1, 7) }; if on[5] { px(8, 6, 1, 7) }
 }
 
 // MARK: - Look (the Minapp window: steel-blue bevel, black LCD, green LED)
@@ -161,7 +208,9 @@ struct MinappWidgetView: View {
     private var small: Bool { family == .systemSmall }
 
     var body: some View {
-        if let img = entry.frame { frameView(img).opacity(entry.stale ? 0.45 : 1).overlay(alignment: .bottom) { if entry.stale { Text("MINAPP IS NOT PLAYING").font(Skin.led(8)).foregroundStyle(Skin.led).padding(2).background(Skin.lcd) } } } else { drawn }
+        // let _ = wlog("body \(family.rawValue) frame=\(entry.frame.map { "\($0.size.width)x\($0.size.height)" } ?? "nil") date=\(entry.date.formatted(.iso8601))")
+        if MINIMAL { VStack { Text(s.title).font(.headline); Text("R \(Int(entry.date.timeIntervalSince1970) % 1000)"); Rectangle().fill(.green).frame(height: 20) }.foregroundColor(.white) } else if let img = entry.frame { frameView(img).opacity(entry.stale ? 0.45 : 1)
+            .overlay(alignment: .bottom) { if entry.stale { Text("MINAPP IS NOT PLAYING").font(Skin.led(8)).foregroundStyle(Skin.led).padding(2).background(Skin.lcd) } } } else { drawn }
     }
 
     /// the real player picture: whole window for medium, the clock + visualizer corner for small
@@ -201,14 +250,21 @@ struct MinappWidgetView: View {
             .offset(x: -x * k, y: -y * k)
             .frame(width: w * k, height: h * k, alignment: .topLeading).clipped()
     }
-    /// the picture's clock is a still from a few seconds ago; draw a ticking one over it
+    /// the picture's clock is a still from a moment ago: draw the skin's own LED digits (MinappLED fonts) for this entry's time
     @ViewBuilder private func liveClock(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat, k: CGFloat) -> some View {
-        if let range, s.playing, !entry.stale {
-            ZStack {
-                Skin.lcd
-                Text(timerInterval: range, countsDown: false).font(.system(size: h * k * 0.95, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Skin.led).monospacedDigit().minimumScaleFactor(0.5).lineLimit(1)
-            }.frame(width: w * k, height: h * k).offset(x: x * k, y: y * k)
+        if CLOCK, live, !entry.stale {
+            let pos = s.position + (s.playing ? max(0, entry.date.timeIntervalSince1970 - s.updated) : 0)
+            let t = Int(min(max(pos, 0), 5999))
+            let d = [t / 60 / 10, t / 60 % 10, t % 60 / 10, t % 60 % 10]
+            // the skin's digit cells: x 48, 60, 78, 90 and y 26 (the clock block starts at skin x47 y24)
+            ZStack(alignment: .topLeading) {
+                ForEach(0..<4, id: \.self) { i in
+                    Image(nsImage: Digits.images[d[i]]).resizable().interpolation(.none)
+                        .frame(width: 9 * k, height: 13 * k)
+                        .offset(x: (x + [1.0, 13, 31, 43][i]) * k, y: (y + 2) * k)
+                }
+            }
+            .frame(width: 1, height: 1, alignment: .topLeading).allowsHitTesting(false)
         }
     }
     private func hit(_ cmd: String, _ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ k: CGFloat) -> some View {
@@ -295,7 +351,7 @@ struct MinappWidget: Widget {
     let kind = "MinappNowPlaying"
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: Provider()) { entry in
-            MinappWidgetView(entry: entry).containerBackground(Skin.panelLo, for: .widget)
+            MinappWidgetView(entry: entry).unredacted().transaction { $0.animation = nil }.contentTransition(.identity).containerBackground(Skin.panelLo, for: .widget)
         }
         .configurationDisplayName("Minapp")
         .description("What Minapp is playing, with play, pause, next and previous.")
