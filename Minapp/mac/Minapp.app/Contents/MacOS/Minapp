@@ -73,6 +73,8 @@ build_engine() {
   P="$E/Contents/Info.plist"; PB=/usr/libexec/PlistBuddy
   setp() { "$PB" -c "Set :$1 $2" "$P" 2>/dev/null || "$PB" -c "Add :$1 string $2" "$P" 2>/dev/null; }
   setp CFBundleName Minapp; setp CFBundleDisplayName Minapp; setp CFBundleIdentifier com.minapp.player
+  setp NSAudioCaptureUsageDescription "Minapp listens to the music that is playing so the visualizer can move with it."
+  setp NSScreenCaptureUsageDescription "Minapp listens to the music that is playing so the visualizer can move with it. It never records the screen."
   setp NSAppleEventsUsageDescription "Minapp reads what the Spotify app is playing and sends it play, pause and skip commands."
   # the file was modified, so give it a fresh (ad-hoc, free) signature; Apple silicon refuses unsigned code
   xattr -cr "$E" 2>/dev/null

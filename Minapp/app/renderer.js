@@ -43,6 +43,42 @@
   webamp.onClose(() => api.quit());
   await webamp.renderWhenReady(document.getElementById('app'));
 
+  // ----- macOS: keep Milkdrop (WebGL) cheap -----
+  // On a Retina screen with the window scaled up, Butterchurn would render at DPR x zoom (up to 4x per axis) inside a
+  // transparent window, which the Mac compositor handles badly (stutter, tearing, everything slows down). While the
+  // Milkdrop window is open, Butterchurn gets a 1:1 pixel ratio and animation frames are paced to 30 fps.
+  const isMacUi = /Mac/i.test(navigator.platform || '');
+  let milkOpen = false;
+  if (isMacUi) {
+    const dprDesc = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
+    if (dprDesc && dprDesc.get) {
+      Object.defineProperty(window, 'devicePixelRatio', { configurable: true, get: () => (milkOpen ? Math.min(dprDesc.get.call(window), 1) : dprDesc.get.call(window)) });
+    }
+    const nativeRaf = window.requestAnimationFrame.bind(window), nativeCaf = window.cancelAnimationFrame.bind(window);
+    let nextId = 1, lastAdmit = 0;
+    const live = new Map(); // our id -> the native id currently standing in for it
+    window.requestAnimationFrame = (cb) => {
+      const id = nextId++;
+      const run = (ts) => {
+        if (milkOpen && ts !== lastAdmit) { // callbacks sharing a frame share its timestamp, so they pass or wait together
+          if (ts - lastAdmit < 30) { live.set(id, nativeRaf(run)); return; }
+          lastAdmit = ts;
+        }
+        live.delete(id);
+        cb(ts);
+      };
+      live.set(id, nativeRaf(run));
+      return id;
+    };
+    window.cancelAnimationFrame = (id) => { if (live.has(id)) { nativeCaf(live.get(id)); live.delete(id); } };
+    try {
+      webamp.store.subscribe(() => {
+        const m = webamp.store.getState().windows.genWindows.milkdrop;
+        milkOpen = !!(m && m.open);
+      });
+    } catch (e) { console.warn('milkdrop pacing unavailable', e); }
+  }
+
   // ----- skins -----
   const loadSkinBuf = (buf) => {
     const url = URL.createObjectURL(new Blob([buf], { type: 'application/zip' }));
@@ -84,10 +120,43 @@
     } catch (e) { console.warn('restack failed', e); }
   }
 
+  // Webamp shoves its windows back into view when the viewport shrinks (the small widget is smaller than the player),
+  // which would slide the skin out of the crop: put everything back at the corner after every resize.
+  window.addEventListener('resize', () => { if (widgetMode === 'off') return; for (const ms of [0, 60, 250]) setTimeout(() => { lastSig = ''; restack(); }, ms); });
+
   // Webamp clamps menus to the viewport, so open the viewport up *before* the
   // menu appears (O button / right-click), then shrink back once it closes.
   let expandUntil = 0;
   const expand = () => { expandUntil = Date.now() + 1500; };
+
+
+  // ----- widget mode: compact, always-on-top versions of the player (set from the menu) -----
+  //  small: only the clock and the live visualizer, cropped out of the skin's main window
+  //  large: the main window with the queue below it (no equalizer / Milkdrop)
+  // Both are the real player, so every button, animation and skin keeps working.
+  const SMALL = { w: 108, h: 62 };
+  let widgetMode = 'off';
+  const windowOpen = (id) => { try { const g = webamp.store.getState().windows.genWindows[id]; return !!(g && g.open); } catch { return false; } };
+  function setWidget(mode, fromUser) {
+    mode = mode === 'small' || mode === 'large' ? mode : 'off';
+    widgetMode = mode;
+    const root = document.documentElement, app = document.getElementById('app');
+    root.classList.toggle('widget-small', mode === 'small');
+    root.classList.toggle('widget-large', mode === 'large');
+    app.style.cssText = mode === 'small' ? `width:${SMALL.w}px;height:${SMALL.h}px;overflow:hidden;box-shadow:0 0 0 1px rgba(0,0,0,.55)` : '';
+    if (mode !== 'off') {
+      for (const id of ['milkdrop', 'equalizer']) if (windowOpen(id)) webamp.store.dispatch({ type: 'TOGGLE_WINDOW', windowId: id });
+      const shaded = document.querySelector('#main-window.shade');
+      if (shaded) document.querySelector('#shade')?.click();
+    }
+    // the queue is open in the large widget, closed in the small one; leaving widget mode keeps whatever is open
+    if (mode === 'large' && !windowOpen('playlist')) webamp.store.dispatch({ type: 'TOGGLE_WINDOW', windowId: 'playlist' });
+    if (mode === 'small' && windowOpen('playlist')) webamp.store.dispatch({ type: 'TOGGLE_WINDOW', windowId: 'playlist' });
+    lastSig = ''; lw = 0; lh = 0;
+    if (fromUser) api.widgetSet(mode);
+  }
+  api.onWidget((m) => setWidget(m, false));
+  api.widgetGet().then((m) => { if (m && m !== 'off') setWidget(m, false); }).catch(() => {});
 
   // keep the Electron window sized to the Winamp windows (and any open menu)
   let lw = 0, lh = 0;
@@ -110,7 +179,8 @@
       if (m && m.open) { right = Math.max(right, 275 + 275); bottom = Math.max(bottom, 232); }
     } catch {}
     let w = Math.round(right), h = Math.round(bottom);
-    if (Date.now() < expandUntil) { w = Math.max(w, 420); h = Math.max(h, 400); }
+    if (widgetMode === 'small') { w = SMALL.w; h = SMALL.h; }
+    else if (Date.now() < expandUntil) { w = Math.max(w, 420); h = Math.max(h, 400); }
     if (w && h && (w !== lw || h !== lh)) { lw = w; lh = h; api.size(w, h); }
   }, 150);
 
@@ -122,7 +192,8 @@
 
   // drag the window by the skin's title bar (no CSS drag regions, so menus stay clickable)
   document.addEventListener('mousedown', (e) => {
-    if (e.button !== 0 || !e.target.closest('#title-bar') || e.target.closest('#option, #minimize, #shade, #close')) return;
+    const grab = widgetMode === 'small' ? e.target.closest('#main-window') && !e.target.closest('#time, #visualizer') : e.target.closest('#title-bar');
+    if (e.button !== 0 || !grab || e.target.closest('#option, #minimize, #shade, #close')) return;
     e.stopPropagation();
     api.dragStart();
   }, true);
@@ -217,6 +288,39 @@
     await startCapture(mode);
     return mode.kind;
   };
+
+  // Spotify on a Mac can't be listened to (Electron only offers system-audio capture on Windows), so the analyser would
+  // sit silent and neither the bars under the timer nor Milkdrop would move. While a song plays with nothing captured,
+  // feed the analyser a soft pulsing noise instead, so both animate. It never reaches the speakers (the analyser is a side branch).
+  let synth = null;
+  function setSynth(on) {
+    if (!on) {
+      if (!synth) return;
+      clearInterval(synth.timer);
+      try { synth.src.stop(); synth.src.disconnect(); synth.lp.disconnect(); synth.g.disconnect(); } catch {}
+      synth = null;
+      return;
+    }
+    if (synth) return;
+    const ctx = media._context;
+    if (ctx.state !== 'running') ctx.resume().catch(() => {});
+    const n = ctx.sampleRate * 2, buf = ctx.createBuffer(1, n, ctx.sampleRate), ch = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) ch[i] = Math.random() * 2 - 1;
+    const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2000;
+    const g = ctx.createGain(); g.gain.value = 0;
+    src.connect(lp); lp.connect(g); g.connect(media._analyser); src.start();
+    let phase = 0, level = 0.5, bright = 2000;
+    const timer = setInterval(() => {
+      phase += 0.06 * (2 * Math.PI) * 2.1; // roughly a beat every 0.48 s
+      const beat = Math.pow(Math.max(0, Math.sin(phase)), 3);
+      level += (0.55 + 0.45 * Math.random() - level) * 0.3;
+      bright += ((500 + Math.random() * 6000) - bright) * 0.25;
+      g.gain.setTargetAtTime(0.04 + 0.5 * beat * level, ctx.currentTime, 0.03);
+      lp.frequency.setTargetAtTime(bright, ctx.currentTime, 0.05);
+    }, 60);
+    synth = { src, lp, g, timer };
+  }
   const eqRouted = () => !!cap && cap.kind === 'eq'; // Webamp's own volume already controls what is heard
 
   // the EQ sliders drive Equalizer APO (Spotify on Windows) through the main process, and are remembered
@@ -473,6 +577,7 @@
     try {
       const s = await api.state();
       lastStatus = s.status;
+      if (s.status !== 'playing') setSynth(false);
       document.documentElement.classList.toggle('src-youtube', s.source === 'youtube');
       const status = webamp.getMediaStatus();
       if (s.status === 'closed' || s.status === 'stopped') {
@@ -486,7 +591,9 @@
         let peak = 0; for (let i = 0; i < d.length; i++) if (d[i] > peak) peak = d[i];
         cap.quiet = peak === 0 ? cap.quiet + 1 : 0;
         if (cap.quiet > 40) { stopCapture(); api.capLost('no sound reached the visualizer for 30 s'); }
+        else if (isMacUi && cap.quiet >= 4) cap.useSynth = true; // capture is running but silent (permission refused?): fake the beat until it restarts
       }
+      setSynth(isMacUi && s.status === 'playing' && (!cap || cap.useSynth));
       if (pendingFix) {
         // Webamp starts the first row; with history above, move playback and the view to the playing song
         const st = webamp.store.getState(), order = st.playlist.trackOrder;
@@ -548,4 +655,17 @@
   }
   kickPoll = (ms) => schedule(ms == null ? 250 : ms);   // after a button press: check soon instead of waiting
   loop();
+
+  // The desktop widget draws its own copy of the visualizer: hand it 12 bars from the analyser once a second (read only).
+  if (/Mac/i.test(navigator.platform || '')) {
+    const widgetBars = new Uint8Array(media._analyser.frequencyBinCount);
+    setInterval(() => {
+      try {
+        media._analyser.getByteFrequencyData(widgetBars);
+        const per = Math.max(1, Math.floor(widgetBars.length * 0.6 / 12)), out = [];
+        for (let b = 0; b < 12; b++) { let m = 0; for (let i = b * per; i < (b + 1) * per; i++) m = Math.max(m, widgetBars[i]); out.push(Math.round(m / 2.55)); }
+        api.vizBars(out);
+      } catch {}
+    }, 1000);
+  }
 })();
