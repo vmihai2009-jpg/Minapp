@@ -58,7 +58,7 @@ struct Provider: TimelineProvider {
             // the picture - bars and scrolling title - steps through the grabbed frames).
             var frames: [NSImage] = e.frame.map { [$0] } ?? []
             var last = e.frameData
-            for _ in 0..<5 {
+            for _ in 0..<2 {
                 try? await Task.sleep(nanoseconds: 1_300_000_000)
                 if let d = await Shared.readFrame(), d != last, let im = NSImage(data: d) { frames.append(im); last = d }
             }
