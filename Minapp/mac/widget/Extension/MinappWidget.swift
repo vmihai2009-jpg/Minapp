@@ -117,6 +117,22 @@ func drawDigit(_ ctx: inout GraphicsContext, _ n: Int, x: CGFloat, y: CGFloat, k
     if on[2] { px(8, 0, 1, 7) }; if on[5] { px(8, 6, 1, 7) }
 }
 
+/// a 9x13 patch of the LCD background: black with the skin's dot grid (a dot on every even skin pixel), as a bitmap so it keeps
+/// its colours in every widget rendering mode
+enum LcdCellImage {
+    static let image: NSImage = {
+        let ctx = CGContext(data: nil, width: 9, height: 13, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.setFillColor(CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: 9, height: 13))
+        ctx.setFillColor(CGColor(srgbRed: 31 / 255, green: 32 / 255, blue: 53 / 255, alpha: 1))
+        for y in stride(from: 0, to: 13, by: 2) { for x in stride(from: 0, to: 9, by: 2) { ctx.fill(CGRect(x: x, y: 12 - y, width: 1, height: 1)) } }
+        return NSImage(cgImage: ctx.makeImage()!, size: NSSize(width: 9, height: 13))
+    }()
+}
+
+struct LcdCell: View {
+    var body: some View { Image(nsImage: LcdCellImage.image).resizable().interpolation(.none).widgetFull() }
+}
+
 // MARK: - Look (the Minapp window: steel-blue bevel, black LCD, green LED)
 
 enum Skin {
@@ -247,6 +263,7 @@ struct MinappWidgetView: View {
             // the skin's digit cells: x 48, 60, 78, 90 and y 26 (the clock block starts at skin x47 y24)
             ZStack(alignment: .topLeading) {
                 ForEach(0..<4, id: \.self) { i in
+                    LcdCell().frame(width: 9 * k, height: 13 * k).offset(x: (x + [1.0, 13, 31, 43][i]) * k, y: (y + 2) * k)
                     Image(nsImage: Digits.images[d[i]]).resizable().interpolation(.none).widgetFull()
                         .frame(width: 9 * k, height: 13 * k)
                         .offset(x: (x + [1.0, 13, 31, 43][i]) * k, y: (y + 2) * k)
