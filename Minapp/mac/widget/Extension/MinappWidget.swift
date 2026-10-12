@@ -53,25 +53,10 @@ struct Provider: TimelineProvider {
             guard e.state.playing, !e.stale else {
                 return completion(Timeline(entries: [e], policy: .after(.now.addingTimeInterval(20))))
             }
-            // WidgetKit cannot animate, but entries inside one timeline are shown on schedule without costing reload budget:
-            // grab a few pictures a second or so apart now, then show one entry per second (the clock is drawn per entry,
-            // the picture - bars and scrolling title - steps through the grabbed frames).
-            var frames: [NSImage] = e.frame.map { [$0] } ?? []
-            var last = e.frameData
-            for _ in 0..<2 {
-                try? await Task.sleep(nanoseconds: 1_300_000_000)
-                if let d = await Shared.readFrame(), d != last, let im = NSImage(data: d) { frames.append(im); last = d }
-            }
+            // one fetch, no waiting: one entry per second (the clock is drawn per entry from the same picture)
             let t0 = Date.now
-            let span = max(frames.count, 1) * 13 / 10 + 1
-            var entries: [NowEntry] = []
-            for i in 0..<span {
-                let fi = min(frames.count - 1, Int(Double(i) / 1.3))
-                var x = e
-                x = NowEntry(date: t0.addingTimeInterval(Double(i)), state: e.state, frame: fi >= 0 ? frames[fi] : e.frame)
-                entries.append(x)
-            }
-            completion(Timeline(entries: entries, policy: .after(t0.addingTimeInterval(Double(span)))))
+            let entries = (0..<10).map { i in NowEntry(date: t0.addingTimeInterval(Double(i)), state: e.state, frame: e.frame, frameData: nil) }
+            completion(Timeline(entries: entries, policy: .after(t0.addingTimeInterval(10))))
         }
     }
     private func load() async -> NowEntry {
