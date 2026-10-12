@@ -71,30 +71,10 @@ function create({ dir, binDir, log }) {
       p.on('close', (code) => { line(buf); resolve({ ok: files.length > 0, files, error: err.split(/\r?\n/).filter((l) => /ERROR/.test(l)).pop() || (code ? 'yt-dlp exited with code ' + code : '') }); });
     });
   }
-  // List the entries of a YouTube playlist / library page, optionally logged in through the cookies of a browser
-  // that is already signed in (yt-dlp reads them locally; nothing is sent anywhere but to YouTube).
-  // Resolves { ok, items: [{ id, title }], error }.
-  async function list(url, browser, onProgress) {
-    if (!haveBin()) { onProgress('Fetching yt-dlp…'); await fetchBin(); }
-    return new Promise((resolve) => {
-      const args = ['--flat-playlist', '--ignore-errors', '--no-colors', '--playlist-end', '200', '--print', '%(id)s\t%(title)s'];
-      if (browser) args.push('--cookies-from-browser', browser);
-      args.push('--', url);
-      const p = spawn(bin(), args, { windowsHide: true });
-      let out = '', err = '';
-      p.stdout.on('data', (d) => { out += d; });
-      p.stderr.on('data', (d) => { err += d; if (err.length > 4000) err = err.slice(-4000); });
-      p.on('error', (e) => resolve({ ok: false, items: [], error: e.message }));
-      p.on('close', (code) => {
-        const items = out.split(/\r?\n/).map((l) => l.split('\t')).filter((x) => /^[\w-]{6,}$/.test(x[0] || '')).map((x) => ({ id: x[0], title: x[1] || x[0] }));
-        resolve({ ok: items.length > 0, items, error: err.split(/\r?\n/).filter((l) => /ERROR/.test(l)).pop() || (code ? 'yt-dlp exited with code ' + code : '') });
-      });
-    });
-  }
   async function download(url, isList, onProgress, fresh) {
     if (!haveBin() || fresh) { onProgress('Fetching yt-dlp…'); await fetchBin(); }
     return runYtDlp(url, isList, onProgress);
   }
-  return { dir, playlists, tracks, importFiles, audioIn, download, list, haveBin, safeName };
+  return { dir, playlists, tracks, importFiles, audioIn, download, haveBin, safeName };
 }
 module.exports = { create, AUDIO };
