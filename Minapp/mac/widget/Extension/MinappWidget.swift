@@ -65,10 +65,21 @@ struct Provider: TimelineProvider {
             guard e.state.playing, !e.stale else {
                 return completion(Timeline(entries: [e], policy: .after(.now.addingTimeInterval(20))))
             }
-            // one fetch, no waiting: one entry per second (the clock is drawn per entry from the same picture)
+            // Grab a run of pictures about 1.4 s apart (Minapp takes a new one at most every 1.5 s) and show them in order:
+            // entries inside one timeline play on schedule without using the reload budget. A tail of one-per-second entries
+            // keeps the clock ticking if the next reload is late.
+            var frames: [NSImage] = e.frame.map { [$0] } ?? []
+            for _ in 0..<9 {
+                try? await Task.sleep(nanoseconds: 1_400_000_000)
+                if let d = await Shared.readFrame(), let im = NSImage(data: d) { frames.append(im) }
+            }
             let t0 = Date.now
-            let entries = (0..<60).map { i in NowEntry(date: t0.addingTimeInterval(Double(i)), state: e.state, frame: e.frame, frameData: nil) }
-            completion(Timeline(entries: entries, policy: .after(t0.addingTimeInterval(55))))
+            let entries = (0..<60).map { i -> NowEntry in
+                let fi = min(frames.count - 1, Int(Double(i) / 1.45))
+                return NowEntry(date: t0.addingTimeInterval(Double(i)), state: e.state, frame: fi >= 0 ? frames[fi] : e.frame)
+            }
+            wlog("timeline built: \(frames.count) frames, \(Int(Date().timeIntervalSince(t)*1000)) ms")
+            completion(Timeline(entries: entries, policy: .after(t0.addingTimeInterval(14))))
         }
     }
     private func load() async -> NowEntry {
