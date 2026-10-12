@@ -583,4 +583,17 @@
   }
   kickPoll = (ms) => schedule(ms == null ? 250 : ms);   // after a button press: check soon instead of waiting
   loop();
+
+  // The desktop widget draws its own copy of the visualizer: hand it 12 bars from the analyser once a second (read only).
+  if (/Mac/i.test(navigator.platform || '')) {
+    const widgetBars = new Uint8Array(media._analyser.frequencyBinCount);
+    setInterval(() => {
+      try {
+        media._analyser.getByteFrequencyData(widgetBars);
+        const per = Math.max(1, Math.floor(widgetBars.length * 0.6 / 12)), out = [];
+        for (let b = 0; b < 12; b++) { let m = 0; for (let i = b * per; i < (b + 1) * per; i++) m = Math.max(m, widgetBars[i]); out.push(Math.round(m / 2.55)); }
+        api.vizBars(out);
+      } catch {}
+    }, 1000);
+  }
 })();

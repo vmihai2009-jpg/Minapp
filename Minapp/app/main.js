@@ -1268,6 +1268,7 @@ app.whenReady().then(() => {
   else if (cfg.source === 'local') setSource('local');
   else if (eqOn) setTimeout(() => { writeApo(true); }, 1500);
   watchSkinLibrary();
+  ipcMain.on('viz:bars', (_e, b) => widgetBridge.setBars(b));
   widgetBridge.init({ doCmd, log }); // macOS desktop widget (mac/widget); a no-op elsewhere
 });
 app.on('window-all-closed', () => app.quit());

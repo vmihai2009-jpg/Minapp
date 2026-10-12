@@ -14,7 +14,7 @@ const { execFile } = require('child_process');
 const PORT = 47831;
 const ALLOWED = new Set(['playpause', 'next', 'previous']);
 const HOST_APPS = ['/Applications/Minapp Widget.app', path.join(os.homedir(), 'Applications', 'Minapp Widget.app')];
-let secret = null, current = null, lastWrite = 0, doCmd = null, log = () => {};
+let bars = [], secret = null, current = null, lastWrite = 0, doCmd = null, log = () => {};
 
 function loadSecret(file) {
   try { secret = fs.readFileSync(file, 'utf8').trim(); } catch {}
@@ -44,6 +44,11 @@ function publish(st) {
   };
 }
 
+// 12 spectrum values (0-100) sampled from the player's analyser about once a second; the widget draws them as its visualizer.
+function setBars(b) {
+  if (Array.isArray(b)) bars = b.slice(0, 12).map((v) => Math.max(0, Math.min(100, Math.round(Number(v) || 0))));
+}
+
 function serve() {
   const srv = http.createServer((req, res) => {
     const ok = secret && req.headers['x-minapp-token'] === secret;
@@ -52,6 +57,7 @@ function serve() {
     if (req.method === 'GET' && url.pathname === '/state') {
       // "updated" is refreshed on read so a long song with no state changes still counts as live while Minapp runs
       const out = Object.assign({}, current || { status: 'closed', title: '', artist: '', id: '', source: 'spotify', duration: 0, position: 0, playing: false }, current ? { updated: Date.now() / 1000, position: current.position + (current.playing ? (Date.now() / 1000 - current.updated) : 0) } : { updated: Date.now() / 1000 });
+      out.bars = current && current.playing ? bars : [];
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(out));
     }
@@ -77,4 +83,4 @@ function init(opts) {
   setInterval(launchHost, 60000);
 }
 
-module.exports = { init, publish };
+module.exports = { init, publish, setBars };
