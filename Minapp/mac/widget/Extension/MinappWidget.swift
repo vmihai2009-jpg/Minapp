@@ -61,7 +61,7 @@ struct Provider: TimelineProvider {
 // MARK: - Look (the Minapp window: steel-blue bevel, black LCD, green LED)
 
 enum Skin {
-    static let panel = Color(red: 0.23, green: 0.29, blue: 0.38)
+    static let panel = Color(red: 0.20, green: 0.25, blue: 0.33)
     static let panelHi = Color(red: 0.42, green: 0.50, blue: 0.62)
     static let panelLo = Color(red: 0.10, green: 0.13, blue: 0.19)
     static let titleA = Color(red: 0.16, green: 0.22, blue: 0.33)
@@ -69,7 +69,8 @@ enum Skin {
     static let lcd = Color.black
     static let led = Color(red: 0.25, green: 1.0, blue: 0.35)
     static let ledDim = Color(red: 0.25, green: 1.0, blue: 0.35).opacity(0.55)
-    static let button = Color(red: 0.55, green: 0.62, blue: 0.72)
+    static let button = Color(red: 0.74, green: 0.82, blue: 0.82)
+    static let gold = Color(red: 0.85, green: 0.74, blue: 0.45)
     static func led(_ size: CGFloat) -> Font { .system(size: size, weight: .bold, design: .monospaced) }
 }
 
@@ -139,17 +140,26 @@ struct MinappWidgetView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("MINAPP").font(.system(size: 9, weight: .heavy, design: .monospaced)).foregroundStyle(.white.opacity(0.9)).tracking(2)
-                Spacer()
+                Text("MINAPP").font(.system(size: 9, weight: .heavy, design: .monospaced)).foregroundStyle(.white.opacity(0.9)).tracking(3)
+                    .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 6).frame(height: 14)
-            .background(LinearGradient(colors: [Skin.titleA, Skin.titleB], startPoint: .leading, endPoint: .trailing))
-            VStack(spacing: 4) {
-                lcd
+            .frame(height: 14)
+            .background(LinearGradient(colors: [Skin.titleA, Skin.titleB, Skin.titleA], startPoint: .leading, endPoint: .trailing))
+            VStack(spacing: 5) {
+                if small {
+                    timeAndBars.frame(maxHeight: .infinity)
+                    titleStrip
+                } else {
+                    HStack(spacing: 5) {
+                        timeAndBars.frame(maxWidth: .infinity)
+                        VStack(spacing: 4) { titleStrip; Spacer(minLength: 0) }.frame(maxWidth: .infinity)
+                    }.frame(maxHeight: .infinity)
+                }
+                seek
                 HStack(spacing: 4) {
-                    RetroButton(symbol: "backward.fill", command: "previous")
+                    RetroButton(symbol: "backward.end.fill", command: "previous")
                     RetroButton(symbol: s.playing ? "pause.fill" : "play.fill", command: "playpause")
-                    RetroButton(symbol: "forward.fill", command: "next")
+                    RetroButton(symbol: "forward.end.fill", command: "next")
                 }
             }.padding(5)
         }
@@ -157,27 +167,42 @@ struct MinappWidgetView: View {
         .modifier(Bevel())
     }
 
-    @ViewBuilder private var lcd: some View {
-        VStack(alignment: .leading, spacing: 2) {
+    /// the app's left LCD: big time with the spectrum under it
+    private var timeAndBars: some View {
+        VStack(alignment: .leading, spacing: 3) {
             if live {
-                HStack(alignment: .top, spacing: 6) {
-                    timeText
-                    if !small { Bars(values: s.bars).frame(maxWidth: .infinity, minHeight: 18, maxHeight: 24) }
-                }
-                if small { Bars(values: s.bars).frame(height: 14) }
-                Text(s.title.uppercased()).font(Skin.led(10)).foregroundStyle(Skin.led).lineLimit(1)
-                Text(s.artist.uppercased()).font(Skin.led(9)).foregroundStyle(Skin.ledDim).lineLimit(1)
+                timeText
+                Bars(values: s.bars).frame(maxHeight: .infinity)
             } else {
-                Text("--:--").font(Skin.led(small ? 20 : 24)).foregroundStyle(Skin.ledDim)
-                Text("MINAPP NOT PLAYING").font(Skin.led(9)).foregroundStyle(Skin.ledDim).lineLimit(1)
+                Text("--:--").font(Skin.led(small ? 22 : 28)).foregroundStyle(Skin.ledDim)
+                Spacer(minLength: 0)
             }
         }
         .padding(5).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Skin.lcd).modifier(Bevel(raised: false))
     }
 
+    /// the app's green title line
+    private var titleStrip: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(live ? s.title.uppercased() : "MINAPP NOT PLAYING").font(Skin.led(small ? 9 : 11)).foregroundStyle(Skin.led).lineLimit(1)
+            if !small && live { Text(s.artist.uppercased()).font(Skin.led(9)).foregroundStyle(Skin.ledDim).lineLimit(1) }
+        }
+        .padding(.horizontal, 5).padding(.vertical, 3).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Skin.lcd).modifier(Bevel(raised: false))
+    }
+
+    @ViewBuilder private var seek: some View {
+        if live, let range, s.playing {
+            ProgressView(timerInterval: range, countsDown: false) { EmptyView() } currentValueLabel: { EmptyView() }
+                .progressViewStyle(.linear).tint(Skin.gold).frame(height: 6)
+        } else if live, s.duration > 0 {
+            ProgressView(value: min(s.position, s.duration), total: s.duration).progressViewStyle(.linear).tint(Skin.gold).frame(height: 6)
+        }
+    }
+
     @ViewBuilder private var timeText: some View {
-        let size: CGFloat = small ? 20 : 26
+        let size: CGFloat = small ? 22 : 28
         if let range, s.playing {
             Text(timerInterval: range, countsDown: false).font(Skin.led(size)).foregroundStyle(Skin.led).monospacedDigit()
         } else {
