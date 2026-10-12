@@ -826,32 +826,48 @@ function setYtHidden(h) {
 }
 
 // ---------- YouTube account + YouTube Music (experiment) ----------
-// Sign-in goes through the user's normal browser (see ytapi.js); the playlists it lists are played by the YouTube player.
+// Google refuses logins inside apps like this one, so the account is borrowed from a browser that is already
+// signed in to YouTube (see ytapi.js). No developer key is needed.
 const ytApi = require('./ytapi').create({
-  shell, dialog, readCfg, writeCfg, askText, log, getWin: () => win, onChange: () => buildMenu(),
+  library: { list: (...a) => library.list(...a) }, readCfg, writeCfg, dialog, log, getWin: () => win, onChange: () => buildMenu(),
 });
 
+async function playYtIds(ids, name) {
+  if (!ids.length) { dialog.showMessageBox(win, { message: `"${name}" has no videos`, detail: 'Nothing to play.' }); return; }
+  writeCfg({ yt: { ids, list: null, v: null, name } });
+  await setSource('youtube');
+}
+
 async function playMyPlaylist(p) {
-  try {
-    const ids = await ytApi.videoIds(p.id);
-    if (!ids.length) { dialog.showMessageBox(win, { message: `"${p.title}" has no videos`, detail: 'Nothing to play.' }); return; }
-    writeCfg({ yt: { ids, list: null, v: null, name: p.title } });
-    await setSource('youtube');
-  } catch (e) {
-    dialog.showMessageBox(win, { type: 'warning', message: 'Could not open that playlist', detail: String((e && e.message) || e) });
+  try { await playYtIds(await ytApi.videoIds(p.id), p.title); }
+  catch (e) {
+    dialog.showMessageBox(win, { type: 'warning', message: 'Could not open that playlist', detail: String((e && e.message) || e) + '\n\nMake sure you are signed in to YouTube in ' + (ytApi.browser() || 'your browser') + ', and allow Minapp when macOS asks to use its saved passwords (keychain).' });
   }
 }
 
+// a pasted link to a private playlist: list its videos with the browser login, then play them
+async function playPrivateLink() {
+  const text = await askForLink();
+  const t = text && parseYouTube(text);
+  if (!t || !t.list) { if (text) dialog.showMessageBox(win, { message: "That isn't a playlist link" }); return; }
+  await playMyPlaylist({ id: t.list, title: 'Playlist' });
+}
+
 function accountMenu() {
-  if (!ytApi.signedIn()) return [{ label: 'Sign in with your browser…', click: () => ytApi.signIn() }];
+  const cur = ytApi.browser();
   const pl = ytApi.playlists();
   return [
-    { label: 'Signed in to YouTube', enabled: false },
-    { label: ytApi.loading() ? 'Loading playlists…' : (ytApi.error() ? 'Could not load: ' + ytApi.error().slice(0, 60) : 'Your playlists'), enabled: false },
-    ...pl.map((p) => ({ label: p.title + (p.count != null ? ` (${p.count})` : ''), click: () => playMyPlaylist(p) })),
-    { type: 'separator' },
-    { label: 'Refresh playlists', click: () => ytApi.refreshPlaylists() },
-    { label: 'Sign out', click: () => ytApi.signOut() },
+    { label: 'Use the YouTube login of:', enabled: false },
+    ...ytApi.BROWSERS.map(([id, name]) => ({ label: name, type: 'radio', checked: cur === id, click: () => { ytApi.setBrowser(id); ytApi.refreshPlaylists(); } })),
+    { label: 'None (public links only)', type: 'radio', checked: !cur, click: () => ytApi.setBrowser('') },
+    ...(cur ? [
+      { type: 'separator' },
+      { label: ytApi.loading() ? 'Loading your playlists…' : 'Your playlists', enabled: false },
+      ...(ytApi.error() && !pl.some((p) => p.id !== 'LL') ? [{ label: 'Playlist list unavailable: use "Open private playlist link…"', enabled: false }] : []),
+      ...pl.map((p) => ({ label: p.title, click: () => playMyPlaylist(p) })),
+      { label: 'Reload playlists', click: () => ytApi.refreshPlaylists() },
+      { label: 'Open private playlist link…', click: playPrivateLink },
+    ] : []),
   ];
 }
 
@@ -1307,7 +1323,6 @@ app.whenReady().then(() => {
   // The experimental mute-and-replay capture is always opt-in.
   if (cfg.eq && ((cfg.source === 'youtube' && cfg.yt) || (cfg.eqPref !== 'capture' && apoDir() && apoEnsureInclude().ok))) eqOn = true;
   buildMenu();
-  if (ytApi.signedIn()) ytApi.refreshPlaylists();
   registerHotkeys();
   app.on('will-quit', () => globalShortcut.unregisterAll());
   // start on YouTube again only if the last session ended there and a link is saved
