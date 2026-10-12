@@ -28,6 +28,7 @@ struct NowEntry: TimelineEntry {
     let state: NowPlayingState
     var frame: NSImage? = nil
     var stale = false
+    var frameData: Data? = nil
 }
 
 struct Provider: TimelineProvider {
@@ -40,16 +41,28 @@ struct Provider: TimelineProvider {
         // never block: every network call has a short timeout and falls back to "not playing", so the widget cannot end up blank
         Task {
             let e = await load()
-            var entries = [e]
-            if e.state.playing && e.frame == nil && !e.state.bars.isEmpty {
-                for i in 1...8 {
-                    var t = e.state
-                    t.bars = e.state.bars.enumerated().map { j, v in max(4, min(100, v + Int(sin(Double(i * 2 + j * 3)) * 18))) }
-                    entries.append(NowEntry(date: .now.addingTimeInterval(Double(i) * 1.5), state: t))
-                }
+            guard e.state.playing, !e.stale else {
+                return completion(Timeline(entries: [e], policy: .after(.now.addingTimeInterval(20))))
             }
-            entries.append(NowEntry(date: .now.addingTimeInterval(25), state: e.state, frame: e.frame))
-            completion(Timeline(entries: entries, policy: .after(.now.addingTimeInterval(e.state.playing ? 5 : 20))))
+            // WidgetKit cannot animate, but entries inside one timeline are shown on schedule without costing reload budget:
+            // grab a few pictures a second or so apart now, then show one entry per second (the clock is drawn per entry,
+            // the picture - bars and scrolling title - steps through the grabbed frames).
+            var frames: [NSImage] = e.frame.map { [$0] } ?? []
+            var last = e.frameData
+            for _ in 0..<5 {
+                try? await Task.sleep(nanoseconds: 1_300_000_000)
+                if let d = await Shared.readFrame(), d != last, let im = NSImage(data: d) { frames.append(im); last = d }
+            }
+            let t0 = Date.now
+            let span = max(frames.count, 1) * 13 / 10 + 1
+            var entries: [NowEntry] = []
+            for i in 0..<span {
+                let fi = min(frames.count - 1, Int(Double(i) / 1.3))
+                var x = e
+                x = NowEntry(date: t0.addingTimeInterval(Double(i)), state: e.state, frame: fi >= 0 ? frames[fi] : e.frame)
+                entries.append(x)
+            }
+            completion(Timeline(entries: entries, policy: .after(t0.addingTimeInterval(Double(span)))))
         }
     }
     private func load() async -> NowEntry {
@@ -59,7 +72,7 @@ struct Provider: TimelineProvider {
         let data = await fr
         let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("last-frame.png")
         if state.isLive, let data, let cache { try? data.write(to: cache) }
-        if state.isLive { return NowEntry(date: .now, state: state, frame: data.flatMap { NSImage(data: $0) }) }
+        if state.isLive { return NowEntry(date: .now, state: state, frame: data.flatMap { NSImage(data: $0) }, frameData: data) }
         // Minapp closed or the Mac just woke: keep the last picture, dimmed by the view, instead of going blank
         let old = cache.flatMap { try? Data(contentsOf: $0) }.flatMap { NSImage(data: $0) }
         return NowEntry(date: .now, state: state, frame: old, stale: old != nil)
@@ -79,6 +92,23 @@ extension Image {
     @ViewBuilder func widgetFull() -> some View {
         if #available(macOS 15.0, *) { self.widgetAccentedRenderingMode(.fullColor) } else { self }
     }
+}
+
+/// the skin's thin 9x13 seven-segment digits, drawn one skin pixel at a time
+func drawDigit(_ ctx: inout GraphicsContext, _ n: Int, x: CGFloat, y: CGFloat, k: CGFloat) {
+    //           top    upper-left upper-right middle lower-left lower-right bottom
+    let seg: [[Bool]] = [
+        [true, true, true, false, true, true, true], [false, false, true, false, false, true, false],
+        [true, false, true, true, true, false, true], [true, false, true, true, false, true, true],
+        [false, true, true, true, false, true, false], [true, true, false, true, false, true, true],
+        [true, true, false, true, true, true, true], [true, false, true, false, false, true, false],
+        [true, true, true, true, true, true, true], [true, true, true, true, false, true, true]]
+    let on = seg[max(0, min(9, n))]
+    let c = GraphicsContext.Shading.color(Color(red: 0.30, green: 0.96, blue: 0.38))
+    func px(_ rx: CGFloat, _ ry: CGFloat, _ rw: CGFloat, _ rh: CGFloat) { ctx.fill(Path(CGRect(x: x + rx * k, y: y + ry * k, width: rw * k, height: rh * k)), with: c) }
+    if on[0] { px(1, 0, 7, 1) }; if on[3] { px(1, 6, 7, 1) }; if on[6] { px(1, 12, 7, 1) }
+    if on[1] { px(0, 0, 1, 7) }; if on[4] { px(0, 6, 1, 7) }
+    if on[2] { px(8, 0, 1, 7) }; if on[5] { px(8, 6, 1, 7) }
 }
 
 // MARK: - Look (the Minapp window: steel-blue bevel, black LCD, green LED)
@@ -201,14 +231,21 @@ struct MinappWidgetView: View {
             .offset(x: -x * k, y: -y * k)
             .frame(width: w * k, height: h * k, alignment: .topLeading).clipped()
     }
-    /// the picture's clock is a still from a few seconds ago; draw a ticking one over it
+    /// the picture's clock is a still from a moment ago: draw the skin's own 7-segment digits over it for this entry's time
     @ViewBuilder private func liveClock(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat, k: CGFloat) -> some View {
-        if let range, s.playing, !entry.stale {
-            ZStack {
-                Skin.lcd
-                Text(timerInterval: range, countsDown: false).font(.system(size: h * k * 0.95, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Skin.led).monospacedDigit().minimumScaleFactor(0.5).lineLimit(1)
-            }.frame(width: w * k, height: h * k).offset(x: x * k, y: y * k)
+        if live, !entry.stale {
+            let pos = s.position + (s.playing ? max(0, entry.date.timeIntervalSince1970 - s.updated) : 0)
+            let t = Int(min(pos, 5999))
+            let d = [t / 60 / 10, t / 60 % 10, t % 60 / 10, t % 60 % 10]
+            // skin coordinates: cells 9x13 at x 48, 60, 78, 90 and y 26 (x/y here are the clock block's offset from the piece origin)
+            let ox = x - 47, oy = y - 24
+            Canvas { ctx, _ in
+                for (i, cx) in [48.0, 60.0, 78.0, 90.0].enumerated() {
+                    let r = CGRect(x: (cx - 1 + ox + 47 - 47) * k, y: (26 - 1 + oy + 24 - 24) * k, width: 11 * k, height: 15 * k)
+                    ctx.fill(Path(r), with: .color(.black))
+                    drawDigit(&ctx, d[i], x: (cx + ox) * k, y: (26 + oy) * k, k: k)
+                }
+            }.frame(width: 275 * k, height: 116 * k, alignment: .topLeading).allowsHitTesting(false)
         }
     }
     private func hit(_ cmd: String, _ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ k: CGFloat) -> some View {
