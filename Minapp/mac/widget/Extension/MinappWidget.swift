@@ -34,20 +34,9 @@ struct NowEntry: TimelineEntry {
 /// tiny diagnostic log next to the cached frame: when the system calls us and what came back
 func wlog(_ m: String) {
     guard let d = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("widget.log") else { return }
+    if let sz = try? FileManager.default.attributesOfItem(atPath: d.path)[.size] as? Int, sz > 200_000 { try? FileManager.default.removeItem(at: d) }
     let line = "\(Date().formatted(.iso8601)) \(m)\n"
     if let h = try? FileHandle(forWritingTo: d) { h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close() } else { try? Data(line.utf8).write(to: d) }
-}
-
-let MINIMAL = false
-let CLOCK = true  // sprite digits, no custom fonts
-
-enum Fonts {
-    static let registered: Bool = {
-        for n in ["MinappLED", "MinappLEDGhost"] {
-            if let u = Bundle.main.url(forResource: n, withExtension: "ttf") { CTFontManagerRegisterFontsForURL(u as CFURL, .process, nil) }
-        }
-        return true
-    }()
 }
 
 struct Provider: TimelineProvider {
@@ -208,8 +197,7 @@ struct MinappWidgetView: View {
     private var small: Bool { family == .systemSmall }
 
     var body: some View {
-        // let _ = wlog("body \(family.rawValue) frame=\(entry.frame.map { "\($0.size.width)x\($0.size.height)" } ?? "nil") date=\(entry.date.formatted(.iso8601))")
-        if MINIMAL { VStack { Text(s.title).font(.headline); Text("R \(Int(entry.date.timeIntervalSince1970) % 1000)"); Rectangle().fill(.green).frame(height: 20) }.foregroundColor(.white) } else if let img = entry.frame { frameView(img).opacity(entry.stale ? 0.45 : 1)
+        if let img = entry.frame { frameView(img).opacity(entry.stale ? 0.45 : 1)
             .overlay(alignment: .bottom) { if entry.stale { Text("MINAPP IS NOT PLAYING").font(Skin.led(8)).foregroundStyle(Skin.led).padding(2).background(Skin.lcd) } } } else { drawn }
     }
 
@@ -252,14 +240,14 @@ struct MinappWidgetView: View {
     }
     /// the picture's clock is a still from a moment ago: draw the skin's own LED digits (MinappLED fonts) for this entry's time
     @ViewBuilder private func liveClock(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat, k: CGFloat) -> some View {
-        if CLOCK, live, !entry.stale {
+        if live, !entry.stale {
             let pos = s.position + (s.playing ? max(0, entry.date.timeIntervalSince1970 - s.updated) : 0)
             let t = Int(min(max(pos, 0), 5999))
             let d = [t / 60 / 10, t / 60 % 10, t % 60 / 10, t % 60 % 10]
             // the skin's digit cells: x 48, 60, 78, 90 and y 26 (the clock block starts at skin x47 y24)
             ZStack(alignment: .topLeading) {
                 ForEach(0..<4, id: \.self) { i in
-                    Image(nsImage: Digits.images[d[i]]).resizable().interpolation(.none)
+                    Image(nsImage: Digits.images[d[i]]).resizable().interpolation(.none).widgetFull()
                         .frame(width: 9 * k, height: 13 * k)
                         .offset(x: (x + [1.0, 13, 31, 43][i]) * k, y: (y + 2) * k)
                 }
