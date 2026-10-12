@@ -271,10 +271,25 @@ async function doCmd(cmd, arg) {
 
 // ---------- Pin (always on top) ----------
 let pinned = false;
+// Widget mode ('small' = clock + visualizer, 'large' = clock + queue) always floats above other apps.
+let widget = 'off';
+function applyOnTop() {
+  if (!win || win.isDestroyed()) return;
+  if (pinned || widget !== 'off') win.setAlwaysOnTop(true, 'screen-saver'); else win.setAlwaysOnTop(false);
+}
+function setWidget(mode, tell) {
+  widget = mode === 'small' || mode === 'large' ? mode : 'off';
+  writeCfg({ widget });
+  applyOnTop();
+  if (tell && win) win.webContents.send('widget:mode', widget);
+  buildMenu();
+}
+ipcMain.handle('widget:get', () => widget);
+ipcMain.on('widget:set', (_e, m) => setWidget(m, false));
 function setPinned(v) {
   pinned = !!v;
   if (win) {
-    if (pinned) win.setAlwaysOnTop(true, 'screen-saver'); else win.setAlwaysOnTop(false);
+    applyOnTop();
     win.webContents.send('pin:state', pinned);
   }
   writeCfg({ onTop: pinned });
@@ -1139,6 +1154,11 @@ function menuItems() {
     { label: 'Equalizer window', click: send('equalizer') },
     { label: 'Milkdrop', accelerator: 'CmdOrCtrl+Shift+K', click: () => win.webContents.send('milkdrop:toggle') },
     { label: 'Mini mode', accelerator: 'CmdOrCtrl+Shift+M', click: () => win.webContents.send('mini:toggle') },
+    { label: 'Widget', submenu: [
+      { label: 'Off (full player)', type: 'radio', checked: widget === 'off', click: () => setWidget('off', true) },
+      { label: 'Small: timer + visualizer', type: 'radio', checked: widget === 'small', accelerator: 'CmdOrCtrl+Shift+W', click: () => setWidget('small', true) },
+      { label: 'Large: timer + playlist', type: 'radio', checked: widget === 'large', accelerator: 'CmdOrCtrl+Alt+W', click: () => setWidget('large', true) },
+    ] },
     { type: 'separator' },
     { label: 'Skins', submenu: skinsMenu() },
     { label: 'Pin on top', type: 'checkbox', checked: pinned, click: () => setPinned(!pinned) },
@@ -1224,7 +1244,8 @@ app.whenReady().then(() => {
   if (isMac && app.dock) { try { app.dock.setIcon(nativeImage.createFromPath(path.join(__dirname, 'icon.png'))); } catch {} }
   setInterval(() => { if (source === 'spotify') refreshSpotifyQueue(); }, 15000); // plus an immediate refresh whenever the song changes or a skip happens
   pinned = !!cfg.onTop;
-  if (pinned) win.setAlwaysOnTop(true, 'screen-saver');
+  widget = cfg.widget === 'small' || cfg.widget === 'large' ? cfg.widget : 'off';
+  applyOnTop();
   win.setVisibleOnAllWorkspaces(true);
   win.loadFile('index.html');
   win.webContents.on('did-finish-load', () => {
