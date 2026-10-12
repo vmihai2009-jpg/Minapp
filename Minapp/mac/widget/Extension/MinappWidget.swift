@@ -170,11 +170,11 @@ struct MinappWidgetView: View {
             if small {
                 // square layout: the real LCD, title line and transport buttons cut from the skin and stacked
                 let w = g.size.width - 12
-                let k1 = w / 108, k2 = w / 156, k3 = w / 118
+                let k1 = w / 102, k2 = w / 156, k3 = w / 118
                 VStack(spacing: 5) {
                     ZStack(alignment: .topLeading) {
-                        piece(img, x: 0, y: 8, w: 108, h: 54, k: k1)
-                        liveClock(x: 47, y: 24 - 8, w: 56, h: 17, k: k1)
+                        piece(img, x: 6, y: 15, w: 102, h: 52, k: k1)
+                        liveClock(x: 47 - 6, y: 24 - 15, w: 56, h: 17, k: k1)
                     }
                     piece(img, x: 109, y: 22, w: 156, h: 17, k: k2)
                     ZStack(alignment: .topLeading) {
