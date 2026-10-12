@@ -4,6 +4,7 @@ const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
 const path = require('path');
+const widgetBridge = require('./widget-bridge');
 
 const isWin = process.platform === 'win32';
 const isMac = process.platform === 'darwin';
@@ -275,7 +276,7 @@ let pinned = false;
 let widget = 'off';
 function applyOnTop() {
   if (!win || win.isDestroyed()) return;
-  if (pinned || widget !== 'off') win.setAlwaysOnTop(true, 'screen-saver'); else win.setAlwaysOnTop(false);
+  if (pinned || (widget !== 'off' && readCfg().widgetTop !== false)) win.setAlwaysOnTop(true, 'screen-saver'); else win.setAlwaysOnTop(false);
 }
 function setWidget(mode, tell) {
   widget = mode === 'small' || mode === 'large' ? mode : 'off';
@@ -534,6 +535,7 @@ function onNowPlaying(st) {
     }
   } catch {}
   updateThumbar(playing);
+  widgetBridge.publish(st);
   const id = st.id || null;
   if (id && id !== lastNowId && st.title) {
     lastNowId = id;
@@ -1158,6 +1160,8 @@ function menuItems() {
       { label: 'Off (full player)', type: 'radio', checked: widget === 'off', click: () => setWidget('off', true) },
       { label: 'Small: timer + visualizer', type: 'radio', checked: widget === 'small', accelerator: 'CmdOrCtrl+Shift+W', click: () => setWidget('small', true) },
       { label: 'Large: timer + playlist', type: 'radio', checked: widget === 'large', accelerator: 'CmdOrCtrl+Alt+W', click: () => setWidget('large', true) },
+      { type: 'separator' },
+      { label: 'Stay on top of other windows', type: 'checkbox', checked: readCfg().widgetTop !== false, click: () => { writeCfg({ widgetTop: readCfg().widgetTop === false }); applyOnTop(); buildMenu(); } },
     ] },
     { type: 'separator' },
     { label: 'Skins', submenu: skinsMenu() },
@@ -1266,5 +1270,15 @@ app.whenReady().then(() => {
   else if (cfg.source === 'local') setSource('local');
   else if (eqOn) setTimeout(() => { writeApo(true); }, 1500);
   watchSkinLibrary();
+  ipcMain.on('viz:bars', (_e, b) => widgetBridge.setBars(b));
+  widgetBridge.init({
+    doCmd, log,
+    // a picture of the player's main window (top-left 275x116 of the page, scaled by the Size setting) for the widget
+    capture: async () => {
+      if (!win || win.isDestroyed() || !win.isVisible() || win.isMinimized()) return null;
+      const img = await win.webContents.capturePage({ x: 0, y: 0, width: Math.round(275 * zoom), height: Math.round(116 * zoom) }, { stayHidden: true });
+      return img.isEmpty() ? null : img.toPNG();
+    },
+  }); // macOS desktop widget (mac/widget); a no-op elsewhere
 });
 app.on('window-all-closed', () => app.quit());
