@@ -348,7 +348,7 @@ struct MinappWidget: Widget {
     let kind = "MinappNowPlaying"
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: Provider()) { entry in
-            MinappWidgetView(entry: entry).transaction { $0.animation = nil }.contentTransition(.identity).containerBackground(Skin.panelLo, for: .widget)
+            MinappWidgetView(entry: entry).unredacted().transaction { $0.animation = nil }.contentTransition(.identity).containerBackground(Skin.panelLo, for: .widget)
         }
         .configurationDisplayName("Minapp")
         .description("What Minapp is playing, with play, pause, next and previous.")
