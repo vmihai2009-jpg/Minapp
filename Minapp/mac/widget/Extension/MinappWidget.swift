@@ -31,6 +31,15 @@ struct NowEntry: TimelineEntry {
     var frameData: Data? = nil
 }
 
+enum Fonts {
+    static let registered: Bool = {
+        for n in ["MinappLED", "MinappLEDGhost"] {
+            if let u = Bundle.main.url(forResource: n, withExtension: "ttf") { CTFontManagerRegisterFontsForURL(u as CFURL, .process, nil) }
+        }
+        return true
+    }()
+}
+
 struct Provider: TimelineProvider {
     func placeholder(in context: Context) -> NowEntry { NowEntry(date: .now, state: sample) }
     func getSnapshot(in context: Context, completion: @escaping (NowEntry) -> Void) {
@@ -189,6 +198,7 @@ struct MinappWidgetView: View {
     private var start: Date { Date(timeIntervalSince1970: s.updated).addingTimeInterval(-s.position) }
     private var range: ClosedRange<Date>? { s.duration > 0 ? start...start.addingTimeInterval(s.duration) : nil }
     private var small: Bool { family == .systemSmall }
+    private let _f = Fonts.registered
 
     var body: some View {
         if let img = entry.frame { frameView(img).opacity(entry.stale ? 0.45 : 1).overlay(alignment: .bottom) { if entry.stale { Text("MINAPP IS NOT PLAYING").font(Skin.led(8)).foregroundStyle(Skin.led).padding(2).background(Skin.lcd) } } } else { drawn }
@@ -231,21 +241,23 @@ struct MinappWidgetView: View {
             .offset(x: -x * k, y: -y * k)
             .frame(width: w * k, height: h * k, alignment: .topLeading).clipped()
     }
-    /// the picture's clock is a still from a moment ago: draw the skin's own 7-segment digits over it for this entry's time
+    /// the picture's clock is a still from a moment ago: draw the skin's own LED digits (MinappLED fonts) for this entry's time
     @ViewBuilder private func liveClock(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat, k: CGFloat) -> some View {
         if live, !entry.stale {
             let pos = s.position + (s.playing ? max(0, entry.date.timeIntervalSince1970 - s.updated) : 0)
             let t = Int(min(pos, 5999))
-            let d = [t / 60 / 10, t / 60 % 10, t % 60 / 10, t % 60 % 10]
-            // skin coordinates: cells 9x13 at x 48, 60, 78, 90 and y 26 (x/y here are the clock block's offset from the piece origin)
-            let ox = x - 47, oy = y - 24
-            Canvas { ctx, _ in
-                for (i, cx) in [48.0, 60.0, 78.0, 90.0].enumerated() {
-                    let r = CGRect(x: (cx - 1 + ox + 47 - 47) * k, y: (26 - 1 + oy + 24 - 24) * k, width: 11 * k, height: 15 * k)
-                    ctx.fill(Path(r), with: .color(.black))
-                    drawDigit(&ctx, d[i], x: (cx + ox) * k, y: (26 + oy) * k, k: k)
+            let txt = String(format: "%02d:%02d", t / 60, t % 60)
+            // black patch at (x, y) over the old digits; the skin's digits start 1 pt right and 2 pt below the patch corner
+            ZStack(alignment: .topLeading) {
+                Skin.lcd
+                ZStack(alignment: .leading) {
+                    Text(txt).font(.custom("MinappLEDGhost", fixedSize: 13 * k)).foregroundColor(Color(red: 24 / 255, green: 33 / 255, blue: 41 / 255))
+                    Text(txt).font(.custom("MinappLED", fixedSize: 13 * k)).foregroundColor(Color(red: 0, green: 248 / 255, blue: 0))
                 }
-            }.frame(width: 275 * k, height: 116 * k, alignment: .topLeading).allowsHitTesting(false)
+                .fixedSize().offset(x: 1 * k, y: 2 * k)
+            }
+            .frame(width: w * k, height: h * k, alignment: .topLeading).clipped()
+            .offset(x: x * k, y: y * k).allowsHitTesting(false)
         }
     }
     private func hit(_ cmd: String, _ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ k: CGFloat) -> some View {
