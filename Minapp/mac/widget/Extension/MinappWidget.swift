@@ -64,8 +64,8 @@ struct Provider: TimelineProvider {
             }
             // one fetch, no waiting: one entry per second (the clock is drawn per entry from the same picture)
             let t0 = Date.now
-            let entries = (0..<60).map { i in NowEntry(date: t0.addingTimeInterval(Double(i)), state: e.state, frame: e.frame, frameData: nil) }
-            completion(Timeline(entries: entries, policy: .after(t0.addingTimeInterval(60))))
+            let entries = (0..<2).map { i in NowEntry(date: t0.addingTimeInterval(Double(i) * 15), state: e.state, frame: e.frame, frameData: nil) }
+            completion(Timeline(entries: entries, policy: .after(t0.addingTimeInterval(30))))
         }
     }
     private func load() async -> NowEntry {
@@ -195,7 +195,10 @@ struct MinappWidgetView: View {
     private let _f = Fonts.registered
 
     var body: some View {
-        if let img = entry.frame { frameView(img).opacity(entry.stale ? 0.45 : 1).overlay(alignment: .bottom) { if entry.stale { Text("MINAPP IS NOT PLAYING").font(Skin.led(8)).foregroundStyle(Skin.led).padding(2).background(Skin.lcd) } } } else { drawn }
+        let _ = wlog("body \(family.rawValue) frame=\(entry.frame.map { "\($0.size.width)x\($0.size.height)" } ?? "nil") date=\(entry.date.formatted(.iso8601))")
+        if let img = entry.frame { frameView(img).opacity(entry.stale ? 0.45 : 1)
+            .overlay(alignment: .topTrailing) { Text("R\(Int(entry.date.timeIntervalSince1970) % 100)").font(.system(size: 7)).foregroundColor(.white).padding(1).background(Color.red) }
+            .overlay(alignment: .bottom) { if entry.stale { Text("MINAPP IS NOT PLAYING").font(Skin.led(8)).foregroundStyle(Skin.led).padding(2).background(Skin.lcd) } } } else { drawn }
     }
 
     /// the real player picture: whole window for medium, the clock + visualizer corner for small
