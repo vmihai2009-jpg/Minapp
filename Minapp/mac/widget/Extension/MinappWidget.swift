@@ -49,7 +49,7 @@ struct Provider: TimelineProvider {
                 }
             }
             entries.append(NowEntry(date: .now.addingTimeInterval(25), state: e.state, frame: e.frame))
-            completion(Timeline(entries: entries, policy: .after(.now.addingTimeInterval(20))))
+            completion(Timeline(entries: entries, policy: .after(.now.addingTimeInterval(e.state.playing ? 5 : 20))))
         }
     }
     private func load() async -> NowEntry {
