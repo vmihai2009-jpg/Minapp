@@ -1,0 +1,138 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		11800714ACF313BCA947122D = {isa = PBXBuildFile; fileRef = 9E81E7B963C71363E2FB3EEF; };
+		83FFA3AC16C8DBB949C9654B = {isa = PBXBuildFile; fileRef = 9E81E7B963C71363E2FB3EEF; };
+		A3DDF331F9A07E0A3F92CF53 = {isa = PBXBuildFile; fileRef = F521E481E0E5BC7AFE57509B; };
+		0F2820BDD1C566CCBAC745E0 = {isa = PBXBuildFile; fileRef = 8574805573E034A9F1C77124; };
+		40032C8F4D3F553104F13371 = {isa = PBXBuildFile; fileRef = 7224446F3EA5D5A8B5BE1CD9; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		431387EB7262E1CFC79B125E = {isa = PBXContainerItemProxy; containerPortal = 4DC844ABCCFC0D132D087C1C; proxyType = 1; remoteGlobalIDString = 3E619C83DFD0065535F5566E; remoteInfo = MinappWidgetExtension; };
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		425893CE4AEDF359C5F0F0D7 = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (40032C8F4D3F553104F13371, ); name = "Embed Foundation Extensions"; runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		9E81E7B963C71363E2FB3EEF = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Shared/Shared.swift"; sourceTree = "<group>"; };
+		F521E481E0E5BC7AFE57509B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Host/MinappWidgetApp.swift"; sourceTree = "<group>"; };
+		8574805573E034A9F1C77124 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Extension/MinappWidget.swift"; sourceTree = "<group>"; };
+		A3C8588BBAA4DB3B93C59557 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Host/Info.plist"; sourceTree = "<group>"; };
+		8A87EDAB2BF952CBBE2369FD = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Extension/Info.plist"; sourceTree = "<group>"; };
+		D6528E199903B89D20C7E24E = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Host/Host.entitlements"; sourceTree = "<group>"; };
+		0793046CD12DB418149C2B68 = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Extension/Extension.entitlements"; sourceTree = "<group>"; };
+		87AB5880F0599E9E143202D0 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Minapp Widget.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7224446F3EA5D5A8B5BE1CD9 = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "MinappWidgetExtension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		5D050B49E230C4E888B0A8E3 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		B269F109C563662CBF4CAC72 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		63A9F0EA7BB98050796B649E = {isa = PBXGroup; children = (9E81E7B963C71363E2FB3EEF, F521E481E0E5BC7AFE57509B, A3C8588BBAA4DB3B93C59557, D6528E199903B89D20C7E24E, 8574805573E034A9F1C77124, 8A87EDAB2BF952CBBE2369FD, 0793046CD12DB418149C2B68, F82C06BF29B68F0EB5A72E1D, ); sourceTree = "<group>"; };
+		F82C06BF29B68F0EB5A72E1D = {isa = PBXGroup; children = (87AB5880F0599E9E143202D0, 7224446F3EA5D5A8B5BE1CD9, ); name = Products; sourceTree = "<group>"; };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		F2BEAC489AE2471F4280DFF0 = {isa = PBXNativeTarget; buildConfigurationList = 448C1C256505AEA835D5D4F0; buildPhases = (EE7F144C81948F17D71D7662, 5D050B49E230C4E888B0A8E3, 425893CE4AEDF359C5F0F0D7, ); buildRules = (); dependencies = (2254342BECCEAFBD04538E0A, ); name = MinappWidget; productName = MinappWidget; productReference = 87AB5880F0599E9E143202D0; productType = "com.apple.product-type.application"; };
+		3E619C83DFD0065535F5566E = {isa = PBXNativeTarget; buildConfigurationList = D6D410834ACAAE39EEB17FD4; buildPhases = (5880004FD42076377F2E6453, B269F109C563662CBF4CAC72, ); buildRules = (); dependencies = (); name = MinappWidgetExtension; productName = MinappWidgetExtension; productReference = 7224446F3EA5D5A8B5BE1CD9; productType = "com.apple.product-type.app-extension"; };
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		4DC844ABCCFC0D132D087C1C = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 1500; LastUpgradeCheck = 1500; }; buildConfigurationList = 9873F885523C5B8D7C91F5AE; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base, ); mainGroup = 63A9F0EA7BB98050796B649E; productRefGroup = F82C06BF29B68F0EB5A72E1D; projectDirPath = ""; projectRoot = ""; targets = (F2BEAC489AE2471F4280DFF0, 3E619C83DFD0065535F5566E, ); };
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		EE7F144C81948F17D71D7662 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A3DDF331F9A07E0A3F92CF53, 11800714ACF313BCA947122D, ); runOnlyForDeploymentPostprocessing = 0; };
+		5880004FD42076377F2E6453 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (0F2820BDD1C566CCBAC745E0, 83FFA3AC16C8DBB949C9654B, ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		2254342BECCEAFBD04538E0A = {isa = PBXTargetDependency; target = 3E619C83DFD0065535F5566E; targetProxy = 431387EB7262E1CFC79B125E; };
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		FA9139DD8B03E3F922556BF8 = {isa = XCBuildConfiguration; buildSettings = {
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+				ENABLE_PREVIEWS = YES;
+				CLANG_ENABLE_MODULES = YES;
+				ONLY_ACTIVE_ARCH = NO;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			}; name = Debug; };
+		BBDCF4D6AB23027DA9796913 = {isa = XCBuildConfiguration; buildSettings = {
+				PRODUCT_NAME = "Minapp Widget";
+				PRODUCT_BUNDLE_IDENTIFIER = com.minapp.widget;
+				INFOPLIST_FILE = Host/Info.plist;
+				CODE_SIGN_ENTITLEMENTS = Host/Host.entitlements;
+				CODE_SIGN_STYLE = Manual; CODE_SIGN_IDENTITY = "-";
+				GENERATE_INFOPLIST_FILE = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+			}; name = Debug; };
+		C964FD5C71DA8A65B1D4C735 = {isa = XCBuildConfiguration; buildSettings = {
+				PRODUCT_NAME = MinappWidgetExtension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.minapp.widget.extension;
+				INFOPLIST_FILE = Extension/Info.plist;
+				CODE_SIGN_ENTITLEMENTS = Extension/Extension.entitlements;
+				CODE_SIGN_STYLE = Manual; CODE_SIGN_IDENTITY = "-";
+				GENERATE_INFOPLIST_FILE = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks";
+				SKIP_INSTALL = YES;
+			}; name = Debug; };
+		FFE2104CCFAB79205AC64460 = {isa = XCBuildConfiguration; buildSettings = {
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+				ENABLE_PREVIEWS = YES;
+				CLANG_ENABLE_MODULES = YES;
+				ONLY_ACTIVE_ARCH = NO;
+			}; name = Release; };
+		30D880826A31FA71F3EB495E = {isa = XCBuildConfiguration; buildSettings = {
+				PRODUCT_NAME = "Minapp Widget";
+				PRODUCT_BUNDLE_IDENTIFIER = com.minapp.widget;
+				INFOPLIST_FILE = Host/Info.plist;
+				CODE_SIGN_ENTITLEMENTS = Host/Host.entitlements;
+				CODE_SIGN_STYLE = Manual; CODE_SIGN_IDENTITY = "-";
+				GENERATE_INFOPLIST_FILE = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+			}; name = Release; };
+		098362909D4C8F8A1CDAEBF8 = {isa = XCBuildConfiguration; buildSettings = {
+				PRODUCT_NAME = MinappWidgetExtension;
+				PRODUCT_BUNDLE_IDENTIFIER = com.minapp.widget.extension;
+				INFOPLIST_FILE = Extension/Info.plist;
+				CODE_SIGN_ENTITLEMENTS = Extension/Extension.entitlements;
+				CODE_SIGN_STYLE = Manual; CODE_SIGN_IDENTITY = "-";
+				GENERATE_INFOPLIST_FILE = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks";
+				SKIP_INSTALL = YES;
+			}; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		9873F885523C5B8D7C91F5AE = {isa = XCConfigurationList; buildConfigurations = (FA9139DD8B03E3F922556BF8, FFE2104CCFAB79205AC64460, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		448C1C256505AEA835D5D4F0 = {isa = XCConfigurationList; buildConfigurations = (BBDCF4D6AB23027DA9796913, 30D880826A31FA71F3EB495E, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		D6D410834ACAAE39EEB17FD4 = {isa = XCConfigurationList; buildConfigurations = (C964FD5C71DA8A65B1D4C735, 098362909D4C8F8A1CDAEBF8, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = 4DC844ABCCFC0D132D087C1C;
+}

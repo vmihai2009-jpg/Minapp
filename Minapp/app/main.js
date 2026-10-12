@@ -4,6 +4,7 @@ const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
 const path = require('path');
+const widgetBridge = require('./widget-bridge');
 
 const isWin = process.platform === 'win32';
 const isMac = process.platform === 'darwin';
@@ -535,6 +536,7 @@ function onNowPlaying(st) {
     }
   } catch {}
   updateThumbar(playing);
+  widgetBridge.publish(st);
   const id = st.id || null;
   if (id && id !== lastNowId && st.title) {
     lastNowId = id;
@@ -1337,5 +1339,6 @@ app.whenReady().then(() => {
   else if (cfg.source === 'local') setSource('local');
   else if (eqOn) setTimeout(() => { writeApo(true); }, 1500);
   watchSkinLibrary();
+  widgetBridge.init({ doCmd, log }); // macOS desktop widget (mac/widget); a no-op elsewhere
 });
 app.on('window-all-closed', () => app.quit());
