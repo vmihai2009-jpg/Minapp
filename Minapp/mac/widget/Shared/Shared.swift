@@ -10,7 +10,24 @@ struct NowPlayingState: Codable, Equatable {
     var duration: Double = 0
     var position: Double = 0
     var playing: Bool = false
+    var bars: [Int] = []     // 12 spectrum values 0-100, empty when nothing plays
     var updated: Double = 0   // unix seconds of the write; a silent file means Minapp is closed
+
+    init() {}
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: K.self)
+        status = try c.decodeIfPresent(String.self, forKey: .status) ?? "closed"
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        artist = try c.decodeIfPresent(String.self, forKey: .artist) ?? ""
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
+        source = try c.decodeIfPresent(String.self, forKey: .source) ?? "spotify"
+        duration = try c.decodeIfPresent(Double.self, forKey: .duration) ?? 0
+        position = try c.decodeIfPresent(Double.self, forKey: .position) ?? 0
+        playing = try c.decodeIfPresent(Bool.self, forKey: .playing) ?? false
+        bars = try c.decodeIfPresent([Int].self, forKey: .bars) ?? []
+        updated = try c.decodeIfPresent(Double.self, forKey: .updated) ?? 0
+    }
+    enum K: String, CodingKey { case status, title, artist, id, source, duration, position, playing, bars, updated }
 
     /// Minapp rewrites the file every few seconds while it runs.
     var isLive: Bool { Date().timeIntervalSince1970 - updated < 20 }
