@@ -1,4 +1,5 @@
-// A small glowing light bulb in the top-left of the player when a newer Minapp is on GitHub. Click: install it.
+// A small glowing light bulb over the menu symbol in the player's top-left corner when a newer Minapp is on GitHub.
+// Click: install it. (Right-click still opens the menu.)
 const PX = [ // 9 x 12 pixel art: Y glass, H highlight, O outline, B base, D dark base
   '..OOOOO..',
   '.OYYYYYO.',
@@ -23,7 +24,7 @@ const svg = () => {
 export function initUpdateBulb(api) {
   const style = document.createElement('style');
   style.textContent = `
-#update-bulb { position: absolute; left: 22px; top: 1px; width: 9px; height: 12px; z-index: 60; cursor: pointer;
+#update-bulb { position: absolute; left: 6px; top: 1px; width: 9px; height: 12px; z-index: 60; cursor: pointer;
   background: ${svg()} no-repeat; image-rendering: pixelated; animation: bulb-glow 1.6s ease-in-out infinite; }
 #update-bulb:hover { filter: brightness(1.2) drop-shadow(0 0 3px #fff36a) drop-shadow(0 0 6px #ffd400); }
 #update-bulb:active { transform: translateY(1px); }

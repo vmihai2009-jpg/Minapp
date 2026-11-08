@@ -4,7 +4,7 @@
 const W = 275, H = 40, BAR_W = 200, THUMB_W = 29, TEXT_W = 259, PCT_CHARS = 4;
 
 // the skin's images live in Webamp's generated style sheet; copy the ones we need onto our own classes
-function skinImage(selector) {
+export function skinImage(selector) {
   for (const sheet of document.styleSheets) {
     let rules; try { rules = sheet.cssRules; } catch { continue; }
     for (let i = rules.length - 1; i >= 0; i--) {
@@ -20,7 +20,7 @@ const charClass = (c) => {
   const d = c.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   return 'character character-' + (d ? d.charCodeAt(0) : 32);
 };
-function setText(el, text) {
+export function setText(el, text) {
   if (el._text === text) return;
   el._text = text;
   el.textContent = '';
