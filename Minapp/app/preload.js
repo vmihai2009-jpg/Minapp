@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('bridge', {
   onUpdate: (cb) => ipcRenderer.on('update:available', (_e, v) => cb(v)),
   updateGet: () => ipcRenderer.invoke('update:get'),
   updateInstall: () => ipcRenderer.send('update:install'),
+  onWhatsNew: (cb) => ipcRenderer.on('whatsnew', (_e, v) => cb(v)),
   onWindowToggle: (cb) => ipcRenderer.on('window:toggle', (_e, id) => cb(id)),
   version: () => ipcRenderer.invoke('app:version'),
   openSkins: () => ipcRenderer.send('skins:open'),

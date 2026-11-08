@@ -164,7 +164,7 @@
     if (document.hidden) return;
     restack();
     // only the few top-level boxes are measured (cheap); a full-tree scan every tick made the playlist feel laggy
-    const els = [...document.querySelectorAll('#main-window, #equalizer-window, #playlist-window, #milkdrop-window, #dl-panel')];
+    const els = [...document.querySelectorAll('#main-window, #equalizer-window, #playlist-window, #milkdrop-window, #dl-panel, #whatsnew-panel')];
     for (const c of document.body.children) {
       if (c.id !== 'app' && !['SCRIPT', 'STYLE'].includes(c.tagName)) els.push(c);
     }
@@ -222,6 +222,7 @@
     }
   }, true);
   api.onDownload((on) => document.documentElement.classList.toggle('downloading', !!on));
+  import('./whatsnew-panel.js').then((m) => m.initWhatsNew(webamp, api)).catch((e) => api.log('whats new failed: ' + e.message));
   import('./update-bulb.js').then((m) => m.initUpdateBulb(api)).catch((e) => api.log('update bulb failed: ' + e.message));
   import('./download-bar.js').then((m) => m.initDownloadBar(webamp, api)).catch((e) => api.log('download bar failed: ' + e.message));
   setInterval(() => { const b = document.getElementById('eject'); if (b) b.title = document.documentElement.classList.contains('src-youtube') ? 'Record: download this YouTube link (personal use)' : ''; }, 1500);

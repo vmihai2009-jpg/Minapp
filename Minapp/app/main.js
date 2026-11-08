@@ -983,6 +983,28 @@ async function installUpdate() {
   }
 }
 
+// After an update (or the first start of a newer version), show what changed since the version that ran last.
+function whatsNew() {
+  const cfg0 = readCfg(), cur = app.getVersion();
+  // versions before 1.8.8 did not record this: an existing setup (it has settings) just sees this version's notes
+  const existing = Object.keys(cfg0).some((k) => k !== 'lastVersion');
+  const last = cfg0.lastVersion || (existing ? '0.0.0' : null);
+  if (last === cur) return;
+  writeCfg({ lastVersion: cur });
+  if (!last || !updater.newer(cur, last)) return; // first install: nothing to compare with
+  let text = '';
+  try { text = fs.readFileSync(path.join(__dirname, 'CHANGELOG.md'), 'utf8'); } catch { return; }
+  const sections = [];
+  for (const sec of text.split(/^## /m).slice(1)) {
+    const v = sec.split(/\r?\n/)[0].trim();
+    if (!updater.newer(v, last) || updater.newer(v, cur)) continue;
+    if (!cfg0.lastVersion && v !== cur) continue;
+    const items = sec.split(/\r?\n/).slice(1).map((l) => l.replace(/^\s*-\s*/, '').trim()).filter(Boolean);
+    sections.push({ version: v, items });
+  }
+  if (sections.length && win && !win.isDestroyed()) win.webContents.send('whatsnew', { version: cur, sections }); // skinned pop-up under the player
+}
+
 let downloading = false;
 async function downloadCurrentYouTube() {
   const t = readCfg().yt;
@@ -1425,6 +1447,7 @@ app.whenReady().then(() => {
   buildMenu();
   if (ytApi.signedIn()) ytApi.refreshPlaylists();
   registerHotkeys();
+  win.webContents.once('did-finish-load', () => setTimeout(whatsNew, 1500));
   // quiet check for a new release at start (at most once a day); the menu then shows "Update available"
   if (Date.now() - (cfg.updCheck || 0) > 864e5) setTimeout(() => checkForUpdate(false), 15000);
   app.on('will-quit', () => globalShortcut.unregisterAll());
