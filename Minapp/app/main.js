@@ -957,6 +957,31 @@ async function checkForUpdate(manual) {
   if (!manual) { new Notification({ title: 'Minapp update available', body: `Version ${info.latest} is ready: open the Minapp menu > Update.` }).show(); return; }
   await installUpdate();
 }
+// Windows: the Spotify/volume helper (PowerShell) keeps skinvol.dll open, which blocks replacing it; stop it first
+// (psCall leaves it stopped while an update runs)
+async function stopHelper() {
+  if (!psProc) return;
+  const p = psProc;
+  await new Promise((r) => { p.once('exit', r); try { p.kill(); } catch { r(); } setTimeout(r, 4000); });
+}
+const versionsDir = () => path.join(app.getPath('userData'), 'versions');
+// Settings > Go back to an earlier version: the last 3 versions are kept by the updater
+async function goBackTo(v) {
+  if (updating) return;
+  const r = await dialog.showMessageBox(win, { type: 'question', buttons: [`Go back to ${v}`, 'Cancel'], defaultId: 1, cancelId: 1,
+    message: `Go back to Minapp ${v}?`, detail: `You have ${app.getVersion()}, which is saved too, so you can return to it the same way. Settings, skins and the library are kept. Minapp restarts.` });
+  if (r.response !== 0) return;
+  updating = true;
+  try {
+    await stopHelper();
+    await updater.restore(v, app.getVersion(), __dirname, versionsDir());
+    log('went back to ' + v);
+    app.relaunch(); app.exit(0);
+  } catch (e) {
+    updating = false;
+    dialog.showMessageBox(win, { type: 'error', message: 'Could not go back', detail: String((e && e.message) || e) });
+  }
+}
 async function installUpdate() {
   const info = updateInfo; if (!info || updating) return;
   const notes = info.notes ? '\n\n' + info.notes : '';
@@ -965,14 +990,10 @@ async function installUpdate() {
   if (r.response !== 0) return;
   if (!info.asset) { shell.openExternal(info.page); return; }
   updating = true;
-  // Windows: the Spotify/volume helper (PowerShell) keeps skinvol.dll open, which blocks replacing it; stop it first
-  if (psProc) {
-    const p = psProc;
-    await new Promise((r) => { p.once('exit', r); try { p.kill(); } catch { r(); } setTimeout(r, 4000); });
-  }
+  await stopHelper();
   const note = (m) => { log('[update] ' + m); try { win.setTitle(m); tray && tray.setToolTip(m); } catch {} lastTitle = ''; };
   try {
-    const v = await updater.install(info, __dirname, note);
+    const v = await updater.install(info, __dirname, note, fetch, versionsDir());
     log('updated to ' + v);
     await dialog.showMessageBox(win, { message: `Updated to version ${v}`, detail: 'Minapp restarts now.' });
     app.relaunch(); app.exit(0);
@@ -1102,7 +1123,7 @@ async function setSource(s) {
 }
 
 ipcMain.on('yt:log', (_e, msg) => log('[youtube] ' + String(msg).slice(0, 300)));
-ipcMain.on('yt:state', (_e, s) => { ytState = s || { status: 'closed' }; });
+ipcMain.on('yt:state', (_e, s) => { const pl = ytState.playlist; ytState = s || { status: 'closed' }; if (ytState.playlist === undefined && pl) ytState.playlist = pl; });
 ipcMain.on('local:log', (_e, msg) => log('[local] ' + String(msg).slice(0, 300)));
 ipcMain.on('local:state', (_e, s) => { localState = s || { status: 'closed' }; });
 
@@ -1355,6 +1376,10 @@ function menuItems() {
       ...(isWin ? [{ label: 'Start with Windows', type: 'checkbox', checked: app.getLoginItemSettings({ path: process.execPath }).openAtLogin,
         click: (mi) => { try { app.setLoginItemSettings({ openAtLogin: mi.checked, path: process.execPath, args: [app.getAppPath()] }); } catch (e) { log('login item failed: ' + e.message); } buildMenu(); } }] : []),
       { type: 'separator' },
+      { label: 'Go back to an earlier version', submenu: (() => {
+        const vs = updater.savedVersions(versionsDir()).filter((v) => v !== app.getVersion());
+        return vs.length ? vs.map((v) => ({ label: `Minapp ${v}`, click: () => goBackTo(v) })) : [{ label: 'None saved yet (kept from the next update on)', enabled: false }];
+      })() },
       { label: 'Open data folder', click: () => shell.openPath(app.getPath('userData')) },
       ...(inMacBundle ? [{ label: 'Uninstall Minapp…', click: () => { const u = path.join(app.getPath('userData'), 'Uninstall Minapp.command'); if (fs.existsSync(u)) shell.openPath(u); } }] : []),
     ] },

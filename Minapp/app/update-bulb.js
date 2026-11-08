@@ -48,6 +48,6 @@ html.widget-small #update-bulb { display: none; }`;
     bulb.title = `Minapp ${version} is ready: click to update`;
   };
   api.onUpdate((v) => { version = v || null; place(); });
-  setInterval(place, 1000); // the skin re-renders the main window when it changes
+  setInterval(() => { if (version) place(); }, 1000); // the skin re-renders the main window when it changes
   api.updateGet().then((v) => { version = v || null; place(); }).catch(() => {});
 }

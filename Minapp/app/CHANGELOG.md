@@ -1,5 +1,9 @@
 # What's new in Minapp
 
+## 1.8.9
+- Faster and lighter: the visualizer is paced like the original Winamp, which halves its drawing work, and long YouTube playlists no longer resend their whole song list twice a second.
+- Go back to an earlier version: Settings, Go back to an earlier version. Minapp keeps the last 3 versions from now on.
+
 ## 1.8.8
 - The update light bulb now sits over the menu symbol in the top-left corner. Right-click still opens the menu.
 - After an update, Minapp shows what's new (this list).
