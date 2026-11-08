@@ -993,7 +993,13 @@ async function downloadCurrentYouTube() {
   downloading = true; buildMenu();
   win.webContents.send('download:state', true);
   const url = t.list ? 'https://www.youtube.com/playlist?list=' + encodeURIComponent(t.list) : 'https://www.youtube.com/watch?v=' + encodeURIComponent(t.v);
-  const note = (m) => { log('[download] ' + m); try { tray && tray.setToolTip(m); win.setTitle(m); } catch {} lastTitle = ''; };
+  let lastLog = '';
+  const note = (m, info) => {
+    const phase = info ? info.phase : '';
+    if (phase !== 'downloading' || m.split(':')[0] !== lastLog) { lastLog = m.split(':')[0]; log('[download] ' + m); } // not every percent
+    try { tray && tray.setToolTip(m.slice(0, 120)); win.setTitle(m); } catch {} lastTitle = '';
+    if (info && win && !win.isDestroyed()) win.webContents.send('download:progress', { ...info, paused: library.isPaused() });
+  };
   try {
     let res = await library.download(url, !!t.list, note);
     if (!res.ok && !res.rateLimited) { note('Updating yt-dlp…'); res = await library.download(url, !!t.list, note, true); } // YouTube changes often: a newer yt-dlp usually fixes it
@@ -1025,7 +1031,7 @@ async function downloadCurrentYouTube() {
     dialog.showMessageBox(win, { type: 'error', message: 'Download failed', detail: String((e && e.message) || e) });
   } finally {
     downloading = false; lastTitle = ''; buildMenu();
-    if (win && !win.isDestroyed()) win.webContents.send('download:state', false);
+    if (win && !win.isDestroyed()) { win.webContents.send('download:state', false); win.webContents.send('download:progress', null); }
   }
 }
 
@@ -1280,7 +1286,8 @@ function menuItems() {
       { type: 'separator' },
       { label: 'Import files…', click: () => importIntoPlaylist(false) },
       { label: 'Import folder…', click: () => importIntoPlaylist(true) },
-      ...(downloading ? [{ label: 'Stop download', click: () => library.cancel() }]
+      ...(downloading ? [{ label: library.isPaused() ? 'Resume download' : 'Pause download', click: () => { library.pause(!library.isPaused()); buildMenu(); } },
+        { label: 'Stop download', click: () => library.cancel() }]
         : source === 'youtube' ? [{ label: 'Download current YouTube link (personal use)…', click: downloadCurrentYouTube }] : []),
       { label: 'Open library folder', click: () => { fs.mkdirSync(library.dir, { recursive: true }); shell.openPath(library.dir); } },
     ] },
@@ -1322,6 +1329,12 @@ function menuItems() {
     { label: 'Quit', click: () => app.quit() },
   ];
 }
+// the progress bar's own pause / resume / stop buttons
+ipcMain.on('download:ctl', (_e, a) => {
+  if (!downloading) return;
+  if (a === 'cancel') library.cancel(); else library.pause(a === 'pause');
+  buildMenu();
+});
 ipcMain.on('menu:show', () => {
   if (win) Menu.buildFromTemplate(menuItems()).popup({ window: win });
 });
