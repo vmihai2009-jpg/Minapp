@@ -222,6 +222,7 @@
     }
   }, true);
   api.onDownload((on) => document.documentElement.classList.toggle('downloading', !!on));
+  import('./update-bulb.js').then((m) => m.initUpdateBulb(api)).catch((e) => api.log('update bulb failed: ' + e.message));
   import('./download-bar.js').then((m) => m.initDownloadBar(webamp, api)).catch((e) => api.log('download bar failed: ' + e.message));
   setInterval(() => { const b = document.getElementById('eject'); if (b) b.title = document.documentElement.classList.contains('src-youtube') ? 'Record: download this YouTube link (personal use)' : ''; }, 1500);
   let modeHoldUntil = 0, holdUntil = 0;
