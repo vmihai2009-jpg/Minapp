@@ -1,9 +1,11 @@
-# Publishing a release: push a tag like v1.8.2 (the tag must match Minapp/app/package.json).
+# Publishing a release: push a tag like v1.8.2 (the tag must match Minapp/app/package.json), or run this workflow
+# by hand from the Actions tab, which releases the version in Minapp/app/package.json.
 # This builds both zips and attaches them to a GitHub Release; Minapp's Update button looks for them there.
 name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
@@ -13,10 +15,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - name: Check tag matches app version
-        run: test "v$(node -p "require('./Minapp/app/package.json').version")" = "$GITHUB_REF_NAME"
+      - name: Work out the version
+        run: |
+          V="v$(node -p "require('./Minapp/app/package.json').version")"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then test "$V" = "$GITHUB_REF_NAME"; fi
+          echo "TAG=$V" >> "$GITHUB_ENV"
       - name: Build zips
         run: ./Minapp/build.sh
       - name: Publish
         env: { GH_TOKEN: '${{ github.token }}' }
-        run: gh release create "$GITHUB_REF_NAME" docs/downloads/Minapp-*-"$GITHUB_REF_NAME".zip --title "Minapp ${GITHUB_REF_NAME#v}" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" docs/downloads/Minapp-*-"$TAG".zip --target "$GITHUB_SHA" --title "Minapp ${TAG#v}" --generate-notes
