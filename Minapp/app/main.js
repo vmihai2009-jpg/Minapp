@@ -949,6 +949,7 @@ async function checkForUpdate(manual) {
   }
   writeCfg({ updCheck: Date.now() });
   updateInfo = info.newer ? info : null; buildMenu();
+  if (win && !win.isDestroyed()) win.webContents.send('update:available', updateInfo ? updateInfo.latest : null);
   if (!info.newer) {
     if (manual) dialog.showMessageBox(win, { message: `Minapp is up to date (version ${app.getVersion()})`, detail: info.none ? 'No release has been published on GitHub yet.' : '' });
     return;
@@ -1163,6 +1164,9 @@ ipcMain.on('win:dragstart', () => {
 ipcMain.on('win:dragend', () => { if (dragTimer) { clearInterval(dragTimer); dragTimer = null; savePos(); } });
 ipcMain.on('app:quit', () => app.quit());
 ipcMain.handle('app:version', () => app.getVersion());
+// the bulb in the player's corner
+ipcMain.handle('update:get', () => (updateInfo ? updateInfo.latest : null));
+ipcMain.on('update:install', () => { installUpdate(); });
 ipcMain.on('app:log', (_e, msg) => log('[ui] ' + String(msg).slice(0, 600)));
 
 // Skins are copied into data/skins so the library travels with the folder and survives the original being moved.
