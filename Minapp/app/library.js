@@ -8,6 +8,17 @@ const crypto = require('crypto');
 const AUDIO = /\.(mp3|m4a|aac|opus|ogg|oga|webm|wav|flac)$/i;
 const safeName = (n) => String(n || '').replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').replace(/^\.+/, '').trim().slice(0, 80) || 'Playlist';
 
+// yt-dlp.exe is a self-unpacking program that runs the real downloader as a second process: killing only the first
+// left the download running (Pause and Stop did nothing). Take down the whole tree.
+function killTree(p) {
+  if (!p || p.exitCode !== null) return;
+  if (process.platform === 'win32') {
+    try { spawn('taskkill', ['/pid', String(p.pid), '/T', '/F'], { windowsHide: true }); } catch { try { p.kill(); } catch {} }
+  } else {
+    try { process.kill(-p.pid, 'SIGTERM'); } catch { try { p.kill(); } catch {} }
+  }
+}
+
 function create({ dir, binDir, log }) {
   const playlists = () => {
     try {
@@ -53,6 +64,33 @@ function create({ dir, binDir, log }) {
   }
   const haveBin = () => fs.existsSync(bin());
 
+  // ----- ffmpeg (only for "Save as MP3"): a static build from the npm registry, checked against its published hash -----
+  const ffBin = () => path.join(binDir, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+  const haveFf = () => fs.existsSync(ffBin());
+  const ffPkg = () => '@ffmpeg-installer/' + (process.platform === 'win32' ? 'win32-x64'
+    : process.platform === 'darwin' ? (process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64') : 'linux-x64');
+  async function fetchFf() {
+    fs.mkdirSync(binDir, { recursive: true });
+    const meta = await (await fetch('https://registry.npmjs.org/' + ffPkg() + '/latest')).json();
+    const r = await fetch(meta.dist.tarball);
+    if (!r.ok) throw new Error('Could not download the MP3 converter (HTTP ' + r.status + ')');
+    const buf = Buffer.from(await r.arrayBuffer());
+    const [algo, want] = String(meta.dist.integrity || '').split('-');
+    if (!want || crypto.createHash(algo).update(buf).digest('base64') !== want) throw new Error('The MP3 converter download was damaged. Try again.');
+    const tmp = fs.mkdtempSync(path.join(binDir, 'ff-'));
+    try {
+      const tgz = path.join(tmp, 'ff.tgz'); fs.writeFileSync(tgz, buf);
+      const name = 'package/' + path.basename(ffBin());
+      await new Promise((ok, no) => {
+        const t = spawn(process.platform === 'win32' ? 'tar.exe' : 'tar', ['-xzf', tgz, '-C', tmp, name], { windowsHide: true });
+        t.on('error', no); t.on('close', (c) => (c ? no(new Error('Could not unpack the MP3 converter')) : ok()));
+      });
+      const got = path.join(tmp, name);
+      fs.chmodSync(got, 0o755);
+      fs.renameSync(got, ffBin());
+    } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+  }
+
   // One yt-dlp run. onProgress(text, info) where info = { phase, i, n, title, pct, saved, wait }.
   // Resolves { ok, files, error, rateLimited, total }.
   // YouTube throttles a session that fetches hundreds of videos quickly, so every request is spaced out. When it
@@ -60,7 +98,7 @@ function create({ dir, binDir, log }) {
   const RATE = /rate-limited|HTTP Error 429|Too Many Requests/i;
   let child = null, cancelled = false, paused = false, wake = null;
   const cur = { i: 0, n: 0, title: '', pct: 0, saved: 0 }; // what the progress bar shows
-  function runYtDlp(url, isList, onProgress, archive) {
+  function runYtDlp(url, isList, onProgress, archive, mp3) {
     return new Promise((resolve) => {
       const out = isList ? '%(playlist_title)s/%(playlist_index)03d - %(title)s.%(ext)s' : 'Singles/%(title)s.%(ext)s';
       const args = ['-f', 'bestaudio[ext=m4a]/bestaudio', isList ? '--yes-playlist' : '--no-playlist', '--ignore-errors', '--no-overwrites',
@@ -73,8 +111,11 @@ function create({ dir, binDir, log }) {
         // machine-readable lines for the progress bar: which song (n of total) and how far into it
         '--progress', '--progress-template', 'download:MINAPP_PCT %(progress._percent_str)s',
         '--print', 'before_dl:MINAPP_ITEM %(playlist_index|1)s/%(n_entries|1)s %(title)s',
+        // MP3 320 kbps constant bit rate with title/artist tags: plays in every DJ app and keeps beat grids stable
+        ...(mp3 ? ['-x', '--audio-format', 'mp3', '--audio-quality', '320K', '--embed-metadata', '--ffmpeg-location', ffBin()] : []),
         '--print', 'after_move:filepath', '-o', out, '-P', dir, '--', url];
-      const p = spawn(bin(), args, { windowsHide: true });
+      // own process group off Windows, so a stop can take down yt-dlp and everything it started
+      const p = spawn(bin(), args, { windowsHide: true, detached: process.platform !== 'win32' });
       child = p;
       const files = []; let err = '', buf = '', ebuf = '', rateLimited = false, total = 0;
       const emit = () => onProgress(`Downloading ${cur.i} of ${cur.n}: ${cur.title}`, { phase: 'downloading', ...cur });
@@ -86,7 +127,7 @@ function create({ dir, binDir, log }) {
         if (path.isAbsolute(l) && AUDIO.test(l)) { files.push(l); cur.saved++; cur.pct = 100; emit(); }
       };
       const eline = (l) => {
-        if (RATE.test(l) && !rateLimited) { rateLimited = true; try { p.kill(); } catch {} }
+        if (RATE.test(l) && !rateLimited) { rateLimited = true; killTree(p); }
       };
       p.stdout.on('data', (d) => { buf += d; const parts = buf.split(/\r?\n/); buf = parts.pop(); parts.forEach(line); });
       p.stderr.on('data', (d) => {
@@ -94,11 +135,15 @@ function create({ dir, binDir, log }) {
         ebuf += d; const parts = ebuf.split(/\r?\n/); ebuf = parts.pop(); parts.forEach(eline);
       });
       p.on('error', (e) => resolve({ ok: false, files, error: e.message, rateLimited, total }));
-      p.on('close', (code) => {
+      let done = false;
+      p.on('exit', (code) => setTimeout(() => finish(code), 1500));
+      p.on('close', (code) => finish(code));
+      const finish = (code) => {
+        if (done) return; done = true;
         child = null; line(buf); eline(ebuf);
         const quiet = rateLimited || cancelled || paused;
         resolve({ ok: files.length > 0, files, rateLimited, total, error: err.split(/\r?\n/).filter((l) => /ERROR/.test(l)).pop() || (code && !quiet ? 'yt-dlp exited with code ' + code : '') });
-      });
+      };
     });
   }
   // Waits 5, 15 and 30 minutes (YouTube's cool-down is up to an hour) and resumes each time. Pause stops yt-dlp
@@ -106,18 +151,19 @@ function create({ dir, binDir, log }) {
   // Resolves { ok, files (saved by this call), error, rateLimited (true: ended before the playlist was complete), total }.
   const WAITS = [5, 15, 30];
   const sleep = (ms) => new Promise((r) => { wake = r; setTimeout(r, ms); });
-  async function download(url, isList, onProgress, fresh) {
+  async function download(url, isList, onProgress, fresh, mp3) {
     cancelled = false; paused = false; Object.assign(cur, { i: 0, n: 0, title: '', pct: 0, saved: 0 });
     if (!haveBin() || fresh) { onProgress('Fetching yt-dlp…', { phase: 'preparing', ...cur, title: 'Fetching yt-dlp…' }); await fetchBin(); }
+    if (mp3 && !haveFf()) { onProgress('Fetching the MP3 converter…', { phase: 'preparing', ...cur, title: 'Fetching the MP3 converter...' }); await fetchFf(); }
     onProgress('Reading the playlist…', { phase: 'preparing', ...cur, title: isList ? 'Reading the playlist…' : 'Reading the video…' });
     fs.mkdirSync(binDir, { recursive: true });
-    const archive = path.join(binDir, 'archive-' + crypto.createHash('sha1').update(url).digest('hex').slice(0, 12) + '.txt');
+    const archive = path.join(binDir, 'archive-' + crypto.createHash('sha1').update(url + (mp3 ? '#mp3' : '')).digest('hex').slice(0, 12) + '.txt');
     const files = []; let total = 0, res;
     const stopped = () => ({ ok: files.length > 0, files, error: 'Stopped.', rateLimited: true, total, cancelled: true });
     for (let round = 0; ; ) {
       while (paused && !cancelled) { onProgress('Download paused', { phase: 'paused', ...cur }); await sleep(1000); }
       if (cancelled) return stopped();
-      res = await runYtDlp(url, isList, onProgress, archive);
+      res = await runYtDlp(url, isList, onProgress, archive, mp3);
       files.push(...res.files); total = res.total || total;
       if (cancelled) return stopped();
       if (paused) continue; // stopped by Pause, not by YouTube: wait above, then carry on in the same round
@@ -133,10 +179,10 @@ function create({ dir, binDir, log }) {
     }
     return { ok: files.length > 0, files, error: res.error, rateLimited: !!res.rateLimited, total };
   }
-  const cancel = () => { cancelled = true; paused = false; try { child && child.kill(); } catch {} if (wake) wake(); };
+  const cancel = () => { cancelled = true; paused = false; try { child && killTree(child); } catch {} if (wake) wake(); };
   // pause(true) stops yt-dlp until pause(false); a pause during a rate-limit wait is just shown, the wait keeps counting
-  const pause = (on) => { paused = !!on; if (paused) { try { child && child.kill(); } catch {} } else if (wake) wake(); };
+  const pause = (on) => { paused = !!on; if (paused) { try { child && killTree(child); } catch {} } else if (wake) wake(); };
   const isPaused = () => paused;
-  return { dir, playlists, tracks, importFiles, audioIn, download, cancel, pause, isPaused, haveBin, safeName };
+  return { dir, playlists, tracks, importFiles, audioIn, download, cancel, pause, isPaused, haveBin, haveFf, safeName };
 }
 module.exports = { create, AUDIO };

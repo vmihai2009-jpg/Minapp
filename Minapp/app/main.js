@@ -992,7 +992,7 @@ async function downloadCurrentYouTube() {
     const r = await dialog.showMessageBox(win, {
       type: 'question', buttons: ['Download', 'Cancel'], defaultId: 1, cancelId: 1,
       message: 'Download this ' + (t.list ? 'playlist' : 'video') + ' as audio files?',
-      detail: 'For your personal use only. YouTube\'s terms do not allow downloading, and most music is copyrighted: only keep what you have the right to keep.\n\nThe first time, Minapp fetches the free yt-dlp tool (about 20 MB) into its data folder. Songs land in the local library and play from menu > Local playlists.',
+      detail: 'For your personal use only. YouTube\'s terms do not allow downloading, and most music is copyrighted: only keep what you have the right to keep.\n\nThe first time, Minapp fetches the free yt-dlp tool (about 20 MB) into its data folder, plus the free ffmpeg converter (about 25 MB) when "Save downloads as MP3" is on. Songs land in the local library and play from menu > Local playlists.',
     });
     if (r.response !== 0) return;
     writeCfg({ dlOk: true });
@@ -1008,8 +1008,9 @@ async function downloadCurrentYouTube() {
     if (info && win && !win.isDestroyed()) win.webContents.send('download:progress', { ...info, paused: library.isPaused() });
   };
   try {
-    let res = await library.download(url, !!t.list, note);
-    if (!res.ok && !res.rateLimited) { note('Updating yt-dlp…'); res = await library.download(url, !!t.list, note, true); } // YouTube changes often: a newer yt-dlp usually fixes it
+    const mp3 = cfgOn('dlMp3', true);
+    let res = await library.download(url, !!t.list, note, false, mp3);
+    if (!res.ok && !res.rateLimited) { note('Updating yt-dlp…'); res = await library.download(url, !!t.list, note, true, mp3); } // YouTube changes often: a newer yt-dlp usually fixes it
     const n = res.files.length, plural = (k) => `${k} song${k === 1 ? '' : 's'}`;
     const folder = n ? path.dirname(res.files[0]) : null;
     const have = folder ? library.tracks(path.basename(folder)).length : 0;
@@ -1296,6 +1297,7 @@ function menuItems() {
       ...(downloading ? [{ label: library.isPaused() ? 'Resume download' : 'Pause download', click: () => { library.pause(!library.isPaused()); buildMenu(); } },
         { label: 'Stop download', click: () => library.cancel() }]
         : source === 'youtube' ? [{ label: 'Download current YouTube link (personal use)…', click: downloadCurrentYouTube }] : []),
+      { label: 'Save downloads as MP3 320 (works in every DJ app)', type: 'checkbox', checked: cfgOn('dlMp3', true), click: toggleCfg('dlMp3', true) },
       { label: 'Open library folder', click: () => { fs.mkdirSync(library.dir, { recursive: true }); shell.openPath(library.dir); } },
     ] },
     { label: 'Open Spotify', click: () => shell.openExternal('spotify:') },
