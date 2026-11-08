@@ -24,4 +24,4 @@ jobs:
         run: ./Minapp/build.sh
       - name: Publish
         env: { GH_TOKEN: '${{ github.token }}' }
-        run: gh release create "$GITHUB_REF_NAME" docs/downloads/Minapp-*-"$TAG".zip --target "$GITHUB_SHA" --title "Minapp ${TAG#v}" --generate-notes
+        run: gh release create "$TAG" docs/downloads/Minapp-*-"$TAG".zip --target "$GITHUB_SHA" --title "Minapp ${TAG#v}" --generate-notes
