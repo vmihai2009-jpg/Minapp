@@ -861,6 +861,48 @@ async function importIntoPlaylist(folderMode) {
   buildMenu();
 }
 
+// ---------- Updates (GitHub Releases) ----------
+const updater = require('./updater');
+let updateInfo = null, updating = false;
+async function checkForUpdate(manual) {
+  if (updating) return;
+  let info;
+  try { info = await updater.check(app.getVersion()); }
+  catch (e) {
+    log('update check failed: ' + e.message);
+    if (manual) dialog.showMessageBox(win, { type: 'error', message: 'Could not check for updates', detail: 'Check your internet connection and try again.\n\n' + e.message });
+    return;
+  }
+  writeCfg({ updCheck: Date.now() });
+  updateInfo = info.newer ? info : null; buildMenu();
+  if (!info.newer) {
+    if (manual) dialog.showMessageBox(win, { message: `Minapp is up to date (version ${app.getVersion()})`, detail: info.none ? 'No release has been published on GitHub yet.' : '' });
+    return;
+  }
+  if (!manual) { new Notification({ title: 'Minapp update available', body: `Version ${info.latest} is ready: open the Minapp menu > Update.` }).show(); return; }
+  await installUpdate();
+}
+async function installUpdate() {
+  const info = updateInfo; if (!info || updating) return;
+  const notes = info.notes ? '\n\n' + info.notes : '';
+  const r = await dialog.showMessageBox(win, { type: 'question', buttons: ['Update now', 'Later'], defaultId: 0, cancelId: 1,
+    message: `Update Minapp to version ${info.latest}?`, detail: `You have ${info.current}. Your settings, skins and library are kept. Minapp restarts when it is done.${notes}` });
+  if (r.response !== 0) return;
+  if (!info.asset) { shell.openExternal(info.page); return; }
+  updating = true;
+  const note = (m) => { log('[update] ' + m); try { win.setTitle(m); tray && tray.setToolTip(m); } catch {} lastTitle = ''; };
+  try {
+    const v = await updater.install(info, __dirname, note);
+    log('updated to ' + v);
+    await dialog.showMessageBox(win, { message: `Updated to version ${v}`, detail: 'Minapp restarts now.' });
+    app.relaunch(); app.exit(0);
+  } catch (e) {
+    updating = false; lastTitle = '';
+    const r2 = await dialog.showMessageBox(win, { type: 'error', buttons: ['OK', 'Open download page'], defaultId: 0, message: 'The update did not work', detail: String((e && e.message) || e) + '\n\nNothing was changed. You can also download the new version by hand.' });
+    if (r2.response === 1) shell.openExternal(info.page);
+  }
+}
+
 let downloading = false;
 async function downloadCurrentYouTube() {
   const t = readCfg().yt;
@@ -875,25 +917,41 @@ async function downloadCurrentYouTube() {
     if (r.response !== 0) return;
     writeCfg({ dlOk: true });
   }
-  downloading = true;
+  downloading = true; buildMenu();
   win.webContents.send('download:state', true);
   const url = t.list ? 'https://www.youtube.com/playlist?list=' + encodeURIComponent(t.list) : 'https://www.youtube.com/watch?v=' + encodeURIComponent(t.v);
   const note = (m) => { log('[download] ' + m); try { tray && tray.setToolTip(m); win.setTitle(m); } catch {} lastTitle = ''; };
   try {
     let res = await library.download(url, !!t.list, note);
-    if (!res.ok) { note('Updating yt-dlp…'); res = await library.download(url, !!t.list, note, true); } // YouTube changes often: a newer yt-dlp usually fixes it
-    if (res.ok) {
+    if (!res.ok && !res.rateLimited) { note('Updating yt-dlp…'); res = await library.download(url, !!t.list, note, true); } // YouTube changes often: a newer yt-dlp usually fixes it
+    const n = res.files.length, plural = (k) => `${k} song${k === 1 ? '' : 's'}`;
+    const folder = n ? path.dirname(res.files[0]) : null;
+    const have = folder ? library.tracks(path.basename(folder)).length : 0;
+    if (res.cancelled) {
       buildMenu();
-      new Notification({ title: 'Download finished', body: `${res.files.length} song${res.files.length === 1 ? '' : 's'} saved to the local library` }).show();
-      const r = await dialog.showMessageBox(win, { message: `Saved ${res.files.length} song${res.files.length === 1 ? '' : 's'} to your local library`, detail: res.error ? 'Some items were skipped: ' + res.error : '', buttons: ['Play them', 'OK'], defaultId: 1 });
-      if (r.response === 0) await playLocal(path.basename(path.dirname(res.files[0])));
+      if (n) dialog.showMessageBox(win, { message: `Stopped. ${plural(n)} saved this time.`, detail: 'Choose Download again later and it continues where it stopped.' });
+    } else if (res.ok || res.rateLimited) {
+      buildMenu();
+      const limited = res.rateLimited;
+      const of = res.total ? ` of ${res.total}` : '';
+      const head = limited ? `Saved ${have}${of} songs so far` : `Saved ${plural(n)} to your local library`;
+      const detail = limited
+        ? 'YouTube asked Minapp to slow down, and it still said so after waiting. Nothing is lost: choose Download again in about an hour and it picks up where it stopped.'
+        : (res.error ? 'Some items were skipped (for example videos that are private or removed): ' + res.error : '');
+      if (n) new Notification({ title: limited ? 'Download paused' : 'Download finished', body: head }).show();
+      if (n) {
+        const r = await dialog.showMessageBox(win, { message: head, detail, buttons: ['Play them', 'OK'], defaultId: 1 });
+        if (r.response === 0) await playLocal(path.basename(folder));
+      } else {
+        dialog.showMessageBox(win, { type: 'warning', message: 'YouTube is asking Minapp to slow down', detail });
+      }
     } else {
       dialog.showMessageBox(win, { type: 'error', message: 'Download failed', detail: res.error || 'yt-dlp did not save anything.' });
     }
   } catch (e) {
     dialog.showMessageBox(win, { type: 'error', message: 'Download failed', detail: String((e && e.message) || e) });
   } finally {
-    downloading = false; lastTitle = '';
+    downloading = false; lastTitle = ''; buildMenu();
     if (win && !win.isDestroyed()) win.webContents.send('download:state', false);
   }
 }
@@ -1117,6 +1175,8 @@ function menuItems() {
     ? (isPlayerSrc() || eqPref === 'capture' ? 'Equalizer sound (on)' : 'Equalizer sound (on, via Equalizer APO)')
     : 'Equalizer sound';
   return [
+    updateInfo ? { label: `Update available: ${updateInfo.latest}…`, click: installUpdate } : { label: 'Check for updates…', click: () => checkForUpdate(true) },
+    { type: 'separator' },
     { label: 'Source', enabled: false },
     { label: 'Spotify', type: 'radio', checked: source === 'spotify', click: () => setSource('spotify') },
     { label: 'YouTube', type: 'radio', checked: source === 'youtube', click: () => setSource('youtube'), accelerator: 'CmdOrCtrl+Shift+S' },
@@ -1130,7 +1190,8 @@ function menuItems() {
       { type: 'separator' },
       { label: 'Import files…', click: () => importIntoPlaylist(false) },
       { label: 'Import folder…', click: () => importIntoPlaylist(true) },
-      ...(source === 'youtube' ? [{ label: 'Download current YouTube link (personal use)…', click: downloadCurrentYouTube }] : []),
+      ...(downloading ? [{ label: 'Stop download', click: () => library.cancel() }]
+        : source === 'youtube' ? [{ label: 'Download current YouTube link (personal use)…', click: downloadCurrentYouTube }] : []),
       { label: 'Open library folder', click: () => { fs.mkdirSync(library.dir, { recursive: true }); shell.openPath(library.dir); } },
     ] },
     { label: 'Open Spotify', click: () => shell.openExternal('spotify:') },
@@ -1239,6 +1300,8 @@ app.whenReady().then(() => {
   if (cfg.eq && ((cfg.source === 'youtube' && cfg.yt) || (cfg.eqPref !== 'capture' && apoDir() && apoEnsureInclude().ok))) eqOn = true;
   buildMenu();
   registerHotkeys();
+  // quiet check for a new release at start (at most once a day); the menu then shows "Update available"
+  if (Date.now() - (cfg.updCheck || 0) > 864e5) setTimeout(() => checkForUpdate(false), 15000);
   app.on('will-quit', () => globalShortcut.unregisterAll());
   // start on YouTube again only if the last session ended there and a link is saved
   if (cfg.source === 'youtube' && cfg.yt) setSource('youtube');
