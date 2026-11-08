@@ -66,6 +66,9 @@ async function install(info, appDir, onProgress, fetchImpl = fetch) {
       fs.cpSync(path.join(src, f), path.join(appDir, f), { recursive: true, force: true });
     }
     fs.copyFileSync(pj, path.join(appDir, 'package.json'));
+    // Mac: the code lives inside the signed engine bundle, so give it a fresh ad-hoc signature like the launcher does
+    const bundle = path.resolve(appDir, '..', '..', '..');
+    if (process.platform === 'darwin' && bundle.endsWith('.app')) { try { await run('codesign', ['--force', '--deep', '--sign', '-', bundle]); } catch {} }
     return nv;
   } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
 }
