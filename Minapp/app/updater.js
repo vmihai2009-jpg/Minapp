@@ -13,12 +13,14 @@ function newer(a, b) { // is version a newer than b?
   for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); }
   return false;
 }
-const platformKey = () => (process.platform === 'win32' ? 'Windows' : process.platform === 'darwin' ? 'Mac' : null);
-const trusted = (u) => { try { const h = new URL(u); return h.protocol === 'https:' && /(^|\.)github\.com$|(^|\.)githubusercontent\.com$/.test(h.hostname); } catch { return false; } };
+const platformKey = () => (process.platform === 'win32' || (process.env.MINAPP_UPDATE_URL && process.platform === 'linux') ? 'Windows' : process.platform === 'darwin' ? 'Mac' : null);
+// MINAPP_UPDATE_URL points the check at a local test server (used only by Minapp's own tests)
+const TEST = process.env.MINAPP_UPDATE_URL;
+const trusted = (u) => { try { const h = new URL(u); if (TEST && h.hostname === '127.0.0.1') return true; return h.protocol === 'https:' && /(^|\.)github\.com$|(^|\.)githubusercontent\.com$/.test(h.hostname); } catch { return false; } };
 
 // Resolves { current, latest, newer, notes, page, asset: {name,url,size}|null } or throws.
 async function check(current, fetchImpl = fetch) {
-  const r = await fetchImpl(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Minapp-updater' } });
+  const r = await fetchImpl(TEST || `https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Minapp-updater' } });
   if (r.status === 404) return { current, latest: current, newer: false, none: true };
   if (!r.ok) throw new Error('GitHub answered HTTP ' + r.status);
   const rel = await r.json();
@@ -38,6 +40,28 @@ function run(cmd, args) {
   });
 }
 const unzip = (zip, to) => (process.platform === 'win32' ? run('tar.exe', ['-xf', zip, '-C', to]) : process.platform === 'darwin' ? run('ditto', ['-x', '-k', zip, to]) : run('unzip', ['-q', zip, '-d', to]));
+
+// Copies one file or folder over the installed one. Unchanged files are left alone. Windows refuses to overwrite a
+// file that is in use (the Core Audio helper DLL is loaded while Minapp runs), but it does allow renaming it: the old
+// copy is moved aside as *.old and removed at the next start (cleanupOld).
+function copyOver(from, to) {
+  if (fs.statSync(from).isDirectory()) {
+    fs.mkdirSync(to, { recursive: true });
+    for (const f of fs.readdirSync(from)) copyOver(path.join(from, f), path.join(to, f));
+    return;
+  }
+  try { if (fs.readFileSync(from).equals(fs.readFileSync(to))) return; } catch {}
+  try { fs.copyFileSync(from, to); }
+  catch (e) {
+    if (!fs.existsSync(to)) throw e;
+    const old = to + '.' + Date.now() + '.old';
+    fs.renameSync(to, old);
+    fs.copyFileSync(from, to);
+  }
+}
+function cleanupOld(appDir) {
+  try { for (const f of fs.readdirSync(appDir)) if (/\.\d+\.old$/.test(f)) { try { fs.unlinkSync(path.join(appDir, f)); } catch {} } } catch {}
+}
 
 // Downloads the release zip and copies its app code over appDir. onProgress(text). Never touches node_modules or data.
 async function install(info, appDir, onProgress, fetchImpl = fetch) {
@@ -63,7 +87,7 @@ async function install(info, appDir, onProgress, fetchImpl = fetch) {
     // package.json goes last, so an interruption leaves the old version number and the check simply offers the update again
     for (const f of fs.readdirSync(src)) {
       if (f === 'node_modules' || f === 'data' || f === 'package.json') continue;
-      fs.cpSync(path.join(src, f), path.join(appDir, f), { recursive: true, force: true });
+      copyOver(path.join(src, f), path.join(appDir, f));
     }
     fs.copyFileSync(pj, path.join(appDir, 'package.json'));
     // Mac: the code lives inside the signed engine bundle, so give it a fresh ad-hoc signature like the launcher does
@@ -72,4 +96,4 @@ async function install(info, appDir, onProgress, fetchImpl = fetch) {
     return nv;
   } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
 }
-module.exports = { check, install, newer, REPO };
+module.exports = { check, install, newer, cleanupOld, REPO };

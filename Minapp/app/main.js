@@ -165,6 +165,7 @@ function psStart() {
   proc.on('exit', (code) => gone('exited with code ' + code));
 }
 async function psCall(line, timeoutMs = 8000) {
+  if (updating) return ''; // the update replaces the helper's files: keep it stopped until Minapp restarts
   if (!psProc) {
     if (Date.now() < psFailUntil) return '';
     psStart();
@@ -935,6 +936,7 @@ async function importIntoPlaylist(folderMode) {
 
 // ---------- Updates (GitHub Releases) ----------
 const updater = require('./updater');
+if (updater.cleanupOld) updater.cleanupOld(__dirname); // files an earlier update could not overwrite while they were in use
 let updateInfo = null, updating = false;
 async function checkForUpdate(manual) {
   if (updating) return;
@@ -962,6 +964,11 @@ async function installUpdate() {
   if (r.response !== 0) return;
   if (!info.asset) { shell.openExternal(info.page); return; }
   updating = true;
+  // Windows: the Spotify/volume helper (PowerShell) keeps skinvol.dll open, which blocks replacing it; stop it first
+  if (psProc) {
+    const p = psProc;
+    await new Promise((r) => { p.once('exit', r); try { p.kill(); } catch { r(); } setTimeout(r, 4000); });
+  }
   const note = (m) => { log('[update] ' + m); try { win.setTitle(m); tray && tray.setToolTip(m); } catch {} lastTitle = ''; };
   try {
     const v = await updater.install(info, __dirname, note);
@@ -970,7 +977,7 @@ async function installUpdate() {
     app.relaunch(); app.exit(0);
   } catch (e) {
     updating = false; lastTitle = '';
-    const r2 = await dialog.showMessageBox(win, { type: 'error', buttons: ['OK', 'Open download page'], defaultId: 0, message: 'The update did not work', detail: String((e && e.message) || e) + '\n\nNothing was changed. You can also download the new version by hand.' });
+    const r2 = await dialog.showMessageBox(win, { type: 'error', buttons: ['OK', 'Open download page'], defaultId: 0, message: 'The update did not work', detail: String((e && e.message) || e) + '\n\nMinapp keeps working as it is. You can also download the new version by hand.' });
     if (r2.response === 1) shell.openExternal(info.page);
   }
 }
