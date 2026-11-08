@@ -43,10 +43,11 @@
   webamp.onClose(() => api.quit());
   await webamp.renderWhenReady(document.getElementById('app'));
 
-  // ----- macOS: keep Milkdrop (WebGL) cheap -----
-  // On a Retina screen with the window scaled up, Butterchurn would render at DPR x zoom (up to 4x per axis) inside a
-  // transparent window, which the Mac compositor handles badly (stutter, tearing, everything slows down). While the
-  // Milkdrop window is open, Butterchurn gets a 1:1 pixel ratio and animation frames are paced to 30 fps.
+  // ----- keep the animation cheap -----
+  // The visualizer bars are paced to 30 fps (the original Winamp ran at about that rate), which halves their drawing
+  // work. Milkdrop keeps full speed on Windows. On a Mac, Milkdrop also gets 30 fps and a 1:1 pixel ratio: on a Retina
+  // screen with the window scaled up, Butterchurn would render at DPR x zoom (up to 4x per axis) inside a transparent
+  // window, which the Mac compositor handles badly (stutter, tearing, everything slows down).
   const isMacUi = /Mac/i.test(navigator.platform || '');
   let milkOpen = false;
   if (isMacUi) {
@@ -54,14 +55,18 @@
     if (dprDesc && dprDesc.get) {
       Object.defineProperty(window, 'devicePixelRatio', { configurable: true, get: () => (milkOpen ? Math.min(dprDesc.get.call(window), 1) : dprDesc.get.call(window)) });
     }
+  }
+  {
+    const minGap = () => (milkOpen && !isMacUi ? 0 : 30); // ms between admitted frames (30 = about 30 fps)
     const nativeRaf = window.requestAnimationFrame.bind(window), nativeCaf = window.cancelAnimationFrame.bind(window);
     let nextId = 1, lastAdmit = 0;
     const live = new Map(); // our id -> the native id currently standing in for it
     window.requestAnimationFrame = (cb) => {
       const id = nextId++;
       const run = (ts) => {
-        if (milkOpen && ts !== lastAdmit) { // callbacks sharing a frame share its timestamp, so they pass or wait together
-          if (ts - lastAdmit < 30) { live.set(id, nativeRaf(run)); return; }
+        const gap = minGap();
+        if (gap && ts !== lastAdmit) { // callbacks sharing a frame share its timestamp, so they pass or wait together
+          if (ts - lastAdmit < gap) { live.set(id, nativeRaf(run)); return; }
           lastAdmit = ts;
         }
         live.delete(id);

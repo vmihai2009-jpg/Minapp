@@ -63,8 +63,59 @@ function cleanupOld(appDir) {
   try { for (const f of fs.readdirSync(appDir)) if (/\.\d+\.old$/.test(f)) { try { fs.unlinkSync(path.join(appDir, f)); } catch {} } } catch {}
 }
 
+// Copies a whole app folder over the installed one. package.json goes last, so an interruption leaves the old version
+// number and the check simply offers the update again.
+async function applyFolder(src, appDir) {
+  const pj = path.join(src, 'package.json');
+  for (const f of fs.readdirSync(src)) {
+    if (f === 'node_modules' || f === 'data' || f === 'package.json') continue;
+    copyOver(path.join(src, f), path.join(appDir, f));
+  }
+  fs.copyFileSync(pj, path.join(appDir, 'package.json'));
+  // Mac: the code lives inside the signed engine bundle, so give it a fresh ad-hoc signature like the launcher does
+  const bundle = path.resolve(appDir, '..', '..', '..');
+  if (process.platform === 'darwin' && bundle.endsWith('.app')) { try { await run('codesign', ['--force', '--deep', '--sign', '-', bundle]); } catch {} }
+}
+
+// ----- earlier versions (for going back): a copy of the app code (about 0.3 MB) is kept before each update/downgrade -----
+const KEEP = 3;
+function savedVersions(dir) {
+  try {
+    return fs.readdirSync(dir).filter((v) => /^\d+\.\d+\.\d+$/.test(v) && fs.existsSync(path.join(dir, v, 'package.json')))
+      .sort((a, b) => (newer(a, b) ? -1 : newer(b, a) ? 1 : 0));
+  } catch { return []; }
+}
+function backup(appDir, version, dir) {
+  const to = path.join(dir, version);
+  fs.rmSync(to, { recursive: true, force: true });
+  fs.mkdirSync(to, { recursive: true });
+  for (const f of fs.readdirSync(appDir)) {
+    if (f === 'node_modules' || f === 'data' || /\.\d+\.old$/.test(f)) continue;
+    fs.cpSync(path.join(appDir, f), path.join(to, f), { recursive: true });
+  }
+  for (const v of savedVersions(dir).slice(KEEP)) fs.rmSync(path.join(dir, v), { recursive: true, force: true }); // newest 3 only
+}
+// Puts a saved version back. The version being left is saved first, so the step can be undone the same way.
+async function restore(version, current, appDir, dir) {
+  const src = path.join(dir, version);
+  if (!fs.existsSync(path.join(src, 'package.json'))) throw new Error('That version is no longer saved.');
+  fs.accessSync(appDir, fs.constants.W_OK);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'minapp-restore-'));
+  try {
+    fs.cpSync(src, tmp, { recursive: true }); // the saved copy itself may be pruned by the backup below
+    try { backup(appDir, current, dir); } catch {}
+    await applyFolder(tmp, appDir);
+    // drop files that the newer version added and the older one does not have
+    const keep = new Set(fs.readdirSync(tmp));
+    for (const f of fs.readdirSync(appDir)) {
+      if (keep.has(f) || f === 'node_modules' || f === 'data' || /\.\d+\.old$/.test(f)) continue;
+      try { fs.rmSync(path.join(appDir, f), { recursive: true, force: true }); } catch {}
+    }
+  } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+}
+
 // Downloads the release zip and copies its app code over appDir. onProgress(text). Never touches node_modules or data.
-async function install(info, appDir, onProgress, fetchImpl = fetch) {
+async function install(info, appDir, onProgress, fetchImpl = fetch, backupDir = null) {
   if (!info.asset) throw new Error('This release has no download for your system.');
   fs.accessSync(appDir, fs.constants.W_OK); // fail early (e.g. a read-only install folder)
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'minapp-update-'));
@@ -83,17 +134,10 @@ async function install(info, appDir, onProgress, fetchImpl = fetch) {
     if (!fs.existsSync(pj) || !fs.existsSync(path.join(src, 'main.js'))) throw new Error('The update file has an unexpected layout.');
     const nv = JSON.parse(fs.readFileSync(pj, 'utf8')).version;
     if (!newer(nv, info.current)) throw new Error('The update file is not newer than this version.');
+    if (backupDir) { onProgress('Saving the current version…'); try { backup(appDir, info.current, backupDir); } catch {} }
     onProgress('Installing…');
-    // package.json goes last, so an interruption leaves the old version number and the check simply offers the update again
-    for (const f of fs.readdirSync(src)) {
-      if (f === 'node_modules' || f === 'data' || f === 'package.json') continue;
-      copyOver(path.join(src, f), path.join(appDir, f));
-    }
-    fs.copyFileSync(pj, path.join(appDir, 'package.json'));
-    // Mac: the code lives inside the signed engine bundle, so give it a fresh ad-hoc signature like the launcher does
-    const bundle = path.resolve(appDir, '..', '..', '..');
-    if (process.platform === 'darwin' && bundle.endsWith('.app')) { try { await run('codesign', ['--force', '--deep', '--sign', '-', bundle]); } catch {} }
+    await applyFolder(src, appDir);
     return nv;
   } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
 }
-module.exports = { check, install, newer, cleanupOld, REPO };
+module.exports = { check, install, newer, cleanupOld, savedVersions, restore, REPO };

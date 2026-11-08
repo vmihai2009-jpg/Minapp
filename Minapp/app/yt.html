@@ -15,6 +15,8 @@
   const list = q.get('list'), vid = q.get('v'), ids = (q.get('ids') || '').split(',').filter(Boolean);
   let player = null;
 
+  // the playlist (up to thousands of ids) is only sent when it changes, not with every state update
+  let lastList = null;
   function push() {
     if (!player || !player.getPlayerState) return;
     try {
@@ -26,7 +28,7 @@
         title: d.title || '', artist: d.author || '', id: d.video_id,
         duration: player.getDuration() || 0, position: player.getCurrentTime() || 0,
         volume: player.getVolume(),
-        playlist: (player.getPlaylist && player.getPlaylist()) || [],
+        playlist: (() => { const p = (player.getPlaylist && player.getPlaylist()) || []; const k = p.length + ':' + p[0] + ':' + p[p.length - 1]; if (k === lastList) return undefined; lastList = k; return p; })(),
         index: player.getPlaylistIndex ? player.getPlaylistIndex() : -1,
       });
     } catch (e) {}
