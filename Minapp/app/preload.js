@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('bridge', {
   pinGet: () => ipcRenderer.invoke('pin:get'),
   onPin: (cb) => ipcRenderer.on('pin:state', (_e, v) => cb(v)),
   onDownload: (cb) => ipcRenderer.on('download:state', (_e, v) => cb(v)),
+  onDownloadProgress: (cb) => ipcRenderer.on('download:progress', (_e, v) => cb(v)),
+  downloadCtl: (a) => ipcRenderer.send('download:ctl', a),
   showMenu: () => ipcRenderer.send('menu:show'),
   onWindowToggle: (cb) => ipcRenderer.on('window:toggle', (_e, id) => cb(id)),
   version: () => ipcRenderer.invoke('app:version'),
