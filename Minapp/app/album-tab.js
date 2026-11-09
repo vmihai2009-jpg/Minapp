@@ -1,22 +1,19 @@
 // Album panel: what is playing (Spotify album cover, YouTube thumbnail) shown as a physical object, in a panel attached
 // to the left of the player like Milkdrop is attached to the right. The panel is framed and coloured like Minapp's
-// other panels (the skin's playlist colours and bevel) and the name underneath is written in the skin's own font.
+// other panels (the skin's playlist colours and bevel). The album name is written in a small pixel font drawn here.
 // Three looks, drawn as 1-pixel pixel art like the skin, with the cover itself on a 32 x 32 grid:
-//  - case: a see-through plastic case with the source's logo
-//  - tape: a cassette with the cover as its label; the reels turn while music plays
+//  - case: a see-through plastic case with the source's logo, tinted with a gradient in the cover's colours, name in white
+//  - tape: a cassette filling the panel, the cover as its label, the name in black on a paper strip; the reels turn
 //  - cd:   a disc with the cover printed on it; it can turn slowly, in pixel steps, while music plays
 // Click the song title or the timer to show or hide it; click the panel to go to the next look. The menu has the same
 // choices under Album picture, plus "Spin the CD" (off by default: the CD then stays still and upright).
-import { setText } from './download-bar.js';
-
 const W = 96, H = 116;          // the panel: as tall as the player
 const ART_H = 90;               // the drawing; the name goes underneath
 const COVER = 32, LEVELS = 8;   // the cover's pixel grid and palette
 const LOOK_ORDER = ['case', 'tape', 'cd'];
-const CHARS = 17;               // characters per line of the skin font (5 px each)
 
 export function initAlbumTab(webamp, api, getWidgetMode) {
-  let open = false, tab = null, canvas = null, nameEl = null, url = null, token = 0, img = null, look = 'case';
+  let open = false, tab = null, canvas = null, url = null, token = 0, img = null, look = 'case';
   let spin = false, spinStep = 0;
   let playing = false, frame = 0, lastSrc = '', timer = null, albumName = '', grid = null, skinKey = '';
   try {
@@ -41,9 +38,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     canvas = document.createElement('canvas');
     canvas.width = W - 2; canvas.height = H - 2;
     canvas.style.cssText = `position:absolute;left:0;top:0;width:${W - 2}px;height:${H - 2}px;image-rendering:pixelated;`;
-    nameEl = document.createElement('div');
-    nameEl.style.cssText = 'position:absolute;height:20px;overflow:hidden;';
-    tab.append(canvas, nameEl);
+    tab.append(canvas);
     tab.title = 'Click to change the look: case, cassette, CD (click the song title to hide it)';
     tab.addEventListener('mousedown', (e) => e.stopPropagation());
     tab.addEventListener('click', () => {
@@ -52,7 +47,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
       if (timer) { clearInterval(timer); timer = null; }
       draw(); animate(); api.albumState({ look, spin, open });
     });
-    (document.getElementById('webamp') || document.body).appendChild(tab); // inside #webamp so the skin font applies
+    (document.getElementById('webamp') || document.body).appendChild(tab);
     frameStyle(); draw();
     setInterval(() => { if (open && skin().normalbg && skin().normalbg !== skinKey) { frameStyle(); draw(); } }, 2000); // skin changed
   }
@@ -84,6 +79,71 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
   // the cover grid drawn with every grid pixel as a 2 x 2 block
   function cover(x, y, w, h) { g.imageSmoothingEnabled = false; g.drawImage(coverGrid(w / 2, h / 2), x, y, w, h); }
 
+  // ---------- a small pixel font (5 px tall, letters of different widths), so the name can be any colour ----------
+  const FONT = {
+    A: ['.#.', '#.#', '###', '#.#', '#.#'], B: ['##.', '#.#', '##.', '#.#', '##.'], C: ['.##', '#..', '#..', '#..', '.##'],
+    D: ['##.', '#.#', '#.#', '#.#', '##.'], E: ['###', '#..', '##.', '#..', '###'], F: ['###', '#..', '##.', '#..', '#..'],
+    G: ['.##', '#..', '#.#', '#.#', '.##'], H: ['#.#', '#.#', '###', '#.#', '#.#'], I: ['###', '.#.', '.#.', '.#.', '###'],
+    J: ['..#', '..#', '..#', '#.#', '.#.'], K: ['#.#', '#.#', '##.', '#.#', '#.#'], L: ['#..', '#..', '#..', '#..', '###'],
+    M: ['#...#', '##.##', '#.#.#', '#...#', '#...#'], N: ['#..#', '##.#', '#.##', '#..#', '#..#'], O: ['.#.', '#.#', '#.#', '#.#', '.#.'],
+    P: ['##.', '#.#', '##.', '#..', '#..'], Q: ['.#.', '#.#', '#.#', '##.', '.##'], R: ['##.', '#.#', '##.', '#.#', '#.#'],
+    S: ['.##', '#..', '.#.', '..#', '##.'], T: ['###', '.#.', '.#.', '.#.', '.#.'], U: ['#.#', '#.#', '#.#', '#.#', '###'],
+    V: ['#.#', '#.#', '#.#', '#.#', '.#.'], W: ['#...#', '#...#', '#.#.#', '##.##', '#...#'], X: ['#.#', '#.#', '.#.', '#.#', '#.#'],
+    Y: ['#.#', '#.#', '.#.', '.#.', '.#.'], Z: ['###', '..#', '.#.', '#..', '###'],
+    0: ['###', '#.#', '#.#', '#.#', '###'], 1: ['.#.', '##.', '.#.', '.#.', '###'], 2: ['##.', '..#', '.#.', '#..', '###'],
+    3: ['##.', '..#', '.#.', '..#', '##.'], 4: ['#.#', '#.#', '###', '..#', '..#'], 5: ['###', '#..', '##.', '..#', '##.'],
+    6: ['.##', '#..', '###', '#.#', '###'], 7: ['###', '..#', '.#.', '.#.', '.#.'], 8: ['###', '#.#', '###', '#.#', '###'],
+    9: ['###', '#.#', '###', '..#', '##.'], ' ': ['..', '..', '..', '..', '..'], '.': ['.', '.', '.', '.', '#'],
+    ',': ['.', '.', '.', '#', '#'], "'": ['#', '#', '.', '.', '.'], '!': ['#', '#', '#', '.', '#'], ':': ['.', '#', '.', '#', '.'],
+    '?': ['##.', '..#', '.#.', '...', '.#.'], '-': ['...', '...', '###', '...', '...'], '&': ['.#.', '#.#', '.#.', '#.#', '.##'],
+    '(': ['.#', '#.', '#.', '#.', '.#'], ')': ['#.', '.#', '.#', '.#', '#.'], '/': ['..#', '..#', '.#.', '#..', '#..'],
+    '+': ['...', '.#.', '###', '.#.', '...'], '"': ['#.#', '#.#', '...', '...', '...'], '#': ['#.#', '###', '#.#', '###', '#.#'],
+    '$': ['.##', '##.', '.#.', '.##', '##.'], '*': ['#.#', '.#.', '#.#', '...', '...'], '_': ['...', '...', '...', '...', '###'],
+  };
+  const glyph = (ch) => FONT[ch] || FONT['?'];
+  const textW = (t) => [...t].reduce((n, ch) => n + glyph(ch)[0].length + 1, 0) - 1;
+  function text(t, cx, y, c, shadow) { // centred on cx
+    let x = Math.round(cx - textW(t) / 2);
+    for (const ch of t) { const gl = glyph(ch); if (shadow) bitmap(gl, x, y + 1, { '#': shadow }); bitmap(gl, x, y, { '#': c }); x += gl[0].length + 1; }
+  }
+  // the album name split into up to `max` lines that fit `width` pixels; shortened with ".." when it is too long
+  function nameLines(width, max) {
+    const clean = String(albumName || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/\s+/g, ' ').trim();
+    const words = clean.split(' ').filter(Boolean), ls = [];
+    const cut = (w) => { while (w.length > 1 && textW(w + '..') > width) w = w.slice(0, -1); return w.trimEnd() + '..'; };
+    let cur = '';
+    for (let i = 0; i < words.length; i++) {
+      const wd = textW(words[i]) > width ? cut(words[i]) : words[i];
+      const next = cur ? cur + ' ' + wd : wd;
+      if (textW(next) <= width) { cur = next; continue; }
+      ls.push(cur); cur = wd;
+      if (ls.length === max) { cur = ''; const rest = ls[max - 1] + ' ' + words.slice(i).join(' '); ls[max - 1] = textW(rest) <= width ? rest : cut(rest); break; }
+    }
+    if (cur && ls.length < max) ls.push(cur);
+    return ls;
+  }
+  function writeName(cx, top, width, max, c, shadow, lh = 7) {
+    const ls = nameLines(width, max);
+    ls.forEach((t, j) => text(t, cx, top + j * lh, c, shadow));
+  }
+
+  // ---------- a stepped, dithered gradient in the cover's own colours (pixel-art style, no smooth blend) ----------
+  const BAYER = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+  function coverColours() { // average colour of the cover's top and bottom thirds
+    const c = coverGrid(COVER, COVER), d = c.getContext('2d').getImageData(0, 0, COVER, COVER).data;
+    const avg = (y0, y1) => { const a = [0, 0, 0]; let n = 0; for (let y = y0; y < y1; y++) for (let x = 0; x < COVER; x++) { const o = (y * COVER + x) * 4; a[0] += d[o]; a[1] += d[o + 1]; a[2] += d[o + 2]; n++; } return a.map((v) => v / n); };
+    return [avg(0, 11), avg(21, 32)];
+  }
+  function gradient(x, y, w, h, top, bottom) {
+    const steps = 6, mix = (t) => `rgb(${top.map((v, k) => Math.round(v + (bottom[k] - v) * t)).join(',')})`;
+    const cols = Array.from({ length: steps }, (_, k) => mix(k / (steps - 1)));
+    for (let j = 0; j < h; j++) {
+      const s = (j / Math.max(1, h - 1)) * (steps - 1), b = Math.floor(s), f = s - b;
+      for (let i = 0; i < w; i++) P(x + i, y + j, cols[Math.min(steps - 1, b + (f * 16 > BAYER[j & 3][i & 3] ? 1 : 0))]);
+    }
+  }
+  const shade = (c, k) => c.map((v) => v * k);
+
   const LOGO = {
     spotify: ['..#####..', '.#######.', '#ddddddd#', '#d#####d#', '##ddddd##', '##d###d##', '###ddd###', '.#######.', '..#####..'],
     youtube: ['.rrrrrrrrr.', 'rrrrwrrrrrr', 'rrrrwwrrrrr', 'rrrrwwwrrrr', 'rrrrwwrrrrr', 'rrrrwrrrrrr', '.rrrrrrrrr.'],
@@ -102,7 +162,8 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     const { x, y, w, h } = CASE;
     P(x + 2, y + 2, '#1c1e2b', w, h);                               // the back of the box (depth)
     P(x + w + 1, y + 3, '#5d6176', 1, h - 2); P(x + 3, y + h + 1, '#4a4e60', w - 2, 1);
-    P(x, y, '#161721', w, h);                                       // front: dark see-through plastic
+    const [ct, cb] = coverColours();                                // front: see-through plastic tinted by the cover
+    gradient(x, y, w, h, shade(ct, 0.85), shade(cb, 0.45));
     box(x, y, w, h, '#9fa3b5');
     P(x + 1, y + 1, '#d3d6e2', w - 2, 1); P(x + 1, y + 1, '#d3d6e2', 1, h - 2); // light top / left edges
     P(x + 1, y + h - 2, '#585c6f', w - 2, 1); P(x + w - 2, y + 2, '#585c6f', 1, h - 3);
@@ -116,9 +177,10 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     for (let j = 2; j < h - 2; j++) for (let i = 2; i < w - 2; i++) { const k = i + j; if ((k > 16 && k < 30) || (k > 40 && k < 43)) g.fillRect(x + i, y + j, 1, 1); }
     P(x + 2, y + 2, '#ffffff'); P(x + 3, y + 2, 'rgba(255,255,255,.6)'); P(x + 2, y + 3, 'rgba(255,255,255,.6)');
     P(x + w - 3, y + 6, 'rgba(255,255,255,.25)', 1, h - 14);        // bright edge on the right
+    writeName(x + w / 2, y + 86, w - 8, 3, '#ffffff', 'rgba(0,0,0,.55)');
   }
 
-  // ---------- tape: a cassette, 92 x 64, drawn after Mihai's reference picture ----------
+  // ---------- tape: a cassette drawn after Mihai's reference picture, stretched to fill the whole panel ----------
   const T_LINE = '#3b3530', T_SHELL = '#e6dccb', T_HI = '#f6efe2', T_LO = '#cfc4b1', T_BAND = '#efe6d6', T_GROOVE = '#9b9183';
   function round(x, y, w, h, fill, line) { // rounded rectangle with a 1 px outline and 2 px corners
     P(x + 2, y, line, w - 4, 1); P(x + 2, y + h - 1, line, w - 4, 1); P(x, y + 2, line, 1, h - 4); P(x + w - 1, y + 2, line, 1, h - 4);
@@ -139,20 +201,20 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
   }
   function screw(a, b) { P(a, b, '#6d6a6c', 3, 3); P(a + 1, b, '#45424a'); P(a + 1, b + 1, '#9c98a0'); }
   function drawTape() {
-    const x = 1, y = 13, w = 92, h = 64;
+    const x = 0, y = 0, w = W - 2, h = H - 2;                          // the whole panel: no dark corners
     round(x, y, w, h, T_SHELL, T_LINE);                                 // shell
     P(x + 2, y + 1, T_HI, w - 4, 1); P(x + 1, y + 2, T_HI, 1, h - 4);
     P(x + 2, y + h - 2, T_LO, w - 4, 1); P(x + w - 2, y + 2, T_LO, 1, h - 4);
     screw(x + 3, y + 3); screw(x + w - 6, y + 3); screw(x + 3, y + h - 6); screw(x + w - 6, y + h - 6);
-    // label: the cover, across the upper two thirds
-    const lx = x + 6, ly = y + 7, lw = 80, lh = 40;
+    // label: the cover, across the top
+    const lx = x + 7, ly = y + 7, lw = 80, lh = 40;
     cover(lx, ly, lw, lh);
     round(lx - 1, ly - 1, lw + 2, lh + 2, null, '#4a4038');
     [[lx, ly], [lx + lw - 1, ly], [lx, ly + lh - 1], [lx + lw - 1, ly + lh - 1]].forEach(([a, b]) => P(a, b, '#4a4038'));
     logo(lx + 3, ly + 3);
     bitmap(['.###.', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'], lx + lw - 10, ly + lh - 12, { '#': '#f4efe6' }); // side A
     // the window band: two reels and the tape window between them
-    const bx = x + 17, by = y + 21, bw = 56, bh = 18;
+    const bx = x + 19, by = y + 21, bw = 56, bh = 18;
     round(bx, by, bw, bh, T_BAND, T_LINE);
     P(bx + 2, by + 1, '#fbf7ef', bw - 4, 1);
     reel(bx + 8, by + 9); reel(bx + bw - 9, by + 9);
@@ -161,11 +223,19 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     const sx = wx + Math.floor(ww / 2) - 1;                          // the brown tape spool in it
     P(sx - 1, wy + 2, '#7d5640', 6, 1); P(sx, wy + 3, '#9a6c50', 4, wh - 6); P(sx - 1, wy + wh - 3, '#7d5640', 6, 1);
     P(sx + 1, wy + 3, '#b9876a', 1, wh - 6);
-    // bottom: the raised part under the label, with its grooves and four holes
-    const ty = y + 49;
+    // the title strip: a paper label with ruled lines and the album name in black
+    const px = x + 7, py = ly + lh + 4, pw = 80, ph = 30;
+    round(px - 1, py - 1, pw + 2, ph + 2, '#fbf8f1', '#8f8576');
+    P(px, py + 1, '#d84a3a', pw, 1);                                  // the red line at the top of a cassette label
+    for (let r = py + 9; r < py + ph - 1; r += 7) P(px + 2, r, '#e2dacb', pw - 4, 1);
+    const ls = nameLines(pw - 6, 3), top = py + 3 + Math.round((ph - 3 - ls.length * 7) / 2);
+    ls.forEach((t, j) => text(t, px + pw / 2, top + j * 7, '#1a1714'));
+    // bottom: the raised part with its grooves and four holes
+    const ty = y + h - 15;
     P(x + 17, ty, T_GROOVE, w - 34, 1);
-    for (let j = 1; j < h - 50; j++) { const d = Math.round(j * 0.35); P(x + 17 - d, ty + j, T_GROOVE); P(x + w - 18 + d, ty + j, T_GROOVE); P(x + 18 - d, ty + j, '#ece3d4', w - 36 + 2 * d, 1); }
-    [[x + 22, y + 58, 4, 3], [x + 32, y + 56, 3, 3], [x + w - 35, y + 56, 3, 3], [x + w - 26, y + 58, 4, 3]].forEach(([a, b, c, d]) => P(a, b, '#2b2622', c, d));
+    for (let j = 1; j < 14; j++) { const d = Math.round(j * 0.35); P(x + 17 - d, ty + j, T_GROOVE); P(x + w - 18 + d, ty + j, T_GROOVE); P(x + 18 - d, ty + j, '#ece3d4', w - 36 + 2 * d, 1); }
+    P(x + 2, y + h - 2, T_LO, w - 4, 1); P(x + 2, y + h - 1, T_LINE, w - 4, 1);
+    [[x + 22, ty + 8, 4, 3], [x + 33, ty + 6, 3, 3], [x + w - 36, ty + 6, 3, 3], [x + w - 26, ty + 8, 4, 3]].forEach(([a, b, c, d]) => P(a, b, '#2b2622', c, d));
   }
 
   // ---------- cd: an 83 px disc ----------
@@ -200,6 +270,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     [[-7, -6, '#ffd6f2'], [-8, -4, '#c9e8ff'], [-6, -8, '#fff4c4'], [6, 7, '#d6ffe0'], [7, 6, '#ffd6f2']].forEach(([dx, dy, c]) => P(cx + dx, cy + dy, c));
     for (let a = 3.6; a < 4.4; a += 0.04) P(Math.round(cx + Math.cos(a) * (R - 2)), Math.round(cy + Math.sin(a) * (R - 2)), '#ffffff');
     logo(cx - 4, cy - 30);
+    writeName(W / 2 - 1, ART_H + 4, W - 10, 2, '#ffffff', 'rgba(0,0,0,.6)');
   }
 
   function draw() {
@@ -207,34 +278,8 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     g = canvas.getContext('2d', { willReadFrequently: true });
     g.imageSmoothingEnabled = false;
     g.clearRect(0, 0, canvas.width, canvas.height);
+    if (look !== 'tape') { const [ct, cb] = coverColours(); gradient(0, 0, canvas.width, canvas.height, shade(ct, 0.5), shade(cb, 0.18)); } // full-panel backdrop
     if (look === 'tape') drawTape(); else if (look === 'cd') drawCd(); else drawCase();
-    writeName();
-  }
-  // the album's name in the skin's own font, on up to two centred lines, shortened with ".." when it is too long
-  function writeName() {
-    if (!nameEl) return;
-    // on the case the name sits inside the box under the cover (13 characters a line); otherwise under the drawing
-    const inCase = look === 'case', per = inCase ? 13 : CHARS;
-    Object.assign(nameEl.style, inCase ? { left: CASE.x + 1 + 'px', width: CASE.w - 2 + 'px', top: CASE.y + 84 + 'px' } : { left: '3px', width: W - 8 + 'px', top: ART_H + 2 + 'px' });
-    const words = String(albumName || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean), ls = [];
-    let cur = '';
-    for (let i = 0; i < words.length; i++) {
-      const wd = words[i].length > per ? words[i].slice(0, per) : words[i];
-      const next = cur ? cur + ' ' + wd : wd;
-      if (next.length <= per) { cur = next; continue; }
-      ls.push(cur); cur = wd;
-      if (ls.length === 2) { const rest = ls[1] + ' ' + words.slice(i).join(' '); ls[1] = rest.length > per ? rest.slice(0, per - 2).trimEnd() + '..' : rest; cur = ''; break; }
-    }
-    if (cur && ls.length < 2) ls.push(cur);
-    const key = look + ls.join('\n');
-    if (nameEl._key === key) return;
-    nameEl._key = key; nameEl.textContent = '';
-    ls.forEach((t, j) => {
-      const row = document.createElement('div');
-      row.style.cssText = `position:absolute;left:0;right:0;top:${(ls.length === 1 ? 5 : 1) + j * 9}px;height:6px;text-align:center;white-space:nowrap;`;
-      const inner = document.createElement('span'); inner.style.cssText = 'display:inline-block;height:6px;';
-      setText(inner, t); row.appendChild(inner); nameEl.appendChild(row);
-    });
   }
   // the reels and the disc move while something plays (nothing runs when paused, hidden, or showing the case)
   function animate() {
