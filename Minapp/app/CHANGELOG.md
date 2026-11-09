@@ -1,5 +1,9 @@
 # What's new in Minapp
 
+## 1.9.13
+- The LOADING animation now also shows while Minapp is still waiting for the album picture's address (Spotify sends it a moment after the song), so the checkers are gone for good.
+- If no picture arrives after 10 seconds, the panel says NO COVER instead.
+
 ## 1.9.12
 - While the album picture loads, the panel shows LOADING with sliding stripes and counting dots instead of checkers.
 - The album name is never bigger than the normal letter size; long names use up to three lines.
