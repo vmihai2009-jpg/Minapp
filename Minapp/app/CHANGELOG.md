@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.15
+- New album picture filter, like an old GIF: each cover is reduced to its own 32 colours and shaded with fine dots (dithering) instead of blocky pixels.
+
 ## 1.9.14
 - Cassette box: the album picture now fills the whole card, with the title over a darker band at the bottom.
 - The title on the box tilts with the box, letter by letter, so every letter stays clean.
