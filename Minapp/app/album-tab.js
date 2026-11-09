@@ -225,9 +225,8 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     // 3. the title where the reference has its bars, written straight on top so the letters stay crisp
     loadingText(kx + cx + cw / 2, ky + cy + ch / 2 - 3 - lift(cx + cw / 2), '#e8e6f2', 'rgba(0,0,0,.6)');
     textLift = () => -lift(kw >> 1);                                  // the slope is only 2 px: keep each line straight
-    const room = kw - 6, one = nameLines(room / 2, 1, true), ty = ky + cy + ch + 6;
-    if (one.ls.length && one.fits) text(one.ls[0], kx + kw / 2, ty + 1, '#ffffff', 'rgba(0,0,0,.55)', 2);
-    else { const two = nameLines(room, 2, true); if (two.fits) writeName(kx + kw / 2, ty + 1, room, 2, '#ffffff', 'rgba(0,0,0,.55)'); else writeName(kx + kw / 2, ty - 1, room, 3, '#ffffff', 'rgba(0,0,0,.55)', 6); }
+    const room = kw - 6, ty = ky + cy + ch + 6;
+    { const two = nameLines(room, 2, true); if (two.fits) writeName(kx + kw / 2, ty + 1, room, 2, '#ffffff', 'rgba(0,0,0,.55)'); else writeName(kx + kw / 2, ty - 1, room, 3, '#ffffff', 'rgba(0,0,0,.55)', 6); }
     textLift = null;
     // 4. the shine across the plastic, then the traced frame on top
     g.fillStyle = 'rgba(255,255,255,.07)';
@@ -278,13 +277,12 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     P(sx - 1, wy + 2, '#7d5640', 6, 1); P(sx, wy + 3, '#9a6c50', 4, wh - 6); P(sx - 1, wy + wh - 3, '#7d5640', 6, 1);
     P(sx + 1, wy + 3, '#b9876a', 1, wh - 6);
     // the title strip: paper, a red line, the album name in black. The size adapts to the length: big letters for a
-    // short name, normal ones on up to two lines, then three tighter lines; only past that is it shortened with ".."
+    // normal letters on up to two lines, then three tighter lines (big letters were too big); only past that is it shortened with ".."
     const px = lx, py = ly + lh, ph = 19;
     P(px, py, '#fbf8f1', lw, ph);
     P(px, py, '#d84a3a', lw, 1);
-    const ink = '#1a1714', room = lw - 4, one = nameLines(room / 2, 1, true);
+    const ink = '#1a1714', room = lw - 4;
     if (loadingText(px + lw / 2, py + 7, ink)) { /* the name follows once the picture is here */ }
-    else if (one.ls.length && one.fits) text(one.ls[0], px + lw / 2, py + 4, ink, null, 2);
     else {
       const two = nameLines(room, 2, true), ls = two.fits ? two.ls : nameLines(room, 3), lh2 = ls.length === 3 ? 6 : 7;
       const top = py + 2 + Math.round((ph - 2 - (ls.length * lh2 - (lh2 - 5))) / 2);
