@@ -34,7 +34,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
 
   function blank() { // nothing to show yet: a dim checkerboard
     const g = canvas.getContext('2d');
-    for (let y = 0; y < GRID; y++) for (let x = 0; x < GRID; x++) { g.fillStyle = (x + y) % 2 ? '#1c1c1c' : '#262626'; g.fillRect(x, y, 1, 1); }
+    for (let y = 0; y < GRID; y++) for (let x = 0; x < GRID; x++) { g.fillStyle = (x + y) % 2 ? '#3a3a3a' : '#555'; g.fillRect(x, y, 1, 1); }
   }
 
   function paint(dataUrl) {
@@ -50,6 +50,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
       for (let i = 0; i < p.length; i += 4) for (let k = 0; k < 3; k++) p[i + k] = Math.round(p[i + k] / q) * q; // fewer colours
       g.putImageData(d, 0, 0);
     };
+    img.onerror = () => { api.log('album tab: picture could not be decoded'); blank(); };
     img.src = dataUrl;
   }
 
@@ -65,8 +66,8 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     if (!u) { token++; blank(); return; }
     try {
       const d = await api.artGet(u);
-      if (d && u === url) paint(d); else if (!d) blank();
-    } catch { blank(); }
+      if (d && u === url) paint(d); else if (!d) { api.log('album tab: no picture for ' + u); blank(); }
+    } catch (e) { api.log('album tab error: ' + (e && e.message)); blank(); }
   }
 
   function setArt(u) {
@@ -80,6 +81,8 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
   document.addEventListener('click', (e) => {
     if (!(e.target.closest && e.target.closest('#marquee, #time'))) return;
     if (getWidgetMode() !== 'off') return;
+    // the timer would also flip between elapsed and remaining time: keep the clock as it is
+    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
     set(!open);
   }, true);
 

@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.2
+- Album picture on a Mac now comes straight from the Spotify app, so it no longer needs the queue connection. Clicking the timer only shows or hides the picture and no longer flips the clock between elapsed and remaining time. A missing picture shows a visible grey checker.
+
 ## 1.9.1
 - Album picture: click the song title or the timer to show a small pixelated picture of the album (Spotify) or the video thumbnail (YouTube) on the left of the player. Click the picture to hide it. Spotify pictures need the Spotify queue to be connected.
 
