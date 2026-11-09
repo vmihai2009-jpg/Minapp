@@ -213,19 +213,25 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     // 1. the card drawn flat on its own canvas
     const off = document.createElement('canvas'); off.width = kw; off.height = kh;
     const main = g; g = off.getContext('2d', { willReadFrequently: true }); g.imageSmoothingEnabled = false;
-    gradient(0, 0, kw, kh, shade(ct, 0.75), shade(cb, 0.4));
-    logo(7, 5);
-    const cw = 52, ch = 44, cx = Math.floor((kw - cw) / 2), cy = 20;
-    cover(cx, cy, cw, ch);
+    // the cover fills the whole card (cropped to its tall shape); the bottom darkens in dithered steps for the title
+    cover(0, 0, kw - (kw % 2), kh - (kh % 2)); if (kw % 2) cover(kw - 2, 0, 2, kh - (kh % 2)); P(0, kh - 1, '#000', kw, 1);
+    const fadeTop = kh - 34;
+    for (let j = fadeTop; j < kh; j++) {
+      const t = (j - fadeTop) / (kh - fadeTop), lvl = Math.min(4, Math.floor(t * 5));
+      for (let i = 0; i < kw; i++) { const a = [0.15, 0.3, 0.45, 0.6, 0.72][lvl] + ((BAYER[j & 3][i & 3] / 16) < (t * 5 % 1) ? 0.08 : 0); P(i, j, `rgba(8,6,14,${a})`); }
+    }
+    logo(5, 4);
+    const cw = kw, ch = kh - 32, cx = 0, cy = 0;                       // (where LOADING goes: the middle of the picture)
     g = main; g.imageSmoothingEnabled = false;
     // 2. laid onto the box column by column, following the turn
     const lift = (i) => Math.round(rise * i / (kw - 1)), colH = (i) => kh - Math.round(shrink * i / (kw - 1));
     for (let i = 0; i < kw; i++) g.drawImage(off, i, 0, 1, kh, kx + i, ky - lift(i), 1, colH(i));
-    // 3. the title where the reference has its bars, written straight on top so the letters stay crisp
-    loadingText(kx + cx + cw / 2, ky + cy + ch / 2 - 3 - lift(cx + cw / 2), '#e8e6f2', 'rgba(0,0,0,.6)');
-    textLift = () => -lift(kw >> 1);                                  // the slope is only 2 px: keep each line straight
-    const room = kw - 6, ty = ky + cy + ch + 6;
-    { const two = nameLines(room, 2, true); if (two.fits) writeName(kx + kw / 2, ty + 1, room, 2, '#ffffff', 'rgba(0,0,0,.55)'); else writeName(kx + kw / 2, ty - 1, room, 3, '#ffffff', 'rgba(0,0,0,.55)', 6); }
+    // 3. the words (title, or LOADING): each whole letter is lifted by the slope where it stands, so the line follows
+    //    the turn while every letter keeps its exact shape (no letter is ever split across a step)
+    textLift = (px) => -lift(Math.max(0, Math.min(kw - 1, Math.round(px - kx))));
+    loadingText(kx + cx + cw / 2, ky + cy + ch / 2 - 3, '#e8e6f2', 'rgba(0,0,0,.6)');
+    const room = kw - 6, ty = ky + kh - 20;
+    { const two = nameLines(room, 2, true); if (two.fits) writeName(kx + kw / 2, ty + 1, room, 2, '#ffffff', 'rgba(0,0,0,.55)'); else writeName(kx + kw / 2, ty - 4, room, 3, '#ffffff', 'rgba(0,0,0,.55)', 6); }
     textLift = null;
     // 4. the shine across the plastic, then the traced frame on top
     g.fillStyle = 'rgba(255,255,255,.07)';
