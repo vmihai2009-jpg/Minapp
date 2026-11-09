@@ -102,10 +102,14 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
   };
   const glyph = (ch) => FONT[ch] || FONT['?'];
   const textW = (t) => [...t].reduce((n, ch) => n + glyph(ch)[0].length + 1, 0) - 1;
+  let textLift = null; // optional: how far up letters move at a given x (the turned box)
   function text(t, cx, y, c, shadow, sc = 1) { // centred on cx; sc = 2 draws every font pixel as 2 x 2
     let x = Math.round(cx - textW(t) * sc / 2);
     const put = (gl, ox, oy, col) => gl.forEach((r, j) => [...r].forEach((ch, i) => { if (ch === '#') P(ox + i * sc, oy + j * sc, col, sc, sc); }));
-    for (const ch of t) { const gl = glyph(ch); if (shadow) put(gl, x, y + 1, shadow); put(gl, x, y, c); x += (gl[0].length + 1) * sc; }
+    for (const ch of t) {
+      const gl = glyph(ch), gy = y + (textLift ? textLift(x + gl[0].length * sc / 2) : 0); // whole letters follow a slope
+      if (shadow) put(gl, x, gy + 1, shadow); put(gl, x, gy, c); x += (gl[0].length + 1) * sc;
+    }
   }
   // the album name split into up to `max` lines that fit `width` pixels; shortened with ".." when it is too long
   function nameLines(width, max, full) {
@@ -180,8 +184,10 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
   // ---------- case: the clear cassette box from Mihai's reference picture. Its plastic frame is that picture, traced at
   // 74 x 110 (white edges, see-through elsewhere so the panel shows through); the card inside is drawn here ----------
   const CASE = { x: 10, y: 2, w: 74, h: 110 };
-  const CARD = { x: 13, y: 9, w: 55, h: 91 };                        // the card's place inside the frame
-  const FRAME_SRC = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEoAAABuCAYAAACA7YVRAAAEQ0lEQVR4nO2dQZLiMAxFf09RrFlwHzQnm/TJRtyHBWtWs5iYFopkKzSE0NarouLYsi0+jjFOsIEkxIeOOJ8ufwAMy7sCAODxSDPs59hKWvl4t9/+Lic3Qhki6cJ1JV66l6fYM2xH55Rnle8RLZdUeADwudtvsSmxQiRWmbxKSKXVnBmEDYuwx7EEdvstzqdLxRQAcHDKIxH26it1yTJIHOl8ugwfAHA+XaSRVaCOG0S854CE8CVsxP4RkBEXrZvU8SrUX2XEypBVulW5F+/l+w6RsrmSNqcOAjBsjASr8lplXpqO1+V7aTW7R0JzjItQLOJkmBrxXr4W2vaI/33EGiDcftkwANrYtl8GsPsVwveQ+Rn/RYqUWfwgdf5IBlEHwxBKVkqosNtvJ+OvB3Bsm9xle1cZ59OF5fmvQIGE22+BYbZL7wuXgHXpkTZSGa34nwjLE0+oYsTltdtvH9Hc35ZaZy7pRiTvV4DVR7ERt5av7pcR6cwTpFBhUqggKVSQFCpIChXEE4qXdOId0APObgaWcwlfeoF56x9N9lFTzF8hKVSQFCrILKE67qe4JRRBTQt3Itakn6oJRc/z4/3QQnU/7zSix5PktSh6siNrRot0BOqX3vA0V94QSyjC9AZDzxwA/+YCL+fH6nEvPRqPvJQn70D0LkzPHIBboUiEeUlP1sZuv53EFaF4PBJSJDO+9iBZIigtil7pxDuQ0yxBUqg6VAKzhfI6ux8Kl8AsoToTieRJWKjORJqQfZQPyxMtlHcDtPsbo9miguRUcJBsUUFSqCApVJAUKkjOHgTJFhUkOuDsHn27KsdRt1AJ5KVXh0sghWrDQP0GaCLIFhUkhYrRfDQxGYkK1fuwwX3iLlFE1z3ondDj0wmmT7PocDLSalGMFA5A9lFh8idMkOzMg9QedqXl3Fg/+RePGObInNSRl/Bk7dRaFC3nxvppLQaYjORfPILkShpBrL94sDomsG+pM1KkCbJF8auceAdyhjNIChUkhQqST7MYWKuF5FPBijkruyaNtVloOT9WT+mCqETUFohIBDln7kPyJPuoILlARJCcZmlDwIwW1cmSbS6z17jrEAbuWDWxg5Z1wNeAk0pkdHOKKx38CZvEi0vkxjBgVDrz8+nSg1gswgTYm3xdE1+JusT1by8ysnCwaCuvxQDRR9cuPa/Aw/gmWlMyk+t8JjwjzarD8k/vylherTpY7thoZRhEJnZs2Iiz0gfYe1+18gP1D0X6Tr6ZS6T+zw0A7Pbb49hKhkBm6Qw74ZZTjOmb8loA4VZcXY8uJ+LH1Ta61dTN9m/jhqmlYsbX5qnlRWjv/2nFAfFm/h2etsfWTR+1228/x33lCP6bGpw0UscoHEg/Av4Os0t8C5sbCoo+axijWJmQEVeDnXCL41qGIu7Oi+MnJzd4ZsOMVdhs9qUlrOVN30Nzi8qxdQEr+nSTFfMPIxIR4CKbg0EAAAAASUVORK5CYII=';
+  // the card's place inside the traced frame. The box is turned a little, so the card is not a plain rectangle: its
+  // right side sits RISE px higher and SHRINK px shorter than its left side, measured on the reference picture
+  const CARD = { x: 9, y: 11, w: 61, h: 89, rise: 2, shrink: 1 };
+  const FRAME_SRC = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEoAAABuCAYAAACA7YVRAAAEHElEQVR4nO2dS3LrOAxFb7pSHnvg/QS9slZW1vB+PPDYox5EjGEEIKGXWE/qd0+Viz+QhK6p/4cAKfHiM66X2z8ApvVdAQDoHMoC+yW2llE9PZ4Of7fEg1CBSL5x30lWntVp9orY0SXtRe1nVNsVF58AvB9PB7y2XCOSukpZJ+LKes5MxkZNPOPcIsfTAdfLrWMKAHhL2hMTz/prfdk2xIRyvdymFwC4Xm7WKGrQ500mP3PAIrgLW7H/CSTIq/YtLvwU6l9npM5QXXnUeZaf1fsOlba1U7akDwEwvQYFUee9zrIyn+/bz8p6dj+JLDFuQqnJs3EZ5Gf1RnjbMz62EVtA8LizUQDyGtveDRBvVwTfw9ZXfIhUabP5IS79k0ymD0UglO1UsBxbR5N4j6qd3SOee4bVdiKul9uDP70R1ZA5VNz3Xi2NIG7T5+PpUOhiMd8RaAnaIpFQ4o3MEer7szzaIGoTfwUG4oynp7myIyKhSEAklK7txB7giCpCoYpQqCIUqgiFKkKhimRC6ZpO7AF/CrPWOdTu4KpXhEIVoVBFKFQRClVDR0IJfvY2027pCSVrObEHvFBbuWW0NSQbUbKmFxvnDPRXvWkdP/ZBdnNBUHvq5E/gDcjv6+l6fmyedNWTOdS1PNkDvAsz5g14FEpMXNf0ZA80oXQOBRQppPcgGTG0ESW/04k9wKsHRShUH2kRCtVHW4RC5YhNUKgiFCpHbcILxRugCRxRRXgpuAhHVBEKVYRCFaFQRXj1oAhHVBEecBbxt6t4HPWItAhXvT7aIhRqjALj9/XIDEdUEQpVY/hoIpmhUDXSJ+6IoyKUPNuJHVB6fJrg69MsPk5mRiNKQeEAcBtVhqcwRbgxL9J72FXWc2P78BWPGuGRubhQ1/Bk6/RGlKznxvYZfQyQzPAVjyL8kkaR6BUPdSFBfEtdQZG+YEeU/i4n9gCvcBahUEUoVBE+zVKETwUX4apXJHunmHwgLdL7QAQx8Jp5jtgEt1FF+IGIIrzMMkYAjqgy/MbdGAVq0538L+jMqNY7GxH8aUKhdnomJhQk88LYQsVOmKe86yEmVNRuntgyAeJJvmzj1pmHyQGfjVtVvBgSVNGkKR2UZ0ww2+jeqhc5AwBv80KMLsm0hcvaGaELyqI+Iv/8rIztN+pD7YyNUYXJVNLERoO8qHzCfV7NJfWB/p9ifZfcLKXS//sr8DGr2DxKpkJl64wm8ZFTiq8LlY0AwaO4vh/fTsWPT9vqjGovNjFPmNo6VtwnT20/wXj+zygPqA/z71Be8KU8bKOOp8P7PK+cIF+oKSkTF1bRQvkZyGeYXWPn8hJlmm3WNGepM5Egr4cm8RHPmp9vMaFQwOfu2U7wrIGZung47NtI2MpC/wqpUA1zQLeZf5dsmP8As9wA9R3SdwMAAAAASUVORK5CYII=';
   let frameImg = null;
   function caseFrame() {
     if (frameImg) return frameImg.complete ? frameImg : null;
@@ -189,18 +195,28 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     return null;
   }
   function drawCase() {
-    const { x, y } = CASE, [ct, cb] = coverColours();
-    const kx = x + CARD.x, ky = y + CARD.y, kw = CARD.w, kh = CARD.h;
-    gradient(kx, ky, kw, kh, shade(ct, 0.75), shade(cb, 0.4));      // the card, in the cover's colours
-    logo(kx + 5, ky + 6);
-    const cw = 52, ch = 48, cx = kx + Math.floor((kw - cw) / 2), cy = ky + 19;
+    const { x, y } = CASE, { w: kw, h: kh, rise, shrink } = CARD, [ct, cb] = coverColours();
+    const kx = x + CARD.x, ky = y + CARD.y;
+    // 1. the card drawn flat on its own canvas
+    const off = document.createElement('canvas'); off.width = kw; off.height = kh;
+    const main = g; g = off.getContext('2d', { willReadFrequently: true }); g.imageSmoothingEnabled = false;
+    gradient(0, 0, kw, kh, shade(ct, 0.75), shade(cb, 0.4));
+    logo(7, 5);
+    const cw = 52, ch = 44, cx = Math.floor((kw - cw) / 2), cy = 20;
     cover(cx, cy, cw, ch);
-    // the title where the reference has its bars: two lines, or one line of big letters when it is short
-    const room = kw - 4, one = nameLines(room / 2, 1, true);
-    if (one.ls.length && one.fits) text(one.ls[0], kx + kw / 2, cy + ch + 7, '#ffffff', 'rgba(0,0,0,.55)', 2);
-    else { const two = nameLines(room, 2, true); if (two.fits) writeName(kx + kw / 2, cy + ch + 6, room, 2, '#ffffff', 'rgba(0,0,0,.55)'); else writeName(kx + kw / 2, cy + ch + 4, room, 3, '#ffffff', 'rgba(0,0,0,.55)', 6); }
-    g.fillStyle = 'rgba(255,255,255,.07)';                          // the shine across the plastic, as in the picture
-    for (let j = 0; j < kh; j++) for (let i = 0; i < kw; i++) { const k = i - j * 0.6; if (k > 30 && k < 44) g.fillRect(kx + i, ky + j, 1, 1); }
+    g = main; g.imageSmoothingEnabled = false;
+    // 2. laid onto the box column by column, following the turn
+    const lift = (i) => Math.round(rise * i / (kw - 1)), colH = (i) => kh - Math.round(shrink * i / (kw - 1));
+    for (let i = 0; i < kw; i++) g.drawImage(off, i, 0, 1, kh, kx + i, ky - lift(i), 1, colH(i));
+    // 3. the title where the reference has its bars, written straight on top so the letters stay crisp
+    textLift = () => -lift(kw >> 1);                                  // the slope is only 2 px: keep each line straight
+    const room = kw - 6, one = nameLines(room / 2, 1, true), ty = ky + cy + ch + 6;
+    if (one.ls.length && one.fits) text(one.ls[0], kx + kw / 2, ty + 1, '#ffffff', 'rgba(0,0,0,.55)', 2);
+    else { const two = nameLines(room, 2, true); if (two.fits) writeName(kx + kw / 2, ty + 1, room, 2, '#ffffff', 'rgba(0,0,0,.55)'); else writeName(kx + kw / 2, ty - 1, room, 3, '#ffffff', 'rgba(0,0,0,.55)', 6); }
+    textLift = null;
+    // 4. the shine across the plastic, then the traced frame on top
+    g.fillStyle = 'rgba(255,255,255,.07)';
+    for (let j = 0; j < kh; j++) for (let i = 0; i < kw; i++) { const k = i - j * 0.6; if (k > 32 && k < 46) g.fillRect(kx + i, ky - lift(i) + j, 1, 1); }
     const f = caseFrame(); if (f) g.drawImage(f, x, y);
   }
 
