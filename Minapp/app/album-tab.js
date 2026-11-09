@@ -14,7 +14,7 @@ const LOOK_ORDER = ['case', 'tape', 'cd'];
 
 export function initAlbumTab(webamp, api, getWidgetMode) {
   let open = false, tab = null, canvas = null, url = null, token = 0, img = null, look = 'case';
-  let spin = false, spinStep = 0;
+  let spin = false, spinStep = 0, loading = false, dots = 0, dotTimer = null;
   let playing = false, frame = 0, lastSrc = '', timer = null, albumName = '', grid = null, skinKey = '';
   try {
     open = localStorage.getItem('minapp.albumTab') === '1';
@@ -60,6 +60,11 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
   // the cover reduced to a small pixel grid with a slightly smaller palette (cached per picture and shape)
   function coverGrid(w, h) {
     const key = w + 'x' + h;
+    if (!img && loading) { // waiting for the picture: dark, with faint diagonal stripes (the words go on top per look)
+      const c = document.createElement('canvas'); c.width = w; c.height = h; const cg = c.getContext('2d');
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { cg.fillStyle = (x + y) % 6 < 1 ? '#2a2a3a' : (y < h / 2 ? '#1f1f2c' : '#1a1a25'); cg.fillRect(x, y, 1, 1); }
+      return c;
+    }
     if (grid && grid.key === key && grid.img === img) return grid.c;
     const c = document.createElement('canvas'); c.width = w; c.height = h;
     const cg = c.getContext('2d', { willReadFrequently: true });
@@ -131,6 +136,15 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
   function writeName(cx, top, width, max, c, shadow, lh = 7) {
     const ls = nameLines(width, max);
     ls.forEach((t, j) => text(t, cx, top + j * lh, c, shadow));
+  }
+
+  // "LOADING..." with the dots counting up while the picture is on its way
+  function loadingText(cx, y, c, shadow) {
+    if (!loading || img) return false;
+    const base = 'LOADING', dw = textW('...'), x0 = Math.round(cx - (textW(base) + 1 + dw) / 2);
+    text(base, x0 + textW(base) / 2, y, c, shadow);
+    for (let k = 0; k < 3; k++) if (k < dots) text('.', x0 + textW(base) + 1 + k * 2, y, c, shadow);
+    return true;
   }
 
   // ---------- a stepped, dithered gradient in the cover's own colours (pixel-art style, no smooth blend) ----------
@@ -209,6 +223,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     const lift = (i) => Math.round(rise * i / (kw - 1)), colH = (i) => kh - Math.round(shrink * i / (kw - 1));
     for (let i = 0; i < kw; i++) g.drawImage(off, i, 0, 1, kh, kx + i, ky - lift(i), 1, colH(i));
     // 3. the title where the reference has its bars, written straight on top so the letters stay crisp
+    loadingText(kx + cx + cw / 2, ky + cy + ch / 2 - 3 - lift(cx + cw / 2), '#e8e6f2', 'rgba(0,0,0,.6)');
     textLift = () => -lift(kw >> 1);                                  // the slope is only 2 px: keep each line straight
     const room = kw - 6, one = nameLines(room / 2, 1, true), ty = ky + cy + ch + 6;
     if (one.ls.length && one.fits) text(one.ls[0], kx + kw / 2, ty + 1, '#ffffff', 'rgba(0,0,0,.55)', 2);
@@ -268,7 +283,8 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     P(px, py, '#fbf8f1', lw, ph);
     P(px, py, '#d84a3a', lw, 1);
     const ink = '#1a1714', room = lw - 4, one = nameLines(room / 2, 1, true);
-    if (one.ls.length && one.fits) text(one.ls[0], px + lw / 2, py + 4, ink, null, 2);
+    if (loadingText(px + lw / 2, py + 7, ink)) { /* the name follows once the picture is here */ }
+    else if (one.ls.length && one.fits) text(one.ls[0], px + lw / 2, py + 4, ink, null, 2);
     else {
       const two = nameLines(room, 2, true), ls = two.fits ? two.ls : nameLines(room, 3), lh2 = ls.length === 3 ? 6 : 7;
       const top = py + 2 + Math.round((ph - 2 - (ls.length * lh2 - (lh2 - 5))) / 2);
@@ -316,6 +332,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     [[-7, -6, '#ffd6f2'], [-8, -4, '#c9e8ff'], [-6, -8, '#fff4c4'], [6, 7, '#d6ffe0'], [7, 6, '#ffd6f2']].forEach(([dx, dy, c]) => P(cx + dx, cy + dy, c));
     for (let a = 3.6; a < 4.4; a += 0.04) P(Math.round(cx + Math.cos(a) * (R - 2)), Math.round(cy + Math.sin(a) * (R - 2)), '#ffffff');
     logo(cx - 4, cy - 30);
+    loadingText(cx, cy + 17, '#e8e6f2', 'rgba(0,0,0,.6)');
     writeName(W / 2 - 1, ART_H + 4, W - 10, 2, '#ffffff', 'rgba(0,0,0,.6)');
   }
 
@@ -334,11 +351,16 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     if (!want && timer) { clearInterval(timer); timer = null; }
   }
 
+  function setLoading(on) {
+    loading = on;
+    if (on && !dotTimer) dotTimer = setInterval(() => { dots = (dots + 1) % 4; if (open && !timer) draw(); }, 350);
+    if (!on && dotTimer) { clearInterval(dotTimer); dotTimer = null; dots = 0; }
+  }
   function paint(dataUrl) {
     const im = new Image();
     const mine = ++token;
-    im.onload = () => { if (mine === token) { img = im; draw(); } };
-    im.onerror = () => { api.log('album tab: picture could not be decoded'); img = null; draw(); };
+    im.onload = () => { if (mine === token) { img = im; setLoading(false); draw(); } };
+    im.onerror = () => { api.log('album tab: picture could not be decoded'); img = null; setLoading(false); draw(); };
     im.src = dataUrl;
   }
 
@@ -353,12 +375,14 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
 
   async function load(u) {
     if (!open || !canvas) return;
-    if (!u) { token++; img = null; draw(); return; }
+    if (!u) { token++; img = null; setLoading(false); draw(); return; }
+    const mine = token, wait = setTimeout(() => { if (token === mine && url === u) { img = null; setLoading(true); draw(); } }, 150); // no flash when it is quick
     try {
       const d = await api.artGet(u);
       if (u !== url) return;
-      if (d) paint(d); else { api.log('album tab: no picture for ' + u); img = null; draw(); }
-    } catch (e) { api.log('album tab error: ' + (e && e.message)); img = null; draw(); }
+      clearTimeout(wait);
+      if (d) paint(d); else { api.log('album tab: no picture for ' + u); img = null; setLoading(false); draw(); }
+    } catch (e) { clearTimeout(wait); api.log('album tab error: ' + (e && e.message)); img = null; setLoading(false); draw(); }
   }
 
   // u: picture address ('' = none, null = nothing playing); song: title; isPlaying: moves the reels / disc; album: its name
