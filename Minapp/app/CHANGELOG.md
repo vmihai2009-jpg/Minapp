@@ -1,5 +1,9 @@
 # What's new in Minapp
 
+## 1.9.6
+- Windows: the album picture now comes from Windows' own media controls, where Spotify puts its cover. No login needed.
+- Windows: the heart works. Windows does not tell Minapp which Spotify song is playing, so the heart asks Spotify itself (this needs the Spotify connection; the heart offers to set it up).
+
 ## 1.9.5
 - Catching up after a long gap: the What's new pop-up now lists every version you missed (scroll it with the mouse wheel), including when you come from an old version that did not remember which one you had. The update question and the release page also show the full history, newest first.
 

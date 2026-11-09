@@ -603,9 +603,29 @@ const SPOT_REDIRECT = `http://127.0.0.1:${SPOT_PORT}/callback`;
 const SPOT_SCOPE = 'user-read-playback-state user-read-currently-playing user-modify-playback-state playlist-read-private playlist-read-collaborative user-library-read user-library-modify';
 let spotAccess = null, spotExpires = 0, spotBackoffUntil = 0, spotQueueBusy = false, spotLastId = null;
 let spotifyQueue = { items: [], err: '' };
+let spotCur = null; // { title, id } of the song the Web API reports (Windows media controls give no Spotify id)
 let spotArt = null; // album picture of the song Spotify reports as playing
 const SPOT_IMG = /^https:\/\/([\w-]+\.)*(scdn\.co|spotifycdn\.com)\//;
 const artCache = new Map();
+const thumbTries = new Map();
+const thumbCache = new Map(); // 'thumb:artist|title' -> data URL from Windows' media controls
+// Windows: Spotify hands its cover to the Windows media controls; the helper reads it once per song
+function winThumb(st) {
+  const k = 'thumb:' + (st.artist || '') + '|' + st.title;
+  if (thumbCache.has(k)) return thumbCache.get(k) ? k : '';
+  thumbCache.set(k, '');
+  psCall('thumb', 8000).then((raw) => {
+    let j = {}; try { j = JSON.parse(raw); } catch {}
+    if (j.data && /^image\/[\w.+-]+$/.test(j.type || 'image/jpeg')) thumbCache.set(k, 'data:' + (j.type || 'image/jpeg') + ';base64,' + j.data);
+    else { // Spotify may add the picture a moment later: ask again a few times
+      log('cover from media controls: ' + (j.err || 'none'));
+      const n = (thumbTries.get(k) || 0) + 1; thumbTries.set(k, n);
+      if (n < 4) setTimeout(() => thumbCache.delete(k), 4000);
+    }
+  });
+  if (thumbCache.size > 30) thumbCache.delete(thumbCache.keys().next().value);
+  return '';
+}
 const oembedCache = new Map(); // spotify track id -> cover url ('' = none found) // url -> data URL
 let lastSongTitle = '';
 let history = [], prevSong = null; // songs already played, oldest first, so the playlist can scroll back
@@ -647,6 +667,7 @@ async function refreshSpotifyQueue() {
     const imgs = (j.currently_playing && j.currently_playing.album && j.currently_playing.album.images) || [];
     const pick = imgs.filter((i) => i.width >= 64).pop() || imgs[imgs.length - 1]; // smallest picture that is still 64 px or more
     spotArt = cp && pick ? { title: norm(cp), url: pick.url } : null;
+    spotCur = cp && j.currently_playing.id ? { title: norm(cp), id: j.currently_playing.id } : spotCur;
     if (cp && lastSongTitle && norm(cp) !== norm(lastSongTitle)) { spotBackoffUntil = Date.now() + 1500; setTimeout(refreshSpotifyQueue, 1600); return; }
     const items = (j.queue || []).slice(0, 30).map((t) => ({
       id: t.id || t.uri, title: t.name || '',
@@ -841,21 +862,36 @@ function checkLiked(id) {
   spotLibrary('GET', tid).then((v) => likedCache.set(tid, v)).catch((e) => { likedCache.delete(tid); log('liked check failed: ' + e.message); });
   if (likedCache.size > 100) likedCache.delete(likedCache.keys().next().value);
 }
+// the playing song's Spotify id from the Web API (needed on Windows, whose media controls only give title and artist)
+async function apiTrackId(title) {
+  if (spotCur && title && spotCur.title === norm(title)) return spotCur.id;
+  try {
+    const tok = await spotAccessToken();
+    if (!tok) return null;
+    const r = await fetch('https://api.spotify.com/v1/me/player/currently-playing', { headers: { Authorization: 'Bearer ' + tok } });
+    if (r.status !== 200) { log('currently-playing: HTTP ' + r.status); return null; }
+    const j = await r.json();
+    if (!j.item || !j.item.id) return null;
+    spotCur = { title: norm(j.item.name), id: j.item.id };
+    return j.item.id;
+  } catch (e) { log('currently-playing error: ' + e.message); return null; }
+}
 let likeBusy = false;
 async function toggleLike() {
   if (likeBusy) return;
   likeBusy = true;
   try {
     const st = (await spotifyState()) || {};
-    const tid = trackIdOf(st.id);
-    if (!tid) { dialog.showMessageBox(win, { message: 'Nothing to like', detail: 'Start a Spotify song first.' }); return; }
     const cfg = readCfg();
     if (!cfg.spotRefresh || !String(cfg.spotScope || '').includes('user-library-modify')) {
-      const r = await dialog.showMessageBox(win, { type: 'info', buttons: ['Connect Spotify', 'Cancel'], defaultId: 0, cancelId: 1, message: 'The heart needs Spotify connected once more',
-        detail: 'It lets Minapp add songs to your Liked Songs. Your Spotify app Client ID is kept, so this is one click and a browser approval.' });
+      const r = await dialog.showMessageBox(win, { type: 'info', buttons: ['Connect Spotify', 'Cancel'], defaultId: 0, cancelId: 1, message: 'The heart needs Spotify connected' + (cfg.spotRefresh ? ' once more' : ''),
+        detail: cfg.spotClientId ? 'It lets Minapp add songs to your Liked Songs. Your Spotify app Client ID is kept, so this is one click and a browser approval.'
+          : 'It lets Minapp add songs to your Liked Songs. The first time, Minapp shows how to make a free Spotify app Client ID (a few minutes, once).' });
       if (r.response === 0) { await connectSpotifyQueue(); }
       return;
     }
+    let tid = trackIdOf(st.id) || await apiTrackId(st.title);
+    if (!tid) { dialog.showMessageBox(win, { message: 'Nothing to like', detail: st.title ? 'Spotify did not say which song is playing. Try again in a few seconds.' : 'Start a Spotify song first.' }); return; }
     let was = likedCache.get(tid);
     if (was === undefined) was = await spotLibrary('GET', tid);
     await spotLibrary(was ? 'DELETE' : 'PUT', tid);
@@ -1321,7 +1357,9 @@ ipcMain.handle('spotify:state', async () => {
   if (st.title) lastSongTitle = st.title;
   st.queue = spotifyQueue.items;
   if (!st.art && spotArt && st.title && spotArt.title === norm(st.title)) st.art = spotArt.url;
-  if (st.id) { checkLiked(st.id); const lk = likedCache.get(trackIdOf(st.id)); if (lk !== undefined) st.liked = lk; }
+  const likeId = trackIdOf(st.id) || (spotCur && st.title && spotCur.title === norm(st.title) ? spotCur.id : null);
+  if (likeId) { checkLiked(likeId); const lk = likedCache.get(likeId); if (lk !== undefined) st.liked = lk; }
+  if (!st.art && isWin && st.title && !process.env.SKIN_FAKE) { const k = winThumb(st); if (k) st.art = k; }
   if (!st.art && st.id) { const c = spotCover(st.id); if (c) st.art = c; } // no login needed: Spotify's public oEmbed page
   st.history = history.map((x) => ({ ...x, id: 'h' + x.id }));
   // Explain an empty list instead of showing nothing: the desktop app does not expose its queue
@@ -1354,6 +1392,7 @@ ipcMain.on('win:size', (_e, w, h, off = 0) => {
 });
 ipcMain.handle('art:get', async (_e, url) => {
   url = String(url || '');
+  if (url.startsWith('thumb:')) return thumbCache.get(url) || null; // Windows media-controls picture
   if (!(SPOT_IMG.test(url) || /^https:\/\/i\.ytimg\.com\//.test(url))) return null;
   if (artCache.has(url)) return artCache.get(url);
   try {

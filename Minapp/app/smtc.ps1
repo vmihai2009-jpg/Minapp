@@ -320,6 +320,27 @@ while ($true) {
       }
       $out = '{"ok":true,"skipped":' + $done + '}'
     }
+    elseif ($bits[1] -eq 'thumb') {
+      # the album picture Spotify hands to the Windows media controls, as base64
+      $out = '{"err":"no media session"}'
+      $sess = Get-SpotifySession
+      if ($null -ne $sess) {
+        $p = Await ($sess.TryGetMediaPropertiesAsync()) $propType
+        if ($null -eq $p -or $null -eq $p.Thumbnail) { $out = '{"err":"no picture"}' }
+        else {
+          [void][Windows.Storage.Streams.IRandomAccessStreamWithContentType,Windows.Storage.Streams,ContentType=WindowsRuntime]
+          $rs = Await ($p.Thumbnail.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType])
+          if ($null -eq $rs) { $out = '{"err":"picture did not open"}' }
+          else {
+            $ns = [System.IO.WindowsRuntimeStreamExtensions]::AsStreamForRead($rs)
+            $ms = New-Object System.IO.MemoryStream
+            $ns.CopyTo($ms); $ns.Dispose()
+            $type = [string]$rs.ContentType; if (-not $type) { $type = 'image/jpeg' }
+            $out = '{"type":"' + $type + '","data":"' + [Convert]::ToBase64String($ms.ToArray()) + '"}'
+          }
+        }
+      }
+    }
     elseif ($bits[1] -eq 'seek') { Send-Command 'seek' $bits[2]; $out = '{"ok":true}' }
     elseif ($bits[1] -eq 'vol')  { Set-SpotifyVolume ([double]::Parse($bits[2], [Globalization.CultureInfo]::InvariantCulture)); $out = '{"ok":true}' }
   } catch {
