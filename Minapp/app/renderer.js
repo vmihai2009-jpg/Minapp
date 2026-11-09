@@ -99,6 +99,7 @@
   // ----- stack the windows with no gaps; Milkdrop sits to the right of the player -----
   const SEL = { main: '#main-window', equalizer: '#equalizer-window', playlist: '#playlist-window' };
   let lastSig = '';
+  const artOffset = () => (window.__albumTab ? window.__albumTab.offset() : 0);
   function restack() {
     try {
       const gen = webamp.store.getState().windows.genWindows;
@@ -112,15 +113,16 @@
         h[id] = open ? (dom || (id === 'main' ? (gen.main.shade ? 14 : 116) : 116)) : 0;
       }
       const milk = !!(gen.milkdrop && gen.milkdrop.open);
-      const sig = JSON.stringify([h, milk]);
+      const ao = artOffset();
+      const sig = JSON.stringify([h, milk, ao]);
       if (sig === lastSig) return;
       lastSig = sig;
       let y = 0;
       const positions = {};
       for (const id of ['main', 'equalizer', 'playlist']) {
-        if (h[id]) { positions[id] = { x: 0, y }; y += h[id]; }
+        if (h[id]) { positions[id] = { x: ao, y }; y += h[id]; }
       }
-      if (milk) positions.milkdrop = { x: 275, y: 0 };
+      if (milk) positions.milkdrop = { x: ao + 275, y: 0 };
       webamp.store.dispatch({ type: 'UPDATE_WINDOW_POSITIONS', positions });
     } catch (e) { console.warn('restack failed', e); }
   }
@@ -164,12 +166,12 @@
   api.widgetGet().then((m) => { if (m && m !== 'off') setWidget(m, false); }).catch(() => {});
 
   // keep the Electron window sized to the Winamp windows (and any open menu)
-  let lw = 0, lh = 0;
+  let lw = 0, lh = 0, lo = 0;
   setInterval(() => {
     if (document.hidden) return;
     restack();
     // only the few top-level boxes are measured (cheap); a full-tree scan every tick made the playlist feel laggy
-    const els = [...document.querySelectorAll('#main-window, #equalizer-window, #playlist-window, #milkdrop-window, #dl-panel, #whatsnew-panel')];
+    const els = [...document.querySelectorAll('#main-window, #equalizer-window, #playlist-window, #milkdrop-window, #dl-panel, #whatsnew-panel, #album-tab')];
     for (const c of document.body.children) {
       if (c.id !== 'app' && !['SCRIPT', 'STYLE'].includes(c.tagName)) els.push(c);
     }
@@ -181,12 +183,13 @@
     });
     try { // if Milkdrop is open but its element wasn't found, still leave room for it
       const m = webamp.store.getState().windows.genWindows.milkdrop;
-      if (m && m.open) { right = Math.max(right, 275 + 275); bottom = Math.max(bottom, 232); }
+      if (m && m.open) { right = Math.max(right, artOffset() + 275 + 275); bottom = Math.max(bottom, 232); }
     } catch {}
+    const ao2 = widgetMode === 'off' ? artOffset() : 0;
     let w = Math.round(right), h = Math.round(bottom);
     if (widgetMode === 'small') { w = SMALL.w; h = SMALL.h; }
     else if (Date.now() < expandUntil) { w = Math.max(w, 420); h = Math.max(h, 400); }
-    if (w && h && (w !== lw || h !== lh)) { lw = w; lh = h; api.size(w, h); }
+    if (w && h && (w !== lw || h !== lh || ao2 !== lo)) { lo = ao2; lw = w; lh = h; api.size(w, h, widgetMode === 'off' ? artOffset() : 0); }
   }, 150);
 
   // menu item / Cmd+Shift+K -> show or hide the Milkdrop window
@@ -229,6 +232,7 @@
   api.onDownload((on) => document.documentElement.classList.toggle('downloading', !!on));
   import('./whatsnew-panel.js').then((m) => m.initWhatsNew(webamp, api)).catch((e) => api.log('whats new failed: ' + e.message));
   import('./playlist-picker.js').then((m) => m.initPlaylistPicker(webamp, api)).catch((e) => api.log('playlist picker failed: ' + e.message));
+  import('./album-tab.js').then((m) => m.initAlbumTab(webamp, api, () => widgetMode)).catch((e) => api.log('album tab failed: ' + e.message));
   import('./update-bulb.js').then((m) => m.initUpdateBulb(api)).catch((e) => api.log('update bulb failed: ' + e.message));
   import('./download-bar.js').then((m) => m.initDownloadBar(webamp, api)).catch((e) => api.log('download bar failed: ' + e.message));
   setInterval(() => { const b = document.getElementById('eject'); if (b) b.title = document.documentElement.classList.contains('src-youtube') ? 'Record: download this YouTube link (personal use)' : ''; }, 1500);
@@ -589,6 +593,7 @@
       if (s.status !== 'playing') setSynth(false);
       document.documentElement.classList.toggle('src-youtube', s.source === 'youtube');
       document.documentElement.dataset.source = s.source || 'spotify';
+      if (window.__albumTab) window.__albumTab.setArt(s.status === 'closed' || s.status === 'stopped' ? null : s.art || '');
       const status = webamp.getMediaStatus();
       if (s.status === 'closed' || s.status === 'stopped') {
         if (status === 'PLAYING') webamp.pause();

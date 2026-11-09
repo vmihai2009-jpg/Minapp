@@ -2,7 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('bridge', {
   state: () => ipcRenderer.invoke('spotify:state'),
   cmd: (c, a) => ipcRenderer.invoke('spotify:cmd', c, a),
-  size: (w, h) => ipcRenderer.send('win:size', w, h),
+  size: (w, h, off) => ipcRenderer.send('win:size', w, h, off),
+  artGet: (url) => ipcRenderer.invoke('art:get', url),
   dragStart: () => ipcRenderer.send('win:dragstart'),
   dragEnd: () => ipcRenderer.send('win:dragend'),
   capPrepare: (mode) => ipcRenderer.invoke('cap:prepare', mode),

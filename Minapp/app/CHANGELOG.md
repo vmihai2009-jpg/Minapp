@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.1
+- Album picture: click the song title or the timer to show a small pixelated picture of the album (Spotify) or the video thumbnail (YouTube) on the left of the player. Click the picture to hide it. Spotify pictures need the Spotify queue to be connected.
+
 ## 1.9.0
 - Pick a Spotify playlist: press LIST in the playlist window to see your playlists (Liked songs, My playlists, Saved from others) in the skin's own font. Click one to play it.
 - If Spotify was connected before, the list asks you to connect once more so Minapp may read your playlists.

@@ -598,6 +598,8 @@ const SPOT_REDIRECT = `http://127.0.0.1:${SPOT_PORT}/callback`;
 const SPOT_SCOPE = 'user-read-playback-state user-read-currently-playing user-modify-playback-state playlist-read-private playlist-read-collaborative user-library-read';
 let spotAccess = null, spotExpires = 0, spotBackoffUntil = 0, spotQueueBusy = false, spotLastId = null;
 let spotifyQueue = { items: [], err: '' };
+let spotArt = null; // album picture of the song Spotify reports as playing
+const artCache = new Map(); // url -> data URL
 let lastSongTitle = '';
 let history = [], prevSong = null; // songs already played, oldest first, so the playlist can scroll back
 const norm = (t) => String(t || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -635,6 +637,9 @@ async function refreshSpotifyQueue() {
     const j = await r.json();
     // Spotify's API can lag behind the app: if it still thinks another song is playing, its queue is stale, so retry shortly
     const cp = j.currently_playing && j.currently_playing.name;
+    const imgs = (j.currently_playing && j.currently_playing.album && j.currently_playing.album.images) || [];
+    const pick = imgs.filter((i) => i.width >= 64).pop() || imgs[imgs.length - 1]; // smallest picture that is still 64 px or more
+    spotArt = cp && pick ? { title: norm(cp), url: pick.url } : null;
     if (cp && lastSongTitle && norm(cp) !== norm(lastSongTitle)) { spotBackoffUntil = Date.now() + 1500; setTimeout(refreshSpotifyQueue, 1600); return; }
     const items = (j.queue || []).slice(0, 30).map((t) => ({
       id: t.id || t.uri, title: t.name || '',
@@ -1219,6 +1224,7 @@ ipcMain.handle('spotify:state', async () => {
   if (source === 'youtube') {
     const st = ytWin ? { ...ytState } : { status: 'closed' };
     st.source = 'youtube';
+    if (st.id && /^[\w-]{11}$/.test(st.id)) st.art = `https://i.ytimg.com/vi/${st.id}/mqdefault.jpg`; // the video's thumbnail
     st.queue = ytQueue();
     st.history = ytHistory();
     delete st.playlist;
@@ -1233,6 +1239,7 @@ ipcMain.handle('spotify:state', async () => {
   }
   if (st.title) lastSongTitle = st.title;
   st.queue = spotifyQueue.items;
+  if (spotArt && st.title && spotArt.title === norm(st.title)) st.art = spotArt.url;
   st.history = history.map((x) => ({ ...x, id: 'h' + x.id }));
   // Explain an empty list instead of showing nothing: the desktop app does not expose its queue
   if (!st.queue.length && st.title && !process.env.SKIN_FAKE) {
@@ -1250,7 +1257,31 @@ function applySize() {
   win.webContents.setZoomFactor(zoom);
   win.setContentSize(Math.round(lastSize.w * zoom), Math.round(lastSize.h * zoom));
 }
-ipcMain.on('win:size', (_e, w, h) => { lastSize = { w, h }; applySize(); });
+// off = width of the album tab on the player's left: the window grows leftwards so the player itself stays where it is
+let artOff = 0;
+ipcMain.on('win:size', (_e, w, h, off = 0) => {
+  lastSize = { w, h };
+  off = Math.max(0, Math.min(200, Math.round(Number(off) || 0)));
+  if (win && !win.isDestroyed() && off !== artOff) {
+    const b = win.getBounds();
+    win.setBounds({ x: b.x - Math.round((off - artOff) * zoom), y: b.y, width: b.width, height: b.height });
+    artOff = off;
+  }
+  applySize();
+});
+ipcMain.handle('art:get', async (_e, url) => {
+  url = String(url || '');
+  if (!/^https:\/\/(i\.scdn\.co|i\.ytimg\.com)\//.test(url)) return null;
+  if (artCache.has(url)) return artCache.get(url);
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const d = 'data:' + (r.headers.get('content-type') || 'image/jpeg') + ';base64,' + Buffer.from(await r.arrayBuffer()).toString('base64');
+    if (artCache.size > 20) artCache.delete(artCache.keys().next().value);
+    artCache.set(url, d);
+    return d;
+  } catch (e) { log('album art error: ' + ((e && e.message) || e)); return null; }
+});
 
 // Dragging uses the cursor position instead of CSS drag regions (so menus stay clickable).
 // setBounds with the original size avoids the Windows high-DPI bug where setPosition makes the window grow.
