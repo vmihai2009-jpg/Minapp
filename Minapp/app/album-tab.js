@@ -213,10 +213,15 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     // 1. the card drawn flat on its own canvas
     const off = document.createElement('canvas'); off.width = kw; off.height = kh;
     const main = g; g = off.getContext('2d', { willReadFrequently: true }); g.imageSmoothingEnabled = false;
-    gradient(0, 0, kw, kh, shade(ct, 0.75), shade(cb, 0.4));
-    logo(7, 5);
-    const cw = 52, ch = 44, cx = Math.floor((kw - cw) / 2), cy = 20;
-    cover(cx, cy, cw, ch);
+    // the cover fills the whole card (cropped to its tall shape); the bottom darkens in dithered steps for the title
+    cover(0, 0, kw - (kw % 2), kh - (kh % 2)); if (kw % 2) cover(kw - 2, 0, 2, kh - (kh % 2)); P(0, kh - 1, '#000', kw, 1);
+    const fadeTop = kh - 34;
+    for (let j = fadeTop; j < kh; j++) {
+      const t = (j - fadeTop) / (kh - fadeTop), lvl = Math.min(4, Math.floor(t * 5));
+      for (let i = 0; i < kw; i++) { const a = [0.15, 0.3, 0.45, 0.6, 0.72][lvl] + ((BAYER[j & 3][i & 3] / 16) < (t * 5 % 1) ? 0.08 : 0); P(i, j, `rgba(8,6,14,${a})`); }
+    }
+    logo(5, 4);
+    const cw = kw, ch = kh - 32, cx = 0, cy = 0;                       // (where LOADING goes: the middle of the picture)
     g = main; g.imageSmoothingEnabled = false;
     // 2. laid onto the box column by column, following the turn
     const lift = (i) => Math.round(rise * i / (kw - 1)), colH = (i) => kh - Math.round(shrink * i / (kw - 1));
@@ -226,8 +231,8 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     const tl = document.createElement('canvas'); tl.width = kw; tl.height = kh;
     g = tl.getContext('2d'); g.imageSmoothingEnabled = false;
     loadingText(cx + cw / 2, cy + ch / 2 - 3, '#e8e6f2', 'rgba(0,0,0,.6)');
-    const room = kw - 6, ty = cy + ch + 6;
-    { const two = nameLines(room, 2, true); if (two.fits) writeName(kw / 2, ty + 1, room, 2, '#ffffff', 'rgba(0,0,0,.55)'); else writeName(kw / 2, ty - 1, room, 3, '#ffffff', 'rgba(0,0,0,.55)', 6); }
+    const room = kw - 6, ty = kh - 20;
+    { const two = nameLines(room, 2, true); if (two.fits) writeName(kw / 2, ty + 1, room, 2, '#ffffff', 'rgba(0,0,0,.55)'); else writeName(kw / 2, ty - 4, room, 3, '#ffffff', 'rgba(0,0,0,.55)', 6); }
     g = main; g.imageSmoothingEnabled = false;
     for (let i = 0; i < kw; i++) g.drawImage(tl, i, 0, 1, kh, kx + i, ky - lift(i), 1, kh);
     // 4. the shine across the plastic, then the traced frame on top
