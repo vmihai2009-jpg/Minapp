@@ -595,6 +595,7 @@ function ytQueue() {
 // Spotify: the desktop app exposes no queue, so this uses Spotify's Web API (one-time login, PKCE, no secret).
 const SPOT_PORT = 8898;
 const SPOT_REDIRECT = `http://127.0.0.1:${SPOT_PORT}/callback`;
+const SPOT_SCOPE = 'user-read-playback-state user-read-currently-playing user-modify-playback-state playlist-read-private playlist-read-collaborative user-library-read';
 let spotAccess = null, spotExpires = 0, spotBackoffUntil = 0, spotQueueBusy = false, spotLastId = null;
 let spotifyQueue = { items: [], err: '' };
 let lastSongTitle = '';
@@ -611,6 +612,7 @@ async function spotToken(form) {
   spotAccess = j.access_token;
   spotExpires = Date.now() + (Number(j.expires_in) - 60) * 1000;
   if (j.refresh_token) writeCfg({ spotRefresh: j.refresh_token });
+  if (j.scope) writeCfg({ spotScope: j.scope }); // remembers what the login allows (playlists need more than the queue did)
 }
 async function spotAccessToken() {
   if (spotAccess && Date.now() < spotExpires) return spotAccess;
@@ -691,7 +693,7 @@ async function connectSpotifyQueue() {
       timer = setTimeout(() => { srv.close(); resolve(null); }, 180000);
       shell.openExternal('https://accounts.spotify.com/authorize?' + new URLSearchParams({
         response_type: 'code', client_id: clientId, redirect_uri: SPOT_REDIRECT,
-        scope: 'user-read-playback-state user-read-currently-playing',
+        scope: SPOT_SCOPE,
         code_challenge_method: 'S256', code_challenge: challenge, state,
       }).toString());
     });
@@ -706,15 +708,83 @@ async function connectSpotifyQueue() {
   await refreshSpotifyQueue();
   buildMenu();
   dialog.showMessageBox(win, {
-    message: 'Spotify queue connected',
-    detail: spotifyQueue.err ? `Connected, but Spotify answered: ${spotifyQueue.err}` : 'Open the playlist (PL) window to see what is coming up.',
+    message: 'Spotify connected',
+    detail: spotifyQueue.err ? `Connected, but Spotify answered: ${spotifyQueue.err}` : 'Open the playlist (PL) window to see what is coming up, and press its LIST button to pick one of your Spotify playlists.',
   });
 }
 function disconnectSpotifyQueue() {
-  writeCfg({ spotRefresh: null, spotClientId: null });
+  writeCfg({ spotRefresh: null, spotClientId: null, spotScope: null });
+  spotLists = null;
   spotAccess = null; spotifyQueue = { items: [], err: '' };
   buildMenu();
 }
+
+// ---------- Spotify playlist picker (LIST button of the playlist window) ----------
+// Spotify's Web API lists playlists but not the folders you may have made in the desktop app, so the picker groups
+// them as "Liked Songs", "My playlists" and "Saved from others".
+let spotLists = null; // { at, data }
+async function spotApi(path, tok) {
+  const r = await fetch('https://api.spotify.com/v1' + path, { headers: { Authorization: 'Bearer ' + tok } });
+  if (r.status === 429) throw new Error('Spotify is busy, try again in a moment');
+  if (r.status === 401 || r.status === 403) { const e = new Error('HTTP ' + r.status); e.auth = true; throw e; }
+  if (!r.ok) throw new Error('Spotify answered HTTP ' + r.status);
+  return r.json();
+}
+async function getSpotifyPlaylists(force) {
+  const cfg = readCfg();
+  if (!cfg.spotRefresh || !cfg.spotClientId) return { status: 'login' };
+  if (!String(cfg.spotScope || '').includes('playlist-read-private')) return { status: 'rescope' }; // connected before playlists existed
+  if (!force && spotLists && Date.now() - spotLists.at < 60000) return spotLists.data;
+  try {
+    const tok = await spotAccessToken();
+    if (!tok) return { status: 'login' };
+    const me = await spotApi('/me', tok);
+    const items = [];
+    let path = '/me/playlists?limit=50';
+    for (let page = 0; path && page < 20; page++) { // up to 1000 playlists
+      const j = await spotApi(path, tok);
+      for (const p of j.items || []) {
+        if (!p || !p.id) continue;
+        const n = p.items && p.items.total != null ? p.items.total : (p.tracks && p.tracks.total);
+        items.push({ id: p.id, name: p.name || '(no name)', tracks: typeof n === 'number' ? n : null, mine: !!(p.owner && p.owner.id === me.id) });
+      }
+      path = j.next ? j.next.replace('https://api.spotify.com/v1', '') : null;
+    }
+    const data = { status: 'ok', userId: me.id, items };
+    spotLists = { at: Date.now(), data };
+    log('playlists: ' + items.length);
+    return data;
+  } catch (e) {
+    log('playlists error: ' + ((e && e.message) || e));
+    if (e && e.auth) { spotAccess = null; return { status: 'rescope' }; }
+    return { status: 'error', message: String((e && e.message) || e) };
+  }
+}
+async function playSpotifyContext(uri) {
+  if (!/^spotify:(playlist:[A-Za-z0-9]+|user:[^:\s]+:collection)$/.test(uri)) return { ok: false, message: 'Unknown playlist' };
+  if (source !== 'spotify') await setSource('spotify');
+  if (isMac && !process.env.SKIN_FAKE) {
+    // the desktop app plays a playlist straight from its address (it is started first if it is closed)
+    await osa('if application "Spotify" is not running then tell application "Spotify" to activate');
+    for (let i = 0; i < 20 && (await osa('if application "Spotify" is running then return "yes"')) !== 'yes'; i++) await new Promise((r) => setTimeout(r, 500));
+    if ((await osa(`tell application "Spotify" to play track "${uri}"`)) !== null) { holdQueue(); return { ok: true }; }
+  }
+  try { // Windows (and a Mac where the script failed): Spotify's Web API starts it on the device that is open
+    const tok = await spotAccessToken();
+    if (tok) {
+      const r = await fetch('https://api.spotify.com/v1/me/player/play', {
+        method: 'PUT', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ context_uri: uri }),
+      });
+      if (r.status === 204 || r.status === 200) { holdQueue(); return { ok: true }; }
+      log('play playlist: HTTP ' + r.status);
+    }
+  } catch (e) { log('play playlist error: ' + ((e && e.message) || e)); }
+  shell.openExternal(uri); // last resort: Spotify opens the playlist, one press of its play button starts it
+  return { ok: true, opened: true };
+}
+ipcMain.handle('spotlists:get', (_e, force) => getSpotifyPlaylists(!!force));
+ipcMain.handle('spotlists:play', (_e, uri) => playSpotifyContext(String(uri || '')));
+ipcMain.on('spotlists:connect', () => { connectSpotifyQueue().then(() => { spotLists = null; }); });
 
 // Remember what played. When the song changes it also works out whether we moved forward through the queue
 // (the skipped songs go to the history) or back through the history (they return to the front of the queue).

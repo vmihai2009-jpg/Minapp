@@ -228,6 +228,7 @@
   }, true);
   api.onDownload((on) => document.documentElement.classList.toggle('downloading', !!on));
   import('./whatsnew-panel.js').then((m) => m.initWhatsNew(webamp, api)).catch((e) => api.log('whats new failed: ' + e.message));
+  import('./playlist-picker.js').then((m) => m.initPlaylistPicker(webamp, api)).catch((e) => api.log('playlist picker failed: ' + e.message));
   import('./update-bulb.js').then((m) => m.initUpdateBulb(api)).catch((e) => api.log('update bulb failed: ' + e.message));
   import('./download-bar.js').then((m) => m.initDownloadBar(webamp, api)).catch((e) => api.log('download bar failed: ' + e.message));
   setInterval(() => { const b = document.getElementById('eject'); if (b) b.title = document.documentElement.classList.contains('src-youtube') ? 'Record: download this YouTube link (personal use)' : ''; }, 1500);
@@ -587,6 +588,7 @@
       lastStatus = s.status;
       if (s.status !== 'playing') setSynth(false);
       document.documentElement.classList.toggle('src-youtube', s.source === 'youtube');
+      document.documentElement.dataset.source = s.source || 'spotify';
       const status = webamp.getMediaStatus();
       if (s.status === 'closed' || s.status === 'stopped') {
         if (status === 'PLAYING') webamp.pause();
