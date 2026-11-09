@@ -19,16 +19,24 @@ const TEST = process.env.MINAPP_UPDATE_URL;
 const trusted = (u) => { try { const h = new URL(u); if (TEST && h.hostname === '127.0.0.1') return true; return h.protocol === 'https:' && /(^|\.)github\.com$|(^|\.)githubusercontent\.com$/.test(h.hostname); } catch { return false; } };
 
 // Resolves { current, latest, newer, notes, page, asset: {name,url,size}|null } or throws.
+// Repeat checks are conditional (ETag): when nothing changed GitHub answers "304 not modified", which is tiny and does not
+// count against its request limit, so checking often is cheap.
+let etag = null, lastInfo = null;
 async function check(current, fetchImpl = fetch) {
-  const r = await fetchImpl(TEST || `https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Minapp-updater' } });
+  const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'Minapp-updater' };
+  if (etag && lastInfo && lastInfo.current === current) headers['If-None-Match'] = etag;
+  const r = await fetchImpl(TEST || `https://api.github.com/repos/${REPO}/releases/latest`, { headers });
+  if (r.status === 304 && lastInfo) return lastInfo;
   if (r.status === 404) return { current, latest: current, newer: false, none: true };
   if (!r.ok) throw new Error('GitHub answered HTTP ' + r.status);
   const rel = await r.json();
   const latest = String(rel.tag_name || '').replace(/^v/i, '');
   const key = platformKey();
   const a = key && (rel.assets || []).find((x) => new RegExp(`^Minapp-${key}-v[\\d.]+\\.zip$`, 'i').test(x.name) && trusted(x.browser_download_url));
-  return { current, latest, newer: newer(latest, current), notes: String(rel.body || '').slice(0, 1200), page: rel.html_url,
+  etag = (r.headers && r.headers.get && r.headers.get('etag')) || null;
+  lastInfo = { current, latest, newer: newer(latest, current), notes: String(rel.body || '').slice(0, 1200), page: rel.html_url,
     asset: a ? { name: a.name, url: a.browser_download_url, size: a.size } : null };
+  return lastInfo;
 }
 
 function run(cmd, args) {

@@ -1034,7 +1034,10 @@ async function checkForUpdate(manual) {
     if (manual) dialog.showMessageBox(win, { message: `Minapp is up to date (version ${app.getVersion()})`, detail: info.none ? 'No release has been published on GitHub yet.' : '' });
     return;
   }
-  if (!manual) { new Notification({ title: 'Minapp update available', body: `Version ${info.latest} is ready: open the Minapp menu > Update.` }).show(); return; }
+  if (!manual) { // the bulb shows it; one quiet notification per version
+    if (readCfg().updNotified !== info.latest) { writeCfg({ updNotified: info.latest }); new Notification({ title: 'Minapp update available', body: `Version ${info.latest} is ready: click the light bulb in the player's corner.` }).show(); }
+    return;
+  }
   await installUpdate();
 }
 // Windows: the Spotify/volume helper (PowerShell) keeps skinvol.dll open, which blocks replacing it; stop it first
@@ -1579,8 +1582,13 @@ app.whenReady().then(() => {
   if (ytApi.signedIn()) ytApi.refreshPlaylists();
   registerHotkeys();
   win.webContents.once('did-finish-load', () => setTimeout(whatsNew, 1500));
-  // quiet check for a new release at start (at most once a day); the menu then shows "Update available"
-  if (Date.now() - (cfg.updCheck || 0) > 864e5) setTimeout(() => checkForUpdate(false), 15000);
+  // quiet checks for a new release: shortly after start, then every 30 minutes, and when the player is brought to the front
+  // (at most every 5 minutes). The light bulb and the menu then show "Update available". Repeat checks are tiny (ETag).
+  let lastQuiet = 0;
+  const quietCheck = () => { if (Date.now() - lastQuiet < 3e5) return; lastQuiet = Date.now(); checkForUpdate(false); };
+  setTimeout(quietCheck, 15000);
+  setInterval(quietCheck, 18e5).unref();
+  win.on('focus', quietCheck);
   app.on('will-quit', () => globalShortcut.unregisterAll());
   // start on YouTube again only if the last session ended there and a link is saved
   if (cfg.source === 'youtube' && cfg.yt) setSource('youtube');
