@@ -79,7 +79,11 @@ if application "Spotify" is running then
     set s to player state as string
     if s is "stopped" then return "stopped"
     set t to current track
-    return s & "|||" & (name of t) & "|||" & (artist of t) & "|||" & (duration of t) & "|||" & player position & "|||" & sound volume & "|||" & (id of t) & "|||" & shuffling & "|||" & repeating
+    set art to ""
+    try
+      set art to artwork url of t
+    end try
+    return s & "|||" & (name of t) & "|||" & (artist of t) & "|||" & (duration of t) & "|||" & player position & "|||" & sound volume & "|||" & (id of t) & "|||" & shuffling & "|||" & repeating & "|||" & art
   end tell
 else
   return "closed"
@@ -88,9 +92,10 @@ end if`;
 async function macState() {
   const out = await osa(STATE_SCRIPT);
   if (!out || out === 'closed' || out === 'stopped') return { status: out || 'closed' };
-  const [status, title, artist, dur, pos, vol, id, shuf, rep] = out.split('|||');
+  const [status, title, artist, dur, pos, vol, id, shuf, rep, art] = out.split('|||');
   const num = (x) => parseFloat(String(x).replace(',', '.')) || 0;
   const st = { status, title, artist, id, duration: num(dur) / 1000, position: num(pos), volume: num(vol) };
+  if (/^https:\/\/i\.scdn\.co\//.test(art || '')) st.art = art.trim(); // the Spotify app tells us the cover itself, no login needed
   if (shuf === 'true' || shuf === 'false') st.shuffle = shuf === 'true';
   if (rep === 'true' || rep === 'false') st.repeat = rep === 'true';
   return st;
@@ -1239,7 +1244,7 @@ ipcMain.handle('spotify:state', async () => {
   }
   if (st.title) lastSongTitle = st.title;
   st.queue = spotifyQueue.items;
-  if (spotArt && st.title && spotArt.title === norm(st.title)) st.art = spotArt.url;
+  if (!st.art && spotArt && st.title && spotArt.title === norm(st.title)) st.art = spotArt.url;
   st.history = history.map((x) => ({ ...x, id: 'h' + x.id }));
   // Explain an empty list instead of showing nothing: the desktop app does not expose its queue
   if (!st.queue.length && st.title && !process.env.SKIN_FAKE) {
@@ -1275,7 +1280,7 @@ ipcMain.handle('art:get', async (_e, url) => {
   if (artCache.has(url)) return artCache.get(url);
   try {
     const r = await fetch(url);
-    if (!r.ok) return null;
+    if (!r.ok) { log('album art: HTTP ' + r.status); return null; }
     const d = 'data:' + (r.headers.get('content-type') || 'image/jpeg') + ';base64,' + Buffer.from(await r.arrayBuffer()).toString('base64');
     if (artCache.size > 20) artCache.delete(artCache.keys().next().value);
     artCache.set(url, d);
