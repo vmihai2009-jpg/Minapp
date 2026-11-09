@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.7
+- No more pop-up notifications from Windows (or the Mac notification center) for updates, likes or finished downloads. The light bulb, the red heart and the download bar show these inside the player. Song-change notifications stay off unless you turn them on under Settings.
+
 ## 1.9.6
 - Windows: the album picture now comes from Windows' own media controls, where Spotify puts its cover. No login needed.
 - Windows: the heart works. Windows does not tell Minapp which Spotify song is playing, so the heart asks Spotify itself (this needs the Spotify connection; the heart offers to set it up).
