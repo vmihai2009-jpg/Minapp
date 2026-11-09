@@ -9,7 +9,7 @@
 // choices under Album picture, plus "Spin the CD" (off by default: the CD then stays still and upright).
 const W = 96, H = 116;          // the panel: as tall as the player
 const ART_H = 90;               // the drawing; the name goes underneath
-const COVER = 32, LEVELS = 8;   // the cover's pixel grid and palette
+const COVER = 32, COLOURS = 32; // the cover grid used for colour sampling; colours in the dithered cover
 const LOOK_ORDER = ['case', 'tape', 'cd'];
 
 export function initAlbumTab(webamp, api, getWidgetMode) {
@@ -57,30 +57,61 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
   const P = (x, y, c, w = 1, h = 1) => { g.fillStyle = c; g.fillRect(x, y, w, h); };
   const bitmap = (rows, x, y, map) => rows.forEach((r, j) => [...r].forEach((ch, i) => { if (map[ch]) P(x + i, y + j, map[ch]); }));
   const box = (x, y, w, h, c) => { P(x, y, c, w, 1); P(x, y + h - 1, c, w, 1); P(x, y, c, 1, h); P(x + w - 1, y, c, 1, h); };
-  // the cover reduced to a small pixel grid with a slightly smaller palette (cached per picture and shape)
+  // the cover at the size it is drawn, dithered to the album's own palette (cached per picture and size)
   function coverGrid(w, h) {
     const key = w + 'x' + h;
     if (!img) { // no picture (yet): dark, with faint diagonal stripes that slide while loading (words go on top per look)
       const c = document.createElement('canvas'); c.width = w; c.height = h; const cg = c.getContext('2d');
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { cg.fillStyle = (((x - stripe + y) % 6) + 6) % 6 < 1 ? '#2a2a3a' : (y < h / 2 ? '#1f1f2c' : '#1a1a25'); cg.fillRect(x, y, 1, 1); }
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { cg.fillStyle = ((((x >> 1) - stripe + (y >> 1)) % 6) + 6) % 6 < 1 ? '#2a2a3a' : (y < h / 2 ? '#1f1f2c' : '#1a1a25'); cg.fillRect(x, y, 1, 1); }
       return c;
     }
-    if (grid && grid.key === key && grid.img === img) return grid.c;
+    if (!grid || grid.img !== img) grid = { img, pal: palette(img), sizes: new Map() };
+    if (grid.sizes.has(key)) return grid.sizes.get(key);
     const c = document.createElement('canvas'); c.width = w; c.height = h;
     const cg = c.getContext('2d', { willReadFrequently: true });
-    {
-      const s = Math.min(img.naturalWidth, img.naturalHeight * w / h), sh = s * h / w; // centre crop to the wanted shape
-      cg.imageSmoothingEnabled = true; cg.imageSmoothingQuality = 'high';
-      cg.drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - sh) / 2, s, sh, 0, 0, w, h);
-      const d = cg.getImageData(0, 0, w, h), p = d.data, q = 255 / (LEVELS - 1);
-      for (let i = 0; i < p.length; i += 4) for (let k = 0; k < 3; k++) p[i + k] = Math.round(p[i + k] / q) * q;
-      cg.putImageData(d, 0, 0);
-    }
-    grid = { key, img, c };
+    const s = Math.min(img.naturalWidth, img.naturalHeight * w / h), sh = s * h / w; // centre crop to the wanted shape
+    cg.imageSmoothingEnabled = true; cg.imageSmoothingQuality = 'high';
+    cg.drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - sh) / 2, s, sh, 0, 0, w, h);
+    const d = cg.getImageData(0, 0, w, h);
+    dither(d, w, h, grid.pal);
+    cg.putImageData(d, 0, 0);
+    grid.sizes.set(key, c);
     return c;
   }
-  // the cover grid drawn with every grid pixel as a 2 x 2 block
-  function cover(x, y, w, h) { g.imageSmoothingEnabled = false; g.drawImage(coverGrid(w / 2, h / 2), x, y, w, h); }
+  // the album's own palette: COLOURS colours chosen from the cover by median cut (the GIF-export method)
+  function palette(im) {
+    const N = 48, c = document.createElement('canvas'); c.width = c.height = N;
+    const cg = c.getContext('2d', { willReadFrequently: true }); cg.imageSmoothingQuality = 'high';
+    cg.drawImage(im, 0, 0, N, N);
+    const p = cg.getImageData(0, 0, N, N).data, px = [];
+    for (let i = 0; i < p.length; i += 4) px.push([p[i], p[i + 1], p[i + 2]]);
+    let boxes = [px];
+    while (boxes.length < COLOURS) {
+      let bi = -1, bk = 0, br = -1;                                   // split the box with the widest colour range
+      boxes.forEach((b, i) => { if (b.length < 2) return; for (let k = 0; k < 3; k++) { let lo = 255, hi = 0; for (const q of b) { if (q[k] < lo) lo = q[k]; if (q[k] > hi) hi = q[k]; } if (hi - lo > br) { br = hi - lo; bi = i; bk = k; } } });
+      if (bi < 0 || br <= 0) break;
+      const b = boxes[bi].sort((u, v) => u[bk] - v[bk]), m = b.length >> 1;
+      boxes.splice(bi, 1, b.slice(0, m), b.slice(m));
+    }
+    return boxes.map((b) => [0, 1, 2].map((k) => Math.round(b.reduce((t, q) => t + q[k], 0) / b.length)));
+  }
+  // Floyd-Steinberg dithering: each pixel takes the nearest palette colour and passes its error on to its neighbours,
+  // which turns smooth shading into a scatter of dots
+  function dither(d, w, h, pal) {
+    const p = d.data, e = new Float32Array(w * h * 3);
+    for (let i = 0; i < w * h; i++) for (let k = 0; k < 3; k++) e[i * 3 + k] = p[i * 4 + k];
+    const spread = (x, y, err, f) => { if (x < 0 || x >= w || y >= h) return; const o = (y * w + x) * 3; for (let k = 0; k < 3; k++) e[o + k] += err[k] * f; };
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const o = (y * w + x) * 3, v = [e[o], e[o + 1], e[o + 2]];
+      let best = pal[0], bd = Infinity;
+      for (const c of pal) { const dd = (c[0] - v[0]) ** 2 * 0.3 + (c[1] - v[1]) ** 2 * 0.59 + (c[2] - v[2]) ** 2 * 0.11; if (dd < bd) { bd = dd; best = c; } }
+      const err = [v[0] - best[0], v[1] - best[1], v[2] - best[2]];
+      p[(y * w + x) * 4] = best[0]; p[(y * w + x) * 4 + 1] = best[1]; p[(y * w + x) * 4 + 2] = best[2];
+      spread(x + 1, y, err, 7 / 16); spread(x - 1, y + 1, err, 3 / 16); spread(x, y + 1, err, 5 / 16); spread(x + 1, y + 1, err, 1 / 16);
+    }
+  }
+  // the cover, dithered at full size so the dots are single pixels
+  function cover(x, y, w, h) { g.imageSmoothingEnabled = false; g.drawImage(coverGrid(w, h), x, y, w, h); }
 
   // ---------- a small pixel font (5 px tall, letters of different widths), so the name can be any colour ----------
   const FONT = {
@@ -214,7 +245,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     const off = document.createElement('canvas'); off.width = kw; off.height = kh;
     const main = g; g = off.getContext('2d', { willReadFrequently: true }); g.imageSmoothingEnabled = false;
     // the cover fills the whole card (cropped to its tall shape); the bottom darkens in dithered steps for the title
-    cover(0, 0, kw - (kw % 2), kh - (kh % 2)); if (kw % 2) cover(kw - 2, 0, 2, kh - (kh % 2)); P(0, kh - 1, '#000', kw, 1);
+    cover(0, 0, kw, kh);
     const fadeTop = kh - 34;
     for (let j = fadeTop; j < kh; j++) {
       const t = (j - fadeTop) / (kh - fadeTop), lvl = Math.min(4, Math.floor(t * 5));
@@ -308,15 +339,15 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     const cx = 47, cy = 45, R = 41, D = 2 * R + 1;
     // the disc: the cover printed on it upright, a silver rim, a clear centre ring and the hole. When "spin" is on it
     // turns in steps of 1/16 of a circle, rotated on the cover's own pixel grid so it stays pixel art.
-    const G = Math.ceil(D / 2), small = document.createElement('canvas'); small.width = small.height = G;
+    const G = D, small = document.createElement('canvas'); small.width = small.height = G;
     const sg = small.getContext('2d', { willReadFrequently: true });
     sg.imageSmoothingEnabled = false;
     sg.save(); sg.translate(G / 2, G / 2); if (spin) sg.rotate(spinStep * Math.PI / 8);
-    sg.drawImage(coverGrid(COVER, COVER), -G / 2, -G / 2, G, G); sg.restore();
+    sg.drawImage(coverGrid(D, D), -G / 2, -G / 2, G, G); sg.restore();
     const disc = document.createElement('canvas'); disc.width = disc.height = D;
     const dg = disc.getContext('2d', { willReadFrequently: true });
     dg.imageSmoothingEnabled = false;
-    dg.drawImage(small, 0, 0, G * 2, G * 2);
+    dg.drawImage(small, 0, 0);
     const d = dg.getImageData(0, 0, D, D), p = d.data;
     for (let j = 0; j < D; j++) for (let i = 0; i < D; i++) {
       const r = Math.hypot(i - R, j - R), o = (j * D + i) * 4;
