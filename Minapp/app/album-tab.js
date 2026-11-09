@@ -1,7 +1,7 @@
 // Album tab: a small pixelated picture of what is playing (Spotify album cover, YouTube thumbnail), attached to the
 // left of the player like Milkdrop is attached to the right. Click the song title or the timer to show or hide it.
-// The picture is shrunk to a tiny grid with a reduced palette, so it stays a soft, unobtrusive splash of colour.
-const SIZE = 64, GRID = 16, LEVELS = 5, BORDER = 2, TAB = SIZE + 2 * BORDER;
+// The picture is drawn at 64 x 64 pixels with a slightly reduced palette, for a retro look that stays readable.
+const SIZE = 64, GRID = 64, LEVELS = 8, BORDER = 2, TAB = SIZE + 2 * BORDER;
 
 export function initAlbumTab(webamp, api, getWidgetMode) {
   let open = false, tab = null, canvas = null, url = null, token = 0;
