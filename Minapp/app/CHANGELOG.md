@@ -1,5 +1,9 @@
 # What's new in Minapp
 
+## 1.9.9
+- The album picture now sits in a clear plastic case with the source's logo on top (Spotify or YouTube) and a little sound-wave under the cover that is different for every song.
+- Second style: a cassette tape with the cover as its label and reels that turn while music plays. Click the picture to switch between the two; click the song title or timer to show or hide it.
+
 ## 1.9.8
 - The album picture is sharper: 64 x 64 pixels instead of 16 x 16, with a lightly reduced palette.
 
