@@ -156,28 +156,42 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     else bitmap(LOGO.note, x, y, { '#': '#e8e8e8' });
   }
 
-  // ---------- case: a cassette box, 70 x 108 (the tall proportions of a real one), cover 64 x 64, name inside ----------
-  const CASE = { x: 11, y: 2, w: 70, h: 108 };
+  // ---------- case: a clear cassette box seen slightly from the left and above (after Mihai's reference picture): the
+  // front stays flat so the cover keeps its pixels, the box's left side and top edge show as clear plastic ----------
+  const CASE = { x: 15, y: 8, w: 72, h: 102 };
+  const DEPTH = { dx: 10, dy: 5 };                                   // how far back the box goes (left and up)
+  const EDGE = '#ece8f6', EDGE_MID = '#b9b3d0', EDGE_LO = '#6f6a8a';
   function drawCase() {
-    const { x, y, w, h } = CASE;
-    P(x + 2, y + 2, '#1c1e2b', w, h);                               // the back of the box (depth)
-    P(x + w + 1, y + 3, '#5d6176', 1, h - 2); P(x + 3, y + h + 1, '#4a4e60', w - 2, 1);
-    const [ct, cb] = coverColours();                                // front: see-through plastic tinted by the cover
+    const { x, y, w, h } = CASE, { dx, dy } = DEPTH;
+    const [ct, cb] = coverColours();
+    const back = (i) => Math.round((dx - i) * dy / dx);            // how far up a column of the side is
+    // shadow under the box
+    P(x - dx + 3, y + h + 1, 'rgba(0,0,0,.35)', w + dx - 2, 1); P(x + 2, y + h, 'rgba(0,0,0,.35)', w - 1, 1);
+    // left side: clear plastic, a little darker, with its own top-to-bottom tint
+    for (let i = 0; i < dx; i++) {
+      const cx = x - dx + i, up = back(i);
+      for (let j = 0; j < h; j++) { const m = j / h; P(cx, y - up + j, `rgb(${ct.map((v, c) => Math.round((v + (cb[c] - v) * m) * 0.42 + 22)).join(',')})`); }
+      P(cx, y - up, EDGE); P(cx, y - up + h - 1, EDGE_MID);
+    }
+    P(x - dx, y - dy, EDGE, 1, h);                                   // the far edge of the side
+    for (const f of [0.1, 0.5, 0.9]) P(x - dx + 3, y - dy + Math.round(h * f) + 3, EDGE_MID, 2, 1); // little ridges
+    // top edge: a thin clear strip going back
+    for (let j = 1; j <= dy; j++) { const sx = x - Math.round(j * dx / dy); P(sx, y - j, `rgb(${ct.map((v) => Math.round(v * 0.5 + 40)).join(',')})`, w, 1); P(sx, y - j, EDGE); P(sx + w - 1, y - j, EDGE_MID); }
+    P(x - dx, y - dy, EDGE, w, 1);                                   // back top edge
+    for (let i = 0; i <= dx; i++) P(x + w - 1 - i, y - Math.round(i * dy / dx), EDGE_MID); // top right corner going back
+    // the front: plastic tinted by the cover, the cover, the logo
     gradient(x, y, w, h, shade(ct, 0.85), shade(cb, 0.45));
-    box(x, y, w, h, '#9fa3b5');
-    P(x + 1, y + 1, '#d3d6e2', w - 2, 1); P(x + 1, y + 1, '#d3d6e2', 1, h - 2); // light top / left edges
-    P(x + 1, y + h - 2, '#585c6f', w - 2, 1); P(x + w - 2, y + 2, '#585c6f', 1, h - 3);
-    P(x + 2, y + 2, '#3a3d4e', w - 4, 1);                           // the lid's lip
-    logo(x + 4, y + 5);
-    const cx = x + 3, cy = y + 17;
+    box(x, y, w, h, EDGE); box(x + 1, y + 1, w - 2, h - 2, EDGE_MID);
+    P(x + 2, y + 2, EDGE_LO, w - 4, 1);                              // the lid's lip
+    for (let i = 0; i < dx; i++) P(x - dx + i, y - back(i), EDGE);   // the front-left corner edge runs back
+    for (let i = 0; i < dx; i++) P(x - dx + i, y + h - 1 - back(i), EDGE_MID);
+    logo(x + 5, y + 6);
+    const cx = x + 4, cy = y + 18;
     box(cx - 1, cy - 1, 66, 66, '#07070b');
     cover(cx, cy, 64, 64);
-    // shine across the plastic
-    g.fillStyle = 'rgba(255,255,255,.09)';
-    for (let j = 2; j < h - 2; j++) for (let i = 2; i < w - 2; i++) { const k = i + j; if ((k > 16 && k < 30) || (k > 40 && k < 43)) g.fillRect(x + i, y + j, 1, 1); }
-    P(x + 2, y + 2, '#ffffff'); P(x + 3, y + 2, 'rgba(255,255,255,.6)'); P(x + 2, y + 3, 'rgba(255,255,255,.6)');
-    P(x + w - 3, y + 6, 'rgba(255,255,255,.25)', 1, h - 14);        // bright edge on the right
-    writeName(x + w / 2, y + 86, w - 8, 3, '#ffffff', 'rgba(0,0,0,.55)');
+    g.fillStyle = 'rgba(255,255,255,.08)';                          // shine across the plastic
+    for (let j = 3; j < h - 3; j++) for (let i = 3; i < w - 3; i++) { const k = i - j + 40; if ((k > 70 && k < 84) || (k > 92 && k < 95)) g.fillRect(x + i, y + j, 1, 1); }
+    writeName(x + w / 2, y + 86, w - 8, 2, '#ffffff', 'rgba(0,0,0,.55)');
   }
 
   // ---------- tape: a cassette drawn after Mihai's reference picture, stretched to fill the whole panel ----------
