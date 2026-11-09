@@ -1,5 +1,9 @@
 # What's new in Minapp
 
+## 1.9.14
+- Cassette box: the album picture now fills the whole card, with the title over a darker band at the bottom.
+- The title on the box tilts with the box, letter by letter, so every letter stays clean.
+
 ## 1.9.13
 - The LOADING animation now also shows while Minapp is still waiting for the album picture's address (Spotify sends it a moment after the song), so the checkers are gone for good.
 - If no picture arrives after 10 seconds, the panel says NO COVER instead.
