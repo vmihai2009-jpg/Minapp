@@ -143,6 +143,25 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     }
   }
   const shade = (c, k) => c.map((v) => v * k);
+  const mixc = (a, b, t) => a.map((v, k) => v + (b[k] - v) * t);
+  // the main window's own colour (average of the skin's main bitmap), so the panel's background matches the player
+  let tone = [44, 44, 62], toneKey = null;
+  function skinTone() {
+    let imgs = null; try { imgs = webamp.store.getState().display.skinImages; } catch {}
+    if (!imgs || imgs === toneKey) return tone;
+    toneKey = imgs;
+    const src = imgs.MAIN_WINDOW_BACKGROUND; if (!src) return tone;
+    const im = new Image();
+    im.onload = () => {
+      const c = document.createElement('canvas'); c.width = 24; c.height = 10;
+      const cg = c.getContext('2d', { willReadFrequently: true }); cg.drawImage(im, 0, 0, 24, 10);
+      const d = cg.getImageData(0, 0, 24, 10).data, a = [0, 0, 0];
+      for (let i = 0; i < d.length; i += 4) { a[0] += d[i]; a[1] += d[i + 1]; a[2] += d[i + 2]; }
+      tone = a.map((v) => v / (d.length / 4)); if (open) draw();
+    };
+    im.src = src;
+    return tone;
+  }
 
   const LOGO = {
     spotify: ['..#####..', '.#######.', '#ddddddd#', '#d#####d#', '##ddddd##', '##d###d##', '###ddd###', '.#######.', '..#####..'],
@@ -158,40 +177,47 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
 
   // ---------- case: a clear cassette box seen slightly from the left and above (after Mihai's reference picture): the
   // front stays flat so the cover keeps its pixels, the box's left side and top edge show as clear plastic ----------
-  const CASE = { x: 15, y: 8, w: 72, h: 102 };
+  const CASE = { x: 20, y: 10, w: 64, h: 100 };                     // a real cassette box is about 1 : 1.6
   const DEPTH = { dx: 10, dy: 5 };                                   // how far back the box goes (left and up)
   const EDGE = '#ece8f6', EDGE_MID = '#b9b3d0', EDGE_LO = '#6f6a8a';
   function drawCase() {
     const { x, y, w, h } = CASE, { dx, dy } = DEPTH;
     const [ct, cb] = coverColours();
     const back = (i) => Math.round((dx - i) * dy / dx);            // how far up a column of the side is
+    const clear = (k) => `rgba(236,232,246,${k})`;                 // see-through plastic
     // shadow under the box
     P(x - dx + 3, y + h + 1, 'rgba(0,0,0,.35)', w + dx - 2, 1); P(x + 2, y + h, 'rgba(0,0,0,.35)', w - 1, 1);
-    // left side: clear plastic, a little darker, with its own top-to-bottom tint
+    // left side (the spine): clear plastic over the dark inside of the box
     for (let i = 0; i < dx; i++) {
       const cx = x - dx + i, up = back(i);
-      for (let j = 0; j < h; j++) { const m = j / h; P(cx, y - up + j, `rgb(${ct.map((v, c) => Math.round((v + (cb[c] - v) * m) * 0.42 + 22)).join(',')})`); }
+      for (let j = 0; j < h; j++) { const m = j / h; P(cx, y - up + j, `rgb(${ct.map((v, c) => Math.round((v + (cb[c] - v) * m) * 0.35 + 20)).join(',')})`); }
       P(cx, y - up, EDGE); P(cx, y - up + h - 1, EDGE_MID);
+      P(cx, y - up + 1, clear(0.35), 1, 4); P(cx, y - up + h - 5, clear(0.35), 1, 4); // thick clear ends
     }
-    P(x - dx, y - dy, EDGE, 1, h);                                   // the far edge of the side
-    for (const f of [0.1, 0.5, 0.9]) P(x - dx + 3, y - dy + Math.round(h * f) + 3, EDGE_MID, 2, 1); // little ridges
+    P(x - dx, y - dy, EDGE, 1, h); P(x - dx + 1, y - dy + 1, clear(0.3), 1, h - 2);
+    P(x - 2, y + 4, EDGE_MID, 1, h - 8);                             // where the side meets the front
     // top edge: a thin clear strip going back
-    for (let j = 1; j <= dy; j++) { const sx = x - Math.round(j * dx / dy); P(sx, y - j, `rgb(${ct.map((v) => Math.round(v * 0.5 + 40)).join(',')})`, w, 1); P(sx, y - j, EDGE); P(sx + w - 1, y - j, EDGE_MID); }
-    P(x - dx, y - dy, EDGE, w, 1);                                   // back top edge
-    for (let i = 0; i <= dx; i++) P(x + w - 1 - i, y - Math.round(i * dy / dx), EDGE_MID); // top right corner going back
-    // the front: plastic tinted by the cover, the cover, the logo
-    gradient(x, y, w, h, shade(ct, 0.85), shade(cb, 0.45));
-    box(x, y, w, h, EDGE); box(x + 1, y + 1, w - 2, h - 2, EDGE_MID);
-    P(x + 2, y + 2, EDGE_LO, w - 4, 1);                              // the lid's lip
-    for (let i = 0; i < dx; i++) P(x - dx + i, y - back(i), EDGE);   // the front-left corner edge runs back
-    for (let i = 0; i < dx; i++) P(x - dx + i, y + h - 1 - back(i), EDGE_MID);
-    logo(x + 5, y + 6);
-    const cx = x + 4, cy = y + 18;
-    box(cx - 1, cy - 1, 66, 66, '#07070b');
-    cover(cx, cy, 64, 64);
-    g.fillStyle = 'rgba(255,255,255,.08)';                          // shine across the plastic
-    for (let j = 3; j < h - 3; j++) for (let i = 3; i < w - 3; i++) { const k = i - j + 40; if ((k > 70 && k < 84) || (k > 92 && k < 95)) g.fillRect(x + i, y + j, 1, 1); }
-    writeName(x + w / 2, y + 86, w - 8, 2, '#ffffff', 'rgba(0,0,0,.55)');
+    for (let j = 1; j <= dy; j++) { const sx = x - Math.round(j * dx / dy); P(sx, y - j, `rgb(${ct.map((v) => Math.round(v * 0.45 + 55)).join(',')})`, w, 1); P(sx, y - j, EDGE); P(sx + w - 1, y - j, EDGE_MID); }
+    P(x - dx, y - dy, EDGE, w, 1);
+    for (let i = 0; i <= dx; i++) P(x + w - 1 - i, y - Math.round(i * dy / dx), EDGE_MID);
+    // front: the clear frame (thick at top and bottom, where the hinge and the lip are) ...
+    P(x, y, `rgb(${ct.map((v) => Math.round(v * 0.35 + 30)).join(',')})`, w, h);
+    P(x + 1, y + 1, clear(0.28), w - 2, 5); P(x + 1, y + h - 6, clear(0.28), w - 2, 5);
+    P(x + 1, y + 6, clear(0.14), 3, h - 12); P(x + w - 4, y + 6, clear(0.14), 3, h - 12);
+    box(x, y, w, h, EDGE);
+    P(x + 1, y + 5, EDGE_MID, w - 2, 1); P(x + 1, y + h - 6, EDGE_MID, w - 2, 1);
+    for (const f of [0.18, 0.82]) { const nx = x + Math.round(w * f) - 2; P(nx, y + 1, EDGE_MID, 1, 4); P(nx + 4, y + 1, EDGE_MID, 1, 4); P(nx, y + h - 5, EDGE_MID, 1, 4); P(nx + 4, y + h - 5, EDGE_MID, 1, 4); } // hinge notches
+    for (let i = 0; i < dx; i++) { P(x - dx + i, y - back(i), EDGE); P(x - dx + i, y + h - 1 - back(i), EDGE_MID); }
+    // ... and the card inside it: gradient in the cover's colours, the logo, the cover and the title
+    const kx = x + 4, ky = y + 7, kw = w - 8, kh = h - 14;
+    gradient(kx, ky, kw, kh, shade(ct, 0.85), shade(cb, 0.45));
+    logo(kx + 3, ky + 3);
+    const cs = 52, cx = kx + (kw - cs) / 2, cy = ky + 14;
+    box(cx - 1, cy - 1, cs + 2, cs + 2, '#07070b');
+    cover(cx, cy, cs, cs);
+    writeName(kx + kw / 2, cy + cs + 3, kw - 4, 2, '#ffffff', 'rgba(0,0,0,.55)');
+    g.fillStyle = 'rgba(255,255,255,.10)';                          // shine across the plastic
+    for (let j = 1; j < h - 1; j++) for (let i = 1; i < w - 1; i++) { const k = i - j + 40; if ((k > 74 && k < 86) || (k > 92 && k < 95)) g.fillRect(x + i, y + j, 1, 1); }
   }
 
   // ---------- tape: a cassette drawn after Mihai's reference picture, stretched to fill the whole panel ----------
@@ -215,20 +241,19 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
   }
   function screw(a, b) { P(a, b, '#6d6a6c', 3, 3); P(a + 1, b, '#45424a'); P(a + 1, b + 1, '#9c98a0'); }
   function drawTape() {
-    const x = 0, y = 0, w = W - 2, h = H - 2;                          // the whole panel: no dark corners
+    const w = 92, h = 64, x = 1, y = Math.round((H - 2 - h) / 2);     // a real cassette's proportions, on the gradient
+    P(x + 2, y + h, 'rgba(0,0,0,.35)', w - 2, 1);                    // shadow
     round(x, y, w, h, T_SHELL, T_LINE);                                 // shell
     P(x + 2, y + 1, T_HI, w - 4, 1); P(x + 1, y + 2, T_HI, 1, h - 4);
     P(x + 2, y + h - 2, T_LO, w - 4, 1); P(x + w - 2, y + 2, T_LO, 1, h - 4);
-    screw(x + 3, y + 3); screw(x + w - 6, y + 3); screw(x + 3, y + h - 6); screw(x + w - 6, y + h - 6);
-    // label: the cover, across the top
-    const lx = x + 7, ly = y + 7, lw = 80, lh = 40;
+    screw(x + 2, y + 2); screw(x + w - 5, y + 2); screw(x + 2, y + h - 5); screw(x + w - 5, y + h - 5);
+    // label: the cover across the top, with the title strip under it
+    const lx = x + 6, ly = y + 5, lw = 80, lh = 30;
     cover(lx, ly, lw, lh);
-    round(lx - 1, ly - 1, lw + 2, lh + 2, null, '#4a4038');
-    [[lx, ly], [lx + lw - 1, ly], [lx, ly + lh - 1], [lx + lw - 1, ly + lh - 1]].forEach(([a, b]) => P(a, b, '#4a4038'));
-    logo(lx + 3, ly + 3);
-    bitmap(['.###.', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'], lx + lw - 10, ly + lh - 12, { '#': '#f4efe6' }); // side A
+    logo(lx + 2, ly + 2);
+    bitmap(['.###.', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'], lx + lw - 8, ly + 2, { '#': '#f4efe6' }); // side A
     // the window band: two reels and the tape window between them
-    const bx = x + 19, by = y + 21, bw = 56, bh = 18;
+    const bx = x + 18, by = ly + 6, bw = 56, bh = 18;
     round(bx, by, bw, bh, T_BAND, T_LINE);
     P(bx + 2, by + 1, '#fbf7ef', bw - 4, 1);
     reel(bx + 8, by + 9); reel(bx + bw - 9, by + 9);
@@ -237,19 +262,20 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     const sx = wx + Math.floor(ww / 2) - 1;                          // the brown tape spool in it
     P(sx - 1, wy + 2, '#7d5640', 6, 1); P(sx, wy + 3, '#9a6c50', 4, wh - 6); P(sx - 1, wy + wh - 3, '#7d5640', 6, 1);
     P(sx + 1, wy + 3, '#b9876a', 1, wh - 6);
-    // the title strip: a paper label with ruled lines and the album name in black
-    const px = x + 7, py = ly + lh + 4, pw = 80, ph = 30;
-    round(px - 1, py - 1, pw + 2, ph + 2, '#fbf8f1', '#8f8576');
-    P(px, py + 1, '#d84a3a', pw, 1);                                  // the red line at the top of a cassette label
-    for (let r = py + 9; r < py + ph - 1; r += 7) P(px + 2, r, '#e2dacb', pw - 4, 1);
-    const ls = nameLines(pw - 6, 3), top = py + 3 + Math.round((ph - 3 - ls.length * 7) / 2);
-    ls.forEach((t, j) => text(t, px + pw / 2, top + j * 7, '#1a1714'));
+    // the title strip: paper, a red line, the album name in black on up to two lines
+    const px = lx, py = ly + lh, ph = 16;
+    P(px, py, '#fbf8f1', lw, ph);
+    P(px, py, '#d84a3a', lw, 1);
+    const ls = nameLines(lw - 4, 2), top = py + 2 + Math.round((ph - 2 - (ls.length * 7 - 2)) / 2);
+    ls.forEach((t, j) => text(t, px + lw / 2, top + j * 7, '#1a1714'));
+    round(lx - 1, ly - 1, lw + 2, lh + ph + 2, null, '#4a4038');
+    [[lx, ly], [lx + lw - 1, ly], [lx, ly + lh + ph - 1], [lx + lw - 1, ly + lh + ph - 1]].forEach(([a, b]) => P(a, b, '#4a4038'));
     // bottom: the raised part with its grooves and four holes
-    const ty = y + h - 15;
-    P(x + 17, ty, T_GROOVE, w - 34, 1);
-    for (let j = 1; j < 14; j++) { const d = Math.round(j * 0.35); P(x + 17 - d, ty + j, T_GROOVE); P(x + w - 18 + d, ty + j, T_GROOVE); P(x + 18 - d, ty + j, '#ece3d4', w - 36 + 2 * d, 1); }
-    P(x + 2, y + h - 2, T_LO, w - 4, 1); P(x + 2, y + h - 1, T_LINE, w - 4, 1);
-    [[x + 22, ty + 8, 4, 3], [x + 33, ty + 6, 3, 3], [x + w - 36, ty + 6, 3, 3], [x + w - 26, ty + 8, 4, 3]].forEach(([a, b, c, d]) => P(a, b, '#2b2622', c, d));
+    const ty = py + ph + 2, rows = y + h - 1 - ty;
+    P(x + 19, ty, T_GROOVE, w - 38, 1);
+    for (let j = 1; j < rows; j++) { const d = Math.round(j * 0.6); P(x + 19 - d, ty + j, T_GROOVE); P(x + w - 20 + d, ty + j, T_GROOVE); P(x + 20 - d, ty + j, '#ece3d4', w - 40 + 2 * d, 1); }
+    P(x + 2, y + h - 2, T_LO, w - 4, 1);
+    [[x + 24, ty + 4, 4, 3], [x + 34, ty + 3, 3, 3], [x + w - 37, ty + 3, 3, 3], [x + w - 28, ty + 4, 4, 3]].forEach(([a, b, c, d]) => P(a, b, '#2b2622', c, d));
   }
 
   // ---------- cd: an 83 px disc ----------
@@ -292,7 +318,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     g = canvas.getContext('2d', { willReadFrequently: true });
     g.imageSmoothingEnabled = false;
     g.clearRect(0, 0, canvas.width, canvas.height);
-    if (look !== 'tape') { const [ct, cb] = coverColours(); gradient(0, 0, canvas.width, canvas.height, shade(ct, 0.5), shade(cb, 0.18)); } // full-panel backdrop
+    { const [ct, cb] = coverColours(), t = skinTone(); gradient(0, 0, canvas.width, canvas.height, mixc(shade(t, 1.1), ct, 0.15), mixc(shade(t, 0.8), cb, 0.1)); } // backdrop: the player's colour, a hint of the cover
     if (look === 'tape') drawTape(); else if (look === 'cd') drawCd(); else drawCase();
   }
   // the reels and the disc move while something plays (nothing runs when paused, hidden, or showing the case)
