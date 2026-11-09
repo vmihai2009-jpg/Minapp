@@ -50,6 +50,21 @@ function create({ dir, binDir, log }) {
     try { return fs.readdirSync(folder).filter((f) => AUDIO.test(f)).map((f) => path.join(folder, f)); } catch { return []; }
   };
 
+  // ----- covers and details of downloaded songs -----
+  const base = (f) => f.replace(AUDIO, '');
+  const IMG = ['.jpg', '.jpeg', '.png', '.webp'];
+  // yt-dlp's details file is large (every format it saw): keep the few fields Minapp shows in a small file, drop the rest
+  function keepDetails(file) {
+    const info = base(file) + '.info.json';
+    try {
+      const j = JSON.parse(fs.readFileSync(info, 'utf8'));
+      fs.writeFileSync(base(file) + '.minapp.json', JSON.stringify({ album: j.album || '', artist: j.artist || j.creator || j.uploader || '', title: j.track || j.title || '' }));
+    } catch {}
+    try { fs.unlinkSync(info); } catch {}
+  }
+  const artFor = (file) => { for (const e of IMG) { const f = base(file) + e; if (fs.existsSync(f)) return f; } return ''; };
+  const detailsFor = (file) => { try { return JSON.parse(fs.readFileSync(base(file) + '.minapp.json', 'utf8')) || {}; } catch { return {}; } };
+
   // ----- yt-dlp -----
   const asset = process.platform === 'win32' ? 'yt-dlp.exe' : process.platform === 'darwin' ? 'yt-dlp_macos' : 'yt-dlp_linux';
   const bin = () => path.join(binDir, process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
@@ -113,6 +128,10 @@ function create({ dir, binDir, log }) {
         '--print', 'before_dl:MINAPP_ITEM %(playlist_index|1)s/%(n_entries|1)s %(title)s',
         // MP3 320 kbps constant bit rate with title/artist tags: plays in every DJ app and keeps beat grids stable
         ...(mp3 ? ['-x', '--audio-format', 'mp3', '--audio-quality', '320K', '--embed-metadata', '--ffmpeg-location', ffBin()] : []),
+        // the cover (YouTube thumbnail) saved next to each song, plus its details (album, artist) for the album panel;
+        // MP3s also get the cover embedded, so DJ apps and Finder / Explorer show it too
+        '--write-thumbnail', '--write-info-json', '--no-write-playlist-metafiles', '--no-clean-info-json',
+        ...(mp3 ? ['--convert-thumbnails', 'jpg', '--embed-thumbnail'] : []),
         '--print', 'after_move:filepath', '-o', out, '-P', dir, '--', url];
       // own process group off Windows, so a stop can take down yt-dlp and everything it started
       const p = spawn(bin(), args, { windowsHide: true, detached: process.platform !== 'win32' });
@@ -124,7 +143,7 @@ function create({ dir, binDir, log }) {
         let m;
         if ((m = /^MINAPP_ITEM (\d+)\/(\d+) (.*)$/.exec(l))) { cur.i = +m[1]; cur.n = total = +m[2]; cur.title = m[3]; cur.pct = 0; emit(); return; }
         if ((m = /^MINAPP_PCT\s*([\d.]+)%/.exec(l))) { const v = +m[1]; if (Math.abs(v - cur.pct) >= 1 || v >= 100) { cur.pct = v; emit(); } return; }
-        if (path.isAbsolute(l) && AUDIO.test(l)) { files.push(l); cur.saved++; cur.pct = 100; emit(); }
+        if (path.isAbsolute(l) && AUDIO.test(l)) { files.push(l); keepDetails(l); cur.saved++; cur.pct = 100; emit(); }
       };
       const eline = (l) => {
         if (RATE.test(l) && !rateLimited) { rateLimited = true; killTree(p); }
@@ -183,6 +202,6 @@ function create({ dir, binDir, log }) {
   // pause(true) stops yt-dlp until pause(false); a pause during a rate-limit wait is just shown, the wait keeps counting
   const pause = (on) => { paused = !!on; if (paused) { try { child && killTree(child); } catch {} } else if (wake) wake(); };
   const isPaused = () => paused;
-  return { dir, playlists, tracks, importFiles, audioIn, download, cancel, pause, isPaused, haveBin, haveFf, safeName };
+  return { dir, playlists, tracks, importFiles, audioIn, download, cancel, pause, isPaused, haveBin, haveFf, safeName, artFor, detailsFor };
 }
 module.exports = { create, AUDIO };
