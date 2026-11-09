@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.8
+- The album picture is sharper: 64 x 64 pixels instead of 16 x 16, with a lightly reduced palette.
+
 ## 1.9.7
 - No more pop-up notifications from Windows (or the Mac notification center) for updates, likes or finished downloads. The light bulb, the red heart and the download bar show these inside the player. Song-change notifications stay off unless you turn them on under Settings.
 
