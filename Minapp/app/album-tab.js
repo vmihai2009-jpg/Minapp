@@ -102,12 +102,13 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
   };
   const glyph = (ch) => FONT[ch] || FONT['?'];
   const textW = (t) => [...t].reduce((n, ch) => n + glyph(ch)[0].length + 1, 0) - 1;
-  function text(t, cx, y, c, shadow) { // centred on cx
-    let x = Math.round(cx - textW(t) / 2);
-    for (const ch of t) { const gl = glyph(ch); if (shadow) bitmap(gl, x, y + 1, { '#': shadow }); bitmap(gl, x, y, { '#': c }); x += gl[0].length + 1; }
+  function text(t, cx, y, c, shadow, sc = 1) { // centred on cx; sc = 2 draws every font pixel as 2 x 2
+    let x = Math.round(cx - textW(t) * sc / 2);
+    const put = (gl, ox, oy, col) => gl.forEach((r, j) => [...r].forEach((ch, i) => { if (ch === '#') P(ox + i * sc, oy + j * sc, col, sc, sc); }));
+    for (const ch of t) { const gl = glyph(ch); if (shadow) put(gl, x, y + 1, shadow); put(gl, x, y, c); x += (gl[0].length + 1) * sc; }
   }
   // the album name split into up to `max` lines that fit `width` pixels; shortened with ".." when it is too long
-  function nameLines(width, max) {
+  function nameLines(width, max, full) {
     const clean = String(albumName || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/\s+/g, ' ').trim();
     const words = clean.split(' ').filter(Boolean), ls = [];
     const cut = (w) => { while (w.length > 1 && textW(w + '..') > width) w = w.slice(0, -1); return w.trimEnd() + '..'; };
@@ -120,6 +121,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
       if (ls.length === max) { cur = ''; const rest = ls[max - 1] + ' ' + words.slice(i).join(' '); ls[max - 1] = textW(rest) <= width ? rest : cut(rest); break; }
     }
     if (cur && ls.length < max) ls.push(cur);
+    if (full) return { ls, fits: !ls.some((l) => l.endsWith('..')) && ls.join(' ').length >= clean.length };
     return ls;
   }
   function writeName(cx, top, width, max, c, shadow, lh = 7) {
@@ -175,49 +177,31 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     else bitmap(LOGO.note, x, y, { '#': '#e8e8e8' });
   }
 
-  // ---------- case: a clear cassette box seen slightly from the left and above (after Mihai's reference picture): the
-  // front stays flat so the cover keeps its pixels, the box's left side and top edge show as clear plastic ----------
-  const CASE = { x: 20, y: 10, w: 64, h: 100 };                     // a real cassette box is about 1 : 1.6
-  const DEPTH = { dx: 10, dy: 5 };                                   // how far back the box goes (left and up)
-  const EDGE = '#ece8f6', EDGE_MID = '#b9b3d0', EDGE_LO = '#6f6a8a';
+  // ---------- case: the clear cassette box from Mihai's reference picture. Its plastic frame is that picture, traced at
+  // 74 x 110 (white edges, see-through elsewhere so the panel shows through); the card inside is drawn here ----------
+  const CASE = { x: 10, y: 2, w: 74, h: 110 };
+  const CARD = { x: 13, y: 9, w: 55, h: 91 };                        // the card's place inside the frame
+  const FRAME_SRC = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEoAAABuCAYAAACA7YVRAAAEQ0lEQVR4nO2dQZLiMAxFf09RrFlwHzQnm/TJRtyHBWtWs5iYFopkKzSE0NarouLYsi0+jjFOsIEkxIeOOJ8ufwAMy7sCAODxSDPs59hKWvl4t9/+Lic3Qhki6cJ1JV66l6fYM2xH55Rnle8RLZdUeADwudtvsSmxQiRWmbxKSKXVnBmEDYuwx7EEdvstzqdLxRQAcHDKIxH26it1yTJIHOl8ugwfAHA+XaSRVaCOG0S854CE8CVsxP4RkBEXrZvU8SrUX2XEypBVulW5F+/l+w6RsrmSNqcOAjBsjASr8lplXpqO1+V7aTW7R0JzjItQLOJkmBrxXr4W2vaI/33EGiDcftkwANrYtl8GsPsVwveQ+Rn/RYqUWfwgdf5IBlEHwxBKVkqosNtvJ+OvB3Bsm9xle1cZ59OF5fmvQIGE22+BYbZL7wuXgHXpkTZSGa34nwjLE0+oYsTltdtvH9Hc35ZaZy7pRiTvV4DVR7ERt5av7pcR6cwTpFBhUqggKVSQFCpIChXEE4qXdOId0APObgaWcwlfeoF56x9N9lFTzF8hKVSQFCrILKE67qe4JRRBTQt3Itakn6oJRc/z4/3QQnU/7zSix5PktSh6siNrRot0BOqX3vA0V94QSyjC9AZDzxwA/+YCL+fH6nEvPRqPvJQn70D0LkzPHIBboUiEeUlP1sZuv53EFaF4PBJSJDO+9iBZIigtil7pxDuQ0yxBUqg6VAKzhfI6ux8Kl8AsoToTieRJWKjORJqQfZQPyxMtlHcDtPsbo9miguRUcJBsUUFSqCApVJAUKkjOHgTJFhUkOuDsHn27KsdRt1AJ5KVXh0sghWrDQP0GaCLIFhUkhYrRfDQxGYkK1fuwwX3iLlFE1z3ondDj0wmmT7PocDLSalGMFA5A9lFh8idMkOzMg9QedqXl3Fg/+RePGObInNSRl/Bk7dRaFC3nxvppLQaYjORfPILkShpBrL94sDomsG+pM1KkCbJF8auceAdyhjNIChUkhQqST7MYWKuF5FPBijkruyaNtVloOT9WT+mCqETUFohIBDln7kPyJPuoILlARJCcZmlDwIwW1cmSbS6z17jrEAbuWDWxg5Z1wNeAk0pkdHOKKx38CZvEi0vkxjBgVDrz8+nSg1gswgTYm3xdE1+JusT1by8ysnCwaCuvxQDRR9cuPa/Aw/gmWlMyk+t8JjwjzarD8k/vylherTpY7thoZRhEJnZs2Iiz0gfYe1+18gP1D0X6Tr6ZS6T+zw0A7Pbb49hKhkBm6Qw74ZZTjOmb8loA4VZcXY8uJ+LH1Ta61dTN9m/jhqmlYsbX5qnlRWjv/2nFAfFm/h2etsfWTR+1228/x33lCP6bGpw0UscoHEg/Av4Os0t8C5sbCoo+axijWJmQEVeDnXCL41qGIu7Oi+MnJzd4ZsOMVdhs9qUlrOVN30Nzi8qxdQEr+nSTFfMPIxIR4CKbg0EAAAAASUVORK5CYII=';
+  let frameImg = null;
+  function caseFrame() {
+    if (frameImg) return frameImg.complete ? frameImg : null;
+    frameImg = new Image(); frameImg.onload = () => { if (open) draw(); }; frameImg.src = FRAME_SRC;
+    return null;
+  }
   function drawCase() {
-    const { x, y, w, h } = CASE, { dx, dy } = DEPTH;
-    const [ct, cb] = coverColours();
-    const back = (i) => Math.round((dx - i) * dy / dx);            // how far up a column of the side is
-    const clear = (k) => `rgba(236,232,246,${k})`;                 // see-through plastic
-    // shadow under the box
-    P(x - dx + 3, y + h + 1, 'rgba(0,0,0,.35)', w + dx - 2, 1); P(x + 2, y + h, 'rgba(0,0,0,.35)', w - 1, 1);
-    // left side (the spine): clear plastic over the dark inside of the box
-    for (let i = 0; i < dx; i++) {
-      const cx = x - dx + i, up = back(i);
-      for (let j = 0; j < h; j++) { const m = j / h; P(cx, y - up + j, `rgb(${ct.map((v, c) => Math.round((v + (cb[c] - v) * m) * 0.35 + 20)).join(',')})`); }
-      P(cx, y - up, EDGE); P(cx, y - up + h - 1, EDGE_MID);
-      P(cx, y - up + 1, clear(0.35), 1, 4); P(cx, y - up + h - 5, clear(0.35), 1, 4); // thick clear ends
-    }
-    P(x - dx, y - dy, EDGE, 1, h); P(x - dx + 1, y - dy + 1, clear(0.3), 1, h - 2);
-    P(x - 2, y + 4, EDGE_MID, 1, h - 8);                             // where the side meets the front
-    // top edge: a thin clear strip going back
-    for (let j = 1; j <= dy; j++) { const sx = x - Math.round(j * dx / dy); P(sx, y - j, `rgb(${ct.map((v) => Math.round(v * 0.45 + 55)).join(',')})`, w, 1); P(sx, y - j, EDGE); P(sx + w - 1, y - j, EDGE_MID); }
-    P(x - dx, y - dy, EDGE, w, 1);
-    for (let i = 0; i <= dx; i++) P(x + w - 1 - i, y - Math.round(i * dy / dx), EDGE_MID);
-    // front: the clear frame (thick at top and bottom, where the hinge and the lip are) ...
-    P(x, y, `rgb(${ct.map((v) => Math.round(v * 0.35 + 30)).join(',')})`, w, h);
-    P(x + 1, y + 1, clear(0.28), w - 2, 5); P(x + 1, y + h - 6, clear(0.28), w - 2, 5);
-    P(x + 1, y + 6, clear(0.14), 3, h - 12); P(x + w - 4, y + 6, clear(0.14), 3, h - 12);
-    box(x, y, w, h, EDGE);
-    P(x + 1, y + 5, EDGE_MID, w - 2, 1); P(x + 1, y + h - 6, EDGE_MID, w - 2, 1);
-    for (const f of [0.18, 0.82]) { const nx = x + Math.round(w * f) - 2; P(nx, y + 1, EDGE_MID, 1, 4); P(nx + 4, y + 1, EDGE_MID, 1, 4); P(nx, y + h - 5, EDGE_MID, 1, 4); P(nx + 4, y + h - 5, EDGE_MID, 1, 4); } // hinge notches
-    for (let i = 0; i < dx; i++) { P(x - dx + i, y - back(i), EDGE); P(x - dx + i, y + h - 1 - back(i), EDGE_MID); }
-    // ... and the card inside it: gradient in the cover's colours, the logo, the cover and the title
-    const kx = x + 4, ky = y + 7, kw = w - 8, kh = h - 14;
-    gradient(kx, ky, kw, kh, shade(ct, 0.85), shade(cb, 0.45));
-    logo(kx + 3, ky + 3);
-    const cs = 52, cx = kx + (kw - cs) / 2, cy = ky + 14;
-    box(cx - 1, cy - 1, cs + 2, cs + 2, '#07070b');
-    cover(cx, cy, cs, cs);
-    writeName(kx + kw / 2, cy + cs + 3, kw - 4, 2, '#ffffff', 'rgba(0,0,0,.55)');
-    g.fillStyle = 'rgba(255,255,255,.10)';                          // shine across the plastic
-    for (let j = 1; j < h - 1; j++) for (let i = 1; i < w - 1; i++) { const k = i - j + 40; if ((k > 74 && k < 86) || (k > 92 && k < 95)) g.fillRect(x + i, y + j, 1, 1); }
+    const { x, y } = CASE, [ct, cb] = coverColours();
+    const kx = x + CARD.x, ky = y + CARD.y, kw = CARD.w, kh = CARD.h;
+    gradient(kx, ky, kw, kh, shade(ct, 0.75), shade(cb, 0.4));      // the card, in the cover's colours
+    logo(kx + 5, ky + 6);
+    const cw = 52, ch = 48, cx = kx + Math.floor((kw - cw) / 2), cy = ky + 19;
+    cover(cx, cy, cw, ch);
+    // the title where the reference has its bars: two lines, or one line of big letters when it is short
+    const room = kw - 4, one = nameLines(room / 2, 1, true);
+    if (one.ls.length && one.fits) text(one.ls[0], kx + kw / 2, cy + ch + 7, '#ffffff', 'rgba(0,0,0,.55)', 2);
+    else { const two = nameLines(room, 2, true); if (two.fits) writeName(kx + kw / 2, cy + ch + 6, room, 2, '#ffffff', 'rgba(0,0,0,.55)'); else writeName(kx + kw / 2, cy + ch + 4, room, 3, '#ffffff', 'rgba(0,0,0,.55)', 6); }
+    g.fillStyle = 'rgba(255,255,255,.07)';                          // the shine across the plastic, as in the picture
+    for (let j = 0; j < kh; j++) for (let i = 0; i < kw; i++) { const k = i - j * 0.6; if (k > 30 && k < 44) g.fillRect(kx + i, ky + j, 1, 1); }
+    const f = caseFrame(); if (f) g.drawImage(f, x, y);
   }
 
   // ---------- tape: a cassette drawn after Mihai's reference picture, stretched to fill the whole panel ----------
@@ -262,16 +246,22 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     const sx = wx + Math.floor(ww / 2) - 1;                          // the brown tape spool in it
     P(sx - 1, wy + 2, '#7d5640', 6, 1); P(sx, wy + 3, '#9a6c50', 4, wh - 6); P(sx - 1, wy + wh - 3, '#7d5640', 6, 1);
     P(sx + 1, wy + 3, '#b9876a', 1, wh - 6);
-    // the title strip: paper, a red line, the album name in black on up to two lines
-    const px = lx, py = ly + lh, ph = 16;
+    // the title strip: paper, a red line, the album name in black. The size adapts to the length: big letters for a
+    // short name, normal ones on up to two lines, then three tighter lines; only past that is it shortened with ".."
+    const px = lx, py = ly + lh, ph = 19;
     P(px, py, '#fbf8f1', lw, ph);
     P(px, py, '#d84a3a', lw, 1);
-    const ls = nameLines(lw - 4, 2), top = py + 2 + Math.round((ph - 2 - (ls.length * 7 - 2)) / 2);
-    ls.forEach((t, j) => text(t, px + lw / 2, top + j * 7, '#1a1714'));
+    const ink = '#1a1714', room = lw - 4, one = nameLines(room / 2, 1, true);
+    if (one.ls.length && one.fits) text(one.ls[0], px + lw / 2, py + 4, ink, null, 2);
+    else {
+      const two = nameLines(room, 2, true), ls = two.fits ? two.ls : nameLines(room, 3), lh2 = ls.length === 3 ? 6 : 7;
+      const top = py + 2 + Math.round((ph - 2 - (ls.length * lh2 - (lh2 - 5))) / 2);
+      ls.forEach((t, j) => text(t, px + lw / 2, top + j * lh2, ink));
+    }
     round(lx - 1, ly - 1, lw + 2, lh + ph + 2, null, '#4a4038');
     [[lx, ly], [lx + lw - 1, ly], [lx, ly + lh + ph - 1], [lx + lw - 1, ly + lh + ph - 1]].forEach(([a, b]) => P(a, b, '#4a4038'));
     // bottom: the raised part with its grooves and four holes
-    const ty = py + ph + 2, rows = y + h - 1 - ty;
+    const ty = py + ph + 1, rows = y + h - 1 - ty;
     P(x + 19, ty, T_GROOVE, w - 38, 1);
     for (let j = 1; j < rows; j++) { const d = Math.round(j * 0.6); P(x + 19 - d, ty + j, T_GROOVE); P(x + w - 20 + d, ty + j, T_GROOVE); P(x + 20 - d, ty + j, '#ece3d4', w - 40 + 2 * d, 1); }
     P(x + 2, y + h - 2, T_LO, w - 4, 1);
