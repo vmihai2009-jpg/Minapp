@@ -1163,7 +1163,8 @@ async function installUpdate() {
 // After an update (or the first start of a newer version), show what changed since the version that ran last.
 function whatsNew() {
   const cfg0 = readCfg(), cur = app.getVersion();
-  // versions before 1.8.8 did not record this: an existing setup (it has settings) just sees this version's notes
+  // versions before 1.8.8 did not record which version ran last: an existing setup (it has settings) then gets the whole
+  // history, so nothing is missed when coming from an old version
   const existing = Object.keys(cfg0).some((k) => k !== 'lastVersion');
   const last = cfg0.lastVersion || (existing ? '0.0.0' : null);
   if (last === cur) return;
@@ -1172,10 +1173,9 @@ function whatsNew() {
   let text = '';
   try { text = fs.readFileSync(path.join(__dirname, 'CHANGELOG.md'), 'utf8'); } catch { return; }
   const sections = [];
-  for (const sec of text.split(/^## /m).slice(1)) {
+  for (const sec of text.split(/^## /m).slice(1, 16)) { // newest first; at most the latest 15 versions
     const v = sec.split(/\r?\n/)[0].trim();
     if (!updater.newer(v, last) || updater.newer(v, cur)) continue;
-    if (!cfg0.lastVersion && v !== cur) continue;
     const items = sec.split(/\r?\n/).slice(1).map((l) => l.replace(/^\s*-\s*/, '').trim()).filter(Boolean);
     sections.push({ version: v, items });
   }

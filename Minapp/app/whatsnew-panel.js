@@ -2,7 +2,7 @@
 // playlist colours, with a close mark. It opens under the player and closes with its X or a click.
 import { setText } from './download-bar.js';
 
-const W = 275, PAD = 7, CHARS = Math.floor((W - 2 * PAD) / 5); // 52 characters of 5 px per line
+const MAX_LINES = 26, W = 275, PAD = 7, CHARS = Math.floor((W - 2 * PAD) / 5); // 52 characters of 5 px per line
 
 function wrap(text, width) {
   const out = [];
@@ -32,7 +32,8 @@ export function initWhatsNew(webamp, api) {
     lines.pop();
     const panel = document.createElement('div');
     panel.id = 'whatsnew-panel';
-    const H = 22 + lines.length * 9 + 8;
+    const shown = Math.min(lines.length, MAX_LINES);
+    const H = 22 + shown * 9 + 8;
     panel.style.cssText = `position:fixed;width:${W}px;height:${H}px;box-sizing:border-box;z-index:55;background:${bg};` +
       'border:1px solid;border-color:rgba(255,255,255,.35) rgba(0,0,0,.6) rgba(0,0,0,.6) rgba(255,255,255,.35);' +
       `box-shadow:inset 0 0 0 1px ${bg},inset 0 0 0 2px rgba(0,0,0,.45);cursor:pointer;user-select:none;`;
@@ -45,7 +46,19 @@ export function initWhatsNew(webamp, api) {
     const rule = document.createElement('div');
     rule.style.cssText = `position:absolute;left:${PAD}px;right:${PAD}px;top:17px;height:1px;background:${hi};opacity:.45`;
     panel.appendChild(rule);
-    lines.forEach((l, i) => row(l.t, 23 + i * 9, l.head ? 'filter:brightness(1.35)' : ''));
+    const body = [];
+    lines.forEach((l, i) => body.push(row(l.t, 23 + i * 9, l.head ? 'filter:brightness(1.35)' : '')));
+    // a long history scrolls with the mouse wheel (the pop-up still closes with a click)
+    let top = 0;
+    const scroll = (d) => {
+      top = Math.max(0, Math.min(lines.length - shown, top + d));
+      body.forEach((el, i) => { const k = i - top; el.style.display = k >= 0 && k < shown ? '' : 'none'; el.style.top = 23 + k * 9 + 'px'; });
+    };
+    if (lines.length > shown) {
+      scroll(0);
+      panel.addEventListener('wheel', (e) => { e.preventDefault(); scroll(e.deltaY > 0 ? 3 : -3); }, { passive: false });
+      row('wheel to scroll', 7, 'left:auto;right:30px;opacity:.6');
+    }
     // close mark in the same skin font, top right (the whole pop-up closes on a click)
     const x = row('X', 7, 'left:auto;right:7px');
     x.title = 'Close';

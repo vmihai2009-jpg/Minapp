@@ -34,7 +34,7 @@ async function check(current, fetchImpl = fetch) {
   const key = platformKey();
   const a = key && (rel.assets || []).find((x) => new RegExp(`^Minapp-${key}-v[\\d.]+\\.zip$`, 'i').test(x.name) && trusted(x.browser_download_url));
   etag = (r.headers && r.headers.get && r.headers.get('etag')) || null;
-  lastInfo = { current, latest, newer: newer(latest, current), notes: String(rel.body || '').slice(0, 1200), page: rel.html_url,
+  lastInfo = { current, latest, newer: newer(latest, current), notes: String(rel.body || '').slice(0, 4000), page: rel.html_url,
     asset: a ? { name: a.name, url: a.browser_download_url, size: a.size } : null };
   return lastInfo;
 }
