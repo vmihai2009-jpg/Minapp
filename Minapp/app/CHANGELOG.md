@@ -1,5 +1,9 @@
 # What's new in Minapp
 
+## 1.9.12
+- While the album picture loads, the panel shows LOADING with sliding stripes and counting dots instead of checkers.
+- The album name is never bigger than the normal letter size; long names use up to three lines.
+
 ## 1.9.11
 - Album panel restyled. The album name is in a small pixel font: white on the box and the CD, black on the cassette.
 - The background takes the player's own colour with a hint of the album's, instead of flat black.
