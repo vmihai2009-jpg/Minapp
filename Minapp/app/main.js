@@ -95,7 +95,7 @@ async function macState() {
   const [status, title, artist, dur, pos, vol, id, shuf, rep, art] = out.split('|||');
   const num = (x) => parseFloat(String(x).replace(',', '.')) || 0;
   const st = { status, title, artist, id, duration: num(dur) / 1000, position: num(pos), volume: num(vol) };
-  if (/^https:\/\/i\.scdn\.co\//.test(art || '')) st.art = art.trim(); // the Spotify app tells us the cover itself, no login needed
+  if (SPOT_IMG.test((art || '').trim())) st.art = art.trim(); // the Spotify app tells us the cover itself, no login needed
   if (shuf === 'true' || shuf === 'false') st.shuffle = shuf === 'true';
   if (rep === 'true' || rep === 'false') st.repeat = rep === 'true';
   return st;
@@ -604,7 +604,9 @@ const SPOT_SCOPE = 'user-read-playback-state user-read-currently-playing user-mo
 let spotAccess = null, spotExpires = 0, spotBackoffUntil = 0, spotQueueBusy = false, spotLastId = null;
 let spotifyQueue = { items: [], err: '' };
 let spotArt = null; // album picture of the song Spotify reports as playing
-const artCache = new Map(); // url -> data URL
+const SPOT_IMG = /^https:\/\/([\w-]+\.)*(scdn\.co|spotifycdn\.com)\//;
+const artCache = new Map();
+const oembedCache = new Map(); // spotify track id -> cover url ('' = none found) // url -> data URL
 let lastSongTitle = '';
 let history = [], prevSong = null; // songs already played, oldest first, so the playlist can scroll back
 const norm = (t) => String(t || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -795,6 +797,22 @@ async function playSpotifyContext(uri) {
 ipcMain.handle('spotlists:get', (_e, force) => getSpotifyPlaylists(!!force));
 ipcMain.handle('spotlists:play', (_e, uri) => playSpotifyContext(String(uri || '')));
 ipcMain.on('spotlists:connect', () => { connectSpotifyQueue().then(() => { spotLists = null; }); });
+
+// Cover of a track through Spotify's public oEmbed address (no login). The first call starts the lookup and returns nothing;
+// the next state poll finds it in the cache.
+function spotCover(id) {
+  const m = /^(?:spotify:track:)?([A-Za-z0-9]{22})$/.exec(String(id));
+  if (!m) return '';
+  const k = m[1];
+  if (oembedCache.has(k)) return oembedCache.get(k);
+  oembedCache.set(k, ''); // marks "looking"
+  fetch('https://open.spotify.com/oembed?url=' + encodeURIComponent('spotify:track:' + k))
+    .then((r) => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
+    .then((j) => { const u = String(j.thumbnail_url || ''); if (SPOT_IMG.test(u)) oembedCache.set(k, u); else log('cover: unexpected address ' + u.slice(0, 80)); })
+    .catch((e) => { oembedCache.delete(k); log('cover lookup failed: ' + ((e && e.message) || e)); });
+  if (oembedCache.size > 200) oembedCache.delete(oembedCache.keys().next().value);
+  return '';
+}
 
 // Remember what played. When the song changes it also works out whether we moved forward through the queue
 // (the skipped songs go to the history) or back through the history (they return to the front of the queue).
@@ -1034,7 +1052,10 @@ async function checkForUpdate(manual) {
     if (manual) dialog.showMessageBox(win, { message: `Minapp is up to date (version ${app.getVersion()})`, detail: info.none ? 'No release has been published on GitHub yet.' : '' });
     return;
   }
-  if (!manual) { new Notification({ title: 'Minapp update available', body: `Version ${info.latest} is ready: open the Minapp menu > Update.` }).show(); return; }
+  if (!manual) { // the bulb shows it; one quiet notification per version
+    if (readCfg().updNotified !== info.latest) { writeCfg({ updNotified: info.latest }); new Notification({ title: 'Minapp update available', body: `Version ${info.latest} is ready: click the light bulb in the player's corner.` }).show(); }
+    return;
+  }
   await installUpdate();
 }
 // Windows: the Spotify/volume helper (PowerShell) keeps skinvol.dll open, which blocks replacing it; stop it first
@@ -1245,6 +1266,7 @@ ipcMain.handle('spotify:state', async () => {
   if (st.title) lastSongTitle = st.title;
   st.queue = spotifyQueue.items;
   if (!st.art && spotArt && st.title && spotArt.title === norm(st.title)) st.art = spotArt.url;
+  if (!st.art && st.id) { const c = spotCover(st.id); if (c) st.art = c; } // no login needed: Spotify's public oEmbed page
   st.history = history.map((x) => ({ ...x, id: 'h' + x.id }));
   // Explain an empty list instead of showing nothing: the desktop app does not expose its queue
   if (!st.queue.length && st.title && !process.env.SKIN_FAKE) {
@@ -1276,7 +1298,7 @@ ipcMain.on('win:size', (_e, w, h, off = 0) => {
 });
 ipcMain.handle('art:get', async (_e, url) => {
   url = String(url || '');
-  if (!/^https:\/\/(i\.scdn\.co|i\.ytimg\.com)\//.test(url)) return null;
+  if (!(SPOT_IMG.test(url) || /^https:\/\/i\.ytimg\.com\//.test(url))) return null;
   if (artCache.has(url)) return artCache.get(url);
   try {
     const r = await fetch(url);
@@ -1579,8 +1601,13 @@ app.whenReady().then(() => {
   if (ytApi.signedIn()) ytApi.refreshPlaylists();
   registerHotkeys();
   win.webContents.once('did-finish-load', () => setTimeout(whatsNew, 1500));
-  // quiet check for a new release at start (at most once a day); the menu then shows "Update available"
-  if (Date.now() - (cfg.updCheck || 0) > 864e5) setTimeout(() => checkForUpdate(false), 15000);
+  // quiet checks for a new release: shortly after start, then every 30 minutes, and when the player is brought to the front
+  // (at most every 5 minutes). The light bulb and the menu then show "Update available". Repeat checks are tiny (ETag).
+  let lastQuiet = 0;
+  const quietCheck = () => { if (Date.now() - lastQuiet < 3e5) return; lastQuiet = Date.now(); checkForUpdate(false); };
+  setTimeout(quietCheck, 15000);
+  setInterval(quietCheck, 18e5).unref();
+  win.on('focus', quietCheck);
   app.on('will-quit', () => globalShortcut.unregisterAll());
   // start on YouTube again only if the last session ended there and a link is saved
   if (cfg.source === 'youtube' && cfg.yt) setSource('youtube');
