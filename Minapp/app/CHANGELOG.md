@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.4
+- Heart button for Spotify: the eject button is now a heart. Click it (or the ADD button in the playlist window) to add the playing song to your Liked Songs; the heart turns red, click again to remove it. The first time, Minapp asks you to connect Spotify once more so it may change your Liked Songs. The menu is still on the O button and right-click.
+
 ## 1.9.3
 - Spotify cover pictures are now found without any login, also when the Spotify app does not hand over its artwork address.
 - The update light bulb now shows up soon after every new release: Minapp checks about every 30 minutes and whenever you bring the player to the front (not just once a day). The checks are tiny and quiet, and you get one notification per version.

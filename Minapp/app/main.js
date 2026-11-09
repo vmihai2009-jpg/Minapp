@@ -600,7 +600,7 @@ function ytQueue() {
 // Spotify: the desktop app exposes no queue, so this uses Spotify's Web API (one-time login, PKCE, no secret).
 const SPOT_PORT = 8898;
 const SPOT_REDIRECT = `http://127.0.0.1:${SPOT_PORT}/callback`;
-const SPOT_SCOPE = 'user-read-playback-state user-read-currently-playing user-modify-playback-state playlist-read-private playlist-read-collaborative user-library-read';
+const SPOT_SCOPE = 'user-read-playback-state user-read-currently-playing user-modify-playback-state playlist-read-private playlist-read-collaborative user-library-read user-library-modify';
 let spotAccess = null, spotExpires = 0, spotBackoffUntil = 0, spotQueueBusy = false, spotLastId = null;
 let spotifyQueue = { items: [], err: '' };
 let spotArt = null; // album picture of the song Spotify reports as playing
@@ -813,6 +813,61 @@ function spotCover(id) {
   if (oembedCache.size > 200) oembedCache.delete(oembedCache.keys().next().value);
   return '';
 }
+
+// ---------- Spotify: heart button = add to / remove from Liked Songs ----------
+const likedCache = new Map(); // track id -> true/false (absent = not asked yet)
+const trackIdOf = (id) => { const m = /([A-Za-z0-9]{22})$/.exec(String(id || '')); return m ? m[1] : null; };
+async function spotLibrary(method, tid) { // Spotify's newer /me/library address first, the older /me/tracks one as fallback
+  const tok = await spotAccessToken();
+  if (!tok) { const e = new Error('login'); e.login = true; throw e; }
+  const H = { Authorization: 'Bearer ' + tok };
+  const tries = method === 'GET'
+    ? [`/me/library/contains?uris=${encodeURIComponent('spotify:track:' + tid)}`, `/me/tracks/contains?ids=${tid}`]
+    : [`/me/library?uris=${encodeURIComponent('spotify:track:' + tid)}`, `/me/tracks?ids=${tid}`];
+  let last = 0;
+  for (const t of tries) {
+    const r = await fetch('https://api.spotify.com/v1' + t, { method, headers: H });
+    last = r.status;
+    if (r.ok) return method === 'GET' ? !!(await r.json())[0] : true;
+    if (r.status === 401 || r.status === 403) { const e = new Error('scope'); e.scope = true; throw e; }
+    if (r.status === 429) throw new Error('Spotify is busy, try again in a moment');
+  }
+  throw new Error('Spotify answered HTTP ' + last);
+}
+function checkLiked(id) {
+  const tid = trackIdOf(id);
+  if (!tid || likedCache.has(tid) || !readCfg().spotRefresh || !String(readCfg().spotScope || '').includes('user-library-read')) return;
+  likedCache.set(tid, false); // marks "asking"
+  spotLibrary('GET', tid).then((v) => likedCache.set(tid, v)).catch((e) => { likedCache.delete(tid); log('liked check failed: ' + e.message); });
+  if (likedCache.size > 100) likedCache.delete(likedCache.keys().next().value);
+}
+let likeBusy = false;
+async function toggleLike() {
+  if (likeBusy) return;
+  likeBusy = true;
+  try {
+    const st = (await spotifyState()) || {};
+    const tid = trackIdOf(st.id);
+    if (!tid) { dialog.showMessageBox(win, { message: 'Nothing to like', detail: 'Start a Spotify song first.' }); return; }
+    const cfg = readCfg();
+    if (!cfg.spotRefresh || !String(cfg.spotScope || '').includes('user-library-modify')) {
+      const r = await dialog.showMessageBox(win, { type: 'info', buttons: ['Connect Spotify', 'Cancel'], defaultId: 0, cancelId: 1, message: 'The heart needs Spotify connected once more',
+        detail: 'It lets Minapp add songs to your Liked Songs. Your Spotify app Client ID is kept, so this is one click and a browser approval.' });
+      if (r.response === 0) { await connectSpotifyQueue(); }
+      return;
+    }
+    let was = likedCache.get(tid);
+    if (was === undefined) was = await spotLibrary('GET', tid);
+    await spotLibrary(was ? 'DELETE' : 'PUT', tid);
+    likedCache.set(tid, !was);
+    log((was ? 'unliked ' : 'liked ') + tid);
+    try { new Notification({ title: was ? 'Removed from Liked Songs' : 'Added to Liked Songs', body: [st.artist, st.title].filter(Boolean).join(' - '), silent: true }).show(); } catch {}
+  } catch (e) {
+    if (e.scope || e.login) { writeCfg({ spotScope: null }); dialog.showMessageBox(win, { message: 'Spotify needs to be connected again', detail: 'Use the heart once more and choose Connect Spotify.' }); }
+    else dialog.showMessageBox(win, { type: 'warning', message: 'Could not update Liked Songs', detail: String((e && e.message) || e) });
+  } finally { likeBusy = false; }
+}
+ipcMain.handle('spotify:like', () => toggleLike());
 
 // Remember what played. When the song changes it also works out whether we moved forward through the queue
 // (the skipped songs go to the history) or back through the history (they return to the front of the queue).
@@ -1266,6 +1321,7 @@ ipcMain.handle('spotify:state', async () => {
   if (st.title) lastSongTitle = st.title;
   st.queue = spotifyQueue.items;
   if (!st.art && spotArt && st.title && spotArt.title === norm(st.title)) st.art = spotArt.url;
+  if (st.id) { checkLiked(st.id); const lk = likedCache.get(trackIdOf(st.id)); if (lk !== undefined) st.liked = lk; }
   if (!st.art && st.id) { const c = spotCover(st.id); if (c) st.art = c; } // no login needed: Spotify's public oEmbed page
   st.history = history.map((x) => ({ ...x, id: 'h' + x.id }));
   // Explain an empty list instead of showing nothing: the desktop app does not expose its queue

@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('bridge', {
   widgetGet: () => ipcRenderer.invoke('widget:get'),
   widgetSet: (m) => ipcRenderer.send('widget:set', m),
   onWidget: (cb) => ipcRenderer.on('widget:mode', (_e, m) => cb(m)),
+  like: () => ipcRenderer.invoke('spotify:like'),
   spotLists: (force) => ipcRenderer.invoke('spotlists:get', force),
   spotPlayList: (uri) => ipcRenderer.invoke('spotlists:play', uri),
   spotConnect: () => ipcRenderer.send('spotlists:connect'),

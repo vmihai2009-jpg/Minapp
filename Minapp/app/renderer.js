@@ -222,20 +222,29 @@
         api.cmd(sr.id, sr.id === 'shuffle' ? m.shuffle : m.repeat);
       } catch {}
     }, 0);
+    // Spotify: the playlist window's ADD button works like the heart (add to Liked Songs)
+    if (e.target.closest('#playlist-add-menu') && (document.documentElement.dataset.source || 'spotify') === 'spotify') {
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); api.like(); setTimeout(() => kickPoll(1500), 1500); return;
+    }
     // eject used to open Webamp's own file picker, which makes no sense here: open the menu instead
     if (e.target.closest('#eject')) {
       e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
       // on YouTube the button is a record button: it downloads the current link (personal use)
-      if (document.documentElement.classList.contains('src-youtube')) api.cmd('download'); else api.showMenu();
+      if (document.documentElement.classList.contains('src-youtube')) api.cmd('download');
+      else if ((document.documentElement.dataset.source || 'spotify') === 'spotify') { api.like(); setTimeout(() => kickPoll(1500), 1500); } // heart: add to Liked Songs
+      else api.showMenu();
     }
   }, true);
+  ['mousedown', 'mouseup'].forEach((ev) => document.addEventListener(ev, (e) => {
+    if (e.target.closest && e.target.closest('#playlist-add-menu') && (document.documentElement.dataset.source || 'spotify') === 'spotify') { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); }
+  }, true));
   api.onDownload((on) => document.documentElement.classList.toggle('downloading', !!on));
   import('./whatsnew-panel.js').then((m) => m.initWhatsNew(webamp, api)).catch((e) => api.log('whats new failed: ' + e.message));
   import('./playlist-picker.js').then((m) => m.initPlaylistPicker(webamp, api)).catch((e) => api.log('playlist picker failed: ' + e.message));
   import('./album-tab.js').then((m) => m.initAlbumTab(webamp, api, () => widgetMode)).catch((e) => api.log('album tab failed: ' + e.message));
   import('./update-bulb.js').then((m) => m.initUpdateBulb(api)).catch((e) => api.log('update bulb failed: ' + e.message));
   import('./download-bar.js').then((m) => m.initDownloadBar(webamp, api)).catch((e) => api.log('download bar failed: ' + e.message));
-  setInterval(() => { const b = document.getElementById('eject'); if (b) b.title = document.documentElement.classList.contains('src-youtube') ? 'Record: download this YouTube link (personal use)' : ''; }, 1500);
+  setInterval(() => { const b = document.getElementById('eject'); if (b) b.title = document.documentElement.classList.contains('src-youtube') ? 'Record: download this YouTube link (personal use)' : (document.documentElement.dataset.source || 'spotify') === 'spotify' ? (document.documentElement.classList.contains('liked') ? 'Liked: click to remove from Liked Songs' : 'Like: add this song to Liked Songs') : ''; }, 1500);
   let modeHoldUntil = 0, holdUntil = 0;
   const followModes = (s) => {
     if (Date.now() < modeHoldUntil) return;
@@ -593,6 +602,7 @@
       if (s.status !== 'playing') setSynth(false);
       document.documentElement.classList.toggle('src-youtube', s.source === 'youtube');
       document.documentElement.dataset.source = s.source || 'spotify';
+      document.documentElement.classList.toggle('liked', !!s.liked);
       if (window.__albumTab) window.__albumTab.setArt(s.status === 'closed' || s.status === 'stopped' ? null : s.art || '');
       const status = webamp.getMediaStatus();
       if (s.status === 'closed' || s.status === 'stopped') {
