@@ -14,7 +14,7 @@ const LOOK_ORDER = ['case', 'tape', 'cd'];
 
 export function initAlbumTab(webamp, api, getWidgetMode) {
   let open = false, tab = null, canvas = null, url = null, token = 0, img = null, look = 'case';
-  let spin = false, spinStep = 0, loading = false, dots = 0, dotTimer = null, stripe = 0;
+  let spin = false, spinStep = 0, loading = false, dots = 0, dotTimer = null, stripe = 0, noCover = false, giveUp = null, stopped = true;
   let playing = false, frame = 0, lastSrc = '', timer = null, albumName = '', grid = null, skinKey = '';
   try {
     open = localStorage.getItem('minapp.albumTab') === '1';
@@ -60,7 +60,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
   // the cover reduced to a small pixel grid with a slightly smaller palette (cached per picture and shape)
   function coverGrid(w, h) {
     const key = w + 'x' + h;
-    if (!img && loading) { // waiting for the picture: dark, with faint diagonal stripes (the words go on top per look)
+    if (!img) { // no picture (yet): dark, with faint diagonal stripes that slide while loading (words go on top per look)
       const c = document.createElement('canvas'); c.width = w; c.height = h; const cg = c.getContext('2d');
       for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { cg.fillStyle = (((x - stripe + y) % 6) + 6) % 6 < 1 ? '#2a2a3a' : (y < h / 2 ? '#1f1f2c' : '#1a1a25'); cg.fillRect(x, y, 1, 1); }
       return c;
@@ -68,9 +68,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     if (grid && grid.key === key && grid.img === img) return grid.c;
     const c = document.createElement('canvas'); c.width = w; c.height = h;
     const cg = c.getContext('2d', { willReadFrequently: true });
-    if (!img) {
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { cg.fillStyle = ((x >> 2) + (y >> 2)) % 2 ? '#34343e' : '#41414d'; cg.fillRect(x, y, 1, 1); }
-    } else {
+    {
       const s = Math.min(img.naturalWidth, img.naturalHeight * w / h), sh = s * h / w; // centre crop to the wanted shape
       cg.imageSmoothingEnabled = true; cg.imageSmoothingQuality = 'high';
       cg.drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - sh) / 2, s, sh, 0, 0, w, h);
@@ -140,7 +138,8 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
 
   // "LOADING..." with the dots counting up while the picture is on its way
   function loadingText(cx, y, c, shadow) {
-    if (!loading || img) return false;
+    if (img) return false;
+    if (!loading) { if (!noCover) return false; text('NO COVER', cx, y, c, shadow); return true; }
     const base = 'LOADING', dw = textW('...'), x0 = Math.round(cx - (textW(base) + 1 + dw) / 2);
     text(base, x0 + textW(base) / 2, y, c, shadow);
     for (let k = 0; k < 3; k++) if (k < dots) text('.', x0 + textW(base) + 1 + k * 2, y, c, shadow);
@@ -358,14 +357,14 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     const im = new Image();
     const mine = ++token;
     im.onload = () => { if (mine === token) { img = im; setLoading(false); draw(); } };
-    im.onerror = () => { api.log('album tab: picture could not be decoded'); img = null; setLoading(false); draw(); };
+    im.onerror = () => { api.log('album tab: picture could not be decoded'); img = null; setLoading(false); noCover = true; draw(); };
     im.src = dataUrl;
   }
 
   function set(on) {
     open = on;
     try { localStorage.setItem('minapp.albumTab', on ? '1' : '0'); } catch {}
-    if (on) { ensure(); tab.style.display = ''; if (url) load(url); else draw(); }
+    if (on) { ensure(); tab.style.display = ''; load(url); }
     else if (tab) tab.style.display = 'none';
     animate();
     api.albumState({ look, spin, open });
@@ -373,24 +372,33 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
 
   async function load(u) {
     if (!open || !canvas) return;
-    if (!u) { token++; img = null; setLoading(false); draw(); return; }
+    if (!u) { // no picture address: still on its way if something is playing (Spotify / Windows send it a bit later)
+      token++; img = null; clearTimeout(giveUp);
+      if (url === '' && albumName && !stopped) { noCover = false; setLoading(true); giveUp = setTimeout(() => { if (url === '') { setLoading(false); noCover = true; draw(); } }, 10000); }
+      else { setLoading(false); noCover = false; }
+      draw(); return;
+    }
+    clearTimeout(giveUp); noCover = false;
     const mine = token, wait = setTimeout(() => { if (token === mine && url === u) { img = null; setLoading(true); draw(); } }, 150); // no flash when it is quick
     try {
       const d = await api.artGet(u);
       if (u !== url) return;
       clearTimeout(wait);
-      if (d) paint(d); else { api.log('album tab: no picture for ' + u); img = null; setLoading(false); draw(); }
-    } catch (e) { clearTimeout(wait); api.log('album tab error: ' + (e && e.message)); img = null; setLoading(false); draw(); }
+      if (d) paint(d); else { api.log('album tab: no picture for ' + u); img = null; setLoading(false); noCover = true; draw(); }
+    } catch (e) { clearTimeout(wait); api.log('album tab error: ' + (e && e.message)); img = null; setLoading(false); noCover = true; draw(); }
   }
 
   // u: picture address ('' = none, null = nothing playing); song: title; isPlaying: moves the reels / disc; album: its name
   function setArt(u, song, isPlaying, album) {
     const next = u === null ? '' : u;
+    const wasStopped = stopped; stopped = u === null;
     if (isPlaying !== undefined && !!isPlaying !== playing) { playing = !!isPlaying; animate(); }
     const name = album || song || ''; // YouTube and local files have no album: the song title instead
     const src = source();
-    if (name !== albumName || src !== lastSrc) { albumName = name; lastSrc = src; if (open && canvas) draw(); }
-    if (next === url) return;
+    const changed = name !== albumName || src !== lastSrc;
+    if (changed) { albumName = name; lastSrc = src; if (open && canvas) draw(); }
+    if (next === url) { if (!next && open && canvas && (changed || wasStopped !== stopped)) load(''); return; } // new song, picture not here yet
+
     url = next;
     if (open) load(url);
   }
