@@ -221,12 +221,15 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     // 2. laid onto the box column by column, following the turn
     const lift = (i) => Math.round(rise * i / (kw - 1)), colH = (i) => kh - Math.round(shrink * i / (kw - 1));
     for (let i = 0; i < kw; i++) g.drawImage(off, i, 0, 1, kh, kx + i, ky - lift(i), 1, colH(i));
-    // 3. the title where the reference has its bars, written straight on top so the letters stay crisp
-    loadingText(kx + cx + cw / 2, ky + cy + ch / 2 - 3 - lift(cx + cw / 2), '#e8e6f2', 'rgba(0,0,0,.6)');
-    textLift = () => -lift(kw >> 1);                                  // the slope is only 2 px: keep each line straight
-    const room = kw - 6, ty = ky + cy + ch + 6;
-    { const two = nameLines(room, 2, true); if (two.fits) writeName(kx + kw / 2, ty + 1, room, 2, '#ffffff', 'rgba(0,0,0,.55)'); else writeName(kx + kw / 2, ty - 1, room, 3, '#ffffff', 'rgba(0,0,0,.55)', 6); }
-    textLift = null;
+    // 3. the words (title, or LOADING) drawn flat on a see-through layer, then laid on with the same slope as the card,
+    //    column by column without stretching, so they follow the turn and every letter keeps its pixels
+    const tl = document.createElement('canvas'); tl.width = kw; tl.height = kh;
+    g = tl.getContext('2d'); g.imageSmoothingEnabled = false;
+    loadingText(cx + cw / 2, cy + ch / 2 - 3, '#e8e6f2', 'rgba(0,0,0,.6)');
+    const room = kw - 6, ty = cy + ch + 6;
+    { const two = nameLines(room, 2, true); if (two.fits) writeName(kw / 2, ty + 1, room, 2, '#ffffff', 'rgba(0,0,0,.55)'); else writeName(kw / 2, ty - 1, room, 3, '#ffffff', 'rgba(0,0,0,.55)', 6); }
+    g = main; g.imageSmoothingEnabled = false;
+    for (let i = 0; i < kw; i++) g.drawImage(tl, i, 0, 1, kh, kx + i, ky - lift(i), 1, kh);
     // 4. the shine across the plastic, then the traced frame on top
     g.fillStyle = 'rgba(255,255,255,.07)';
     for (let j = 0; j < kh; j++) for (let i = 0; i < kw; i++) { const k = i - j * 0.6; if (k > 32 && k < 46) g.fillRect(kx + i, ky - lift(i) + j, 1, 1); }
