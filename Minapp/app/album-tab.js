@@ -1,199 +1,254 @@
-// Album tab: a small clear plastic cassette case, attached to the left of the player like Milkdrop is attached to the
-// right, with the cover of what is playing inside (Spotify album cover, YouTube thumbnail). The case carries the
-// source's logo at the top and a little sound-wave under the cover that is different for every song.
-// A second style is a cassette tape with the cover as its label and reels that turn while music plays.
-// Click the song title or the timer to show or hide it; click the case itself to switch between the two styles.
-const CASE = { W: 80, H: 110 }, TAPE = { W: 112, H: 74 };
-const CX = 8, CY = 21, CS = 64;  // where the cover sits inside the case, and its size
-const LX = 7, LY = 6, LW = 98, LH = 44; // the tape's label
-const LEVELS = 8;                // slightly reduced palette for a retro look
-let W = CASE.W, H = CASE.H;
+// Album panel: what is playing (Spotify album cover, YouTube thumbnail) shown as a physical object, in a panel attached
+// to the left of the player like Milkdrop is attached to the right. The panel is framed and coloured like Minapp's
+// other panels (the skin's playlist colours and bevel) and the name underneath is written in the skin's own font.
+// Three looks, drawn as 1-pixel pixel art like the skin, with the cover itself on a 32 x 32 grid:
+//  - case: a see-through plastic case with the source's logo
+//  - tape: a cassette with the cover as its label; the reels turn while music plays
+//  - cd:   a disc with the cover printed on it; it can turn slowly, in pixel steps, while music plays
+// Click the song title or the timer to show or hide it; click the panel to go to the next look. The menu has the same
+// choices under Album picture, plus "Spin the CD" (off by default: the CD then stays still and upright).
+import { setText } from './download-bar.js';
+
+const W = 96, H = 116;          // the panel: as tall as the player
+const ART_H = 90;               // the drawing; the name goes underneath
+const COVER = 32, LEVELS = 8;   // the cover's pixel grid and palette
+const LOOK_ORDER = ['case', 'tape', 'cd'];
+const CHARS = 17;               // characters per line of the skin font (5 px each)
 
 export function initAlbumTab(webamp, api, getWidgetMode) {
-  let open = false, tab = null, canvas = null, url = null, token = 0, cover = null, label = null, wave = '', style = 'case';
-  let playing = false, spin = 0, lastSrc = '', spinTimer = null;
-  try { open = localStorage.getItem('minapp.albumTab') === '1'; style = localStorage.getItem('minapp.albumStyle') === 'tape' ? 'tape' : 'case'; } catch {}
-  const size = () => { ({ W, H } = style === 'tape' ? TAPE : CASE); if (tab) { tab.style.width = W + 'px'; tab.style.height = H + 'px'; canvas.width = W; canvas.height = H; canvas.style.width = W + 'px'; canvas.style.height = H + 'px'; } };
-  size();
-
+  let open = false, tab = null, canvas = null, nameEl = null, url = null, token = 0, img = null, look = 'case';
+  let spin = false, spinStep = 0;
+  let playing = false, frame = 0, lastSrc = '', timer = null, albumName = '', grid = null, skinKey = '';
+  try {
+    open = localStorage.getItem('minapp.albumTab') === '1';
+    const l = localStorage.getItem('minapp.albumStyle'); if (LOOK_ORDER.includes(l)) look = l;
+    spin = localStorage.getItem('minapp.albumSpin') === '1';
+  } catch {}
   const source = () => document.documentElement.dataset.source || 'spotify';
+  const skin = () => { try { return webamp.store.getState().display.skinPlaylistStyle || {}; } catch { return {}; } };
 
+  function frameStyle() {
+    const st = skin(), bg = st.normalbg || '#000';
+    tab.style.cssText = `position:fixed;left:0;top:0;width:${W}px;height:${H}px;box-sizing:border-box;z-index:40;background:${bg};` +
+      'border:1px solid;border-color:rgba(255,255,255,.35) rgba(0,0,0,.6) rgba(0,0,0,.6) rgba(255,255,255,.35);' +
+      `box-shadow:inset 0 0 0 1px ${bg},inset 0 0 0 2px rgba(0,0,0,.45);user-select:none;cursor:pointer;` + (open ? '' : 'display:none;');
+    skinKey = bg;
+  }
   function ensure() {
     if (tab) return;
     tab = document.createElement('div');
     tab.id = 'album-tab';
-    tab.style.cssText = `position:fixed;left:0;top:0;width:${W}px;height:${H}px;z-index:40;user-select:none;cursor:pointer;`;
     canvas = document.createElement('canvas');
-    canvas.width = W; canvas.height = H;
-    canvas.style.cssText = `width:${W}px;height:${H}px;image-rendering:pixelated;display:block;`;
-    tab.appendChild(canvas);
-    tab.title = 'Click to switch between the case and the cassette (click the song title to hide it)';
+    canvas.width = W - 2; canvas.height = H - 2;
+    canvas.style.cssText = `position:absolute;left:0;top:0;width:${W - 2}px;height:${H - 2}px;image-rendering:pixelated;`;
+    nameEl = document.createElement('div');
+    nameEl.style.cssText = 'position:absolute;height:20px;overflow:hidden;';
+    tab.append(canvas, nameEl);
+    tab.title = 'Click to change the look: case, cassette, CD (click the song title to hide it)';
     tab.addEventListener('mousedown', (e) => e.stopPropagation());
     tab.addEventListener('click', () => {
-      style = style === 'tape' ? 'case' : 'tape';
-      try { localStorage.setItem('minapp.albumStyle', style); } catch {}
-      size(); draw(); animate();
+      look = LOOK_ORDER[(LOOK_ORDER.indexOf(look) + 1) % LOOK_ORDER.length];
+      try { localStorage.setItem('minapp.albumStyle', look); } catch {}
+      if (timer) { clearInterval(timer); timer = null; }
+      draw(); animate(); api.albumState({ look, spin, open });
     });
-    (document.getElementById('webamp') || document.body).appendChild(tab);
-    draw();
+    (document.getElementById('webamp') || document.body).appendChild(tab); // inside #webamp so the skin font applies
+    frameStyle(); draw();
+    setInterval(() => { if (open && skin().normalbg && skin().normalbg !== skinKey) { frameStyle(); draw(); } }, 2000); // skin changed
   }
 
-  // ---- drawing helpers (1 canvas pixel = 1 screen pixel, like the skin) ----
-  const px = (g, x, y, c) => { g.fillStyle = c; g.fillRect(x, y, 1, 1); };
-  function roundRect(g, x, y, w, h, r, fill) {
-    g.fillStyle = fill;
-    g.fillRect(x + r, y, w - 2 * r, h); g.fillRect(x, y + r, w, h - 2 * r);
-    for (let i = 1; i < r; i++) { g.fillRect(x + r - i, y + i, 1, h - 2 * i); g.fillRect(x + w - r + i - 1, y + i, 1, h - 2 * i); }
-  }
-  function outline(g, x, y, w, h, c) { // rounded-corner 1 px frame
-    g.fillStyle = c;
-    g.fillRect(x + 2, y, w - 4, 1); g.fillRect(x + 2, y + h - 1, w - 4, 1);
-    g.fillRect(x, y + 2, 1, h - 4); g.fillRect(x + w - 1, y + 2, 1, h - 4);
-    px(g, x + 1, y + 1, c); px(g, x + w - 2, y + 1, c); px(g, x + 1, y + h - 2, c); px(g, x + w - 2, y + h - 2, c);
-  }
-  function spotifyLogo(g, x, y) { // white disc with three dark arcs, 11 px
-    g.fillStyle = '#f2f2f2';
-    g.beginPath(); g.arc(x + 5.5, y + 5.5, 5.5, 0, Math.PI * 2); g.fill();
-    g.strokeStyle = '#1a1a22'; g.lineWidth = 1.1; g.lineCap = 'round';
-    [[3.0, 3.6], [5.4, 2.8], [7.6, 2.0]].forEach(([yy, r], i) => {
-      g.beginPath(); g.ellipse(x + 5.6, y + yy + r * 0.9, r + 1.2 - i * 0.2, r * 0.75, 0, Math.PI * 1.15, Math.PI * 1.85); g.stroke();
-    });
-  }
-  function youtubeLogo(g, x, y) { // red rounded box with a white play mark
-    roundRect(g, x, y + 2, 13, 9, 2, '#e5322d');
-    g.fillStyle = '#fff'; g.beginPath(); g.moveTo(x + 5, y + 4); g.lineTo(x + 9, y + 6.5); g.lineTo(x + 5, y + 9); g.closePath(); g.fill();
-  }
-  function noteLogo(g, x, y) { // generic music note for other sources
-    g.fillStyle = '#e8e8e8';
-    g.fillRect(x + 6, y, 1, 8); g.fillRect(x + 6, y, 4, 1); g.fillRect(x + 9, y, 1, 3);
-    g.beginPath(); g.ellipse(x + 4.5, y + 8.5, 2.5, 2, 0, 0, Math.PI * 2); g.fill();
-  }
-  // a little sound-wave, the same for a song every time and different between songs
-  function waveform(g, seed) {
-    let h = 2166136261;
-    for (const c of seed || 'minapp') { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; }
-    const bars = 17, bw = 2, gap = 1, total = bars * (bw + gap) - gap, x0 = Math.round((W - total) / 2), mid = 97;
-    for (let i = 0; i < bars; i++) {
-      h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
-      const env = Math.sin(Math.PI * (i + 0.5) / bars); // taller in the middle
-      const bh = Math.max(1, Math.round((1 + (h % 6)) * (0.45 + env * 0.75)));
-      g.fillStyle = 'rgba(240,240,245,.9)';
-      g.fillRect(x0 + i * (bw + gap), mid - bh, bw, bh * 2);
+  // ---------- drawing helpers ----------
+  let g = null;
+  const P = (x, y, c, w = 1, h = 1) => { g.fillStyle = c; g.fillRect(x, y, w, h); };
+  const bitmap = (rows, x, y, map) => rows.forEach((r, j) => [...r].forEach((ch, i) => { if (map[ch]) P(x + i, y + j, map[ch]); }));
+  const box = (x, y, w, h, c) => { P(x, y, c, w, 1); P(x, y + h - 1, c, w, 1); P(x, y, c, 1, h); P(x + w - 1, y, c, 1, h); };
+  // the cover reduced to a small pixel grid with a slightly smaller palette (cached per picture and shape)
+  function coverGrid(w, h) {
+    const key = w + 'x' + h;
+    if (grid && grid.key === key && grid.img === img) return grid.c;
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const cg = c.getContext('2d', { willReadFrequently: true });
+    if (!img) {
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { cg.fillStyle = ((x >> 2) + (y >> 2)) % 2 ? '#34343e' : '#41414d'; cg.fillRect(x, y, 1, 1); }
+    } else {
+      const s = Math.min(img.naturalWidth, img.naturalHeight * w / h), sh = s * h / w; // centre crop to the wanted shape
+      cg.imageSmoothingEnabled = true; cg.imageSmoothingQuality = 'high';
+      cg.drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - sh) / 2, s, sh, 0, 0, w, h);
+      const d = cg.getImageData(0, 0, w, h), p = d.data, q = 255 / (LEVELS - 1);
+      for (let i = 0; i < p.length; i += 4) for (let k = 0; k < 3; k++) p[i + k] = Math.round(p[i + k] / q) * q;
+      cg.putImageData(d, 0, 0);
     }
+    grid = { key, img, c };
+    return c;
+  }
+  // the cover grid drawn with every grid pixel as a 2 x 2 block
+  function cover(x, y, w, h) { g.imageSmoothingEnabled = false; g.drawImage(coverGrid(w / 2, h / 2), x, y, w, h); }
+
+  const LOGO = {
+    spotify: ['..#####..', '.#######.', '#ddddddd#', '#d#####d#', '##ddddd##', '##d###d##', '###ddd###', '.#######.', '..#####..'],
+    youtube: ['.rrrrrrrrr.', 'rrrrwrrrrrr', 'rrrrwwrrrrr', 'rrrrwwwrrrr', 'rrrrwwrrrrr', 'rrrrwrrrrrr', '.rrrrrrrrr.'],
+    note: ['...####', '...#..#', '...#..#', '...#..#', '.###.##', '####.##', '.##....'],
+  };
+  function logo(x, y) {
+    const src = source();
+    if (src === 'youtube') bitmap(LOGO.youtube, x, y + 1, { r: '#e5322d', w: '#ffffff' });
+    else if (src === 'spotify') bitmap(LOGO.spotify, x, y, { '#': '#f4f4f4', d: '#15151c' });
+    else bitmap(LOGO.note, x, y, { '#': '#e8e8e8' });
+  }
+
+  // ---------- case: a cassette box, 70 x 108 (the tall proportions of a real one), cover 64 x 64, name inside ----------
+  const CASE = { x: 11, y: 2, w: 70, h: 108 };
+  function drawCase() {
+    const { x, y, w, h } = CASE;
+    P(x + 2, y + 2, '#1c1e2b', w, h);                               // the back of the box (depth)
+    P(x + w + 1, y + 3, '#5d6176', 1, h - 2); P(x + 3, y + h + 1, '#4a4e60', w - 2, 1);
+    P(x, y, '#161721', w, h);                                       // front: dark see-through plastic
+    box(x, y, w, h, '#9fa3b5');
+    P(x + 1, y + 1, '#d3d6e2', w - 2, 1); P(x + 1, y + 1, '#d3d6e2', 1, h - 2); // light top / left edges
+    P(x + 1, y + h - 2, '#585c6f', w - 2, 1); P(x + w - 2, y + 2, '#585c6f', 1, h - 3);
+    P(x + 2, y + 2, '#3a3d4e', w - 4, 1);                           // the lid's lip
+    logo(x + 4, y + 5);
+    const cx = x + 3, cy = y + 17;
+    box(cx - 1, cy - 1, 66, 66, '#07070b');
+    cover(cx, cy, 64, 64);
+    // shine across the plastic
+    g.fillStyle = 'rgba(255,255,255,.09)';
+    for (let j = 2; j < h - 2; j++) for (let i = 2; i < w - 2; i++) { const k = i + j; if ((k > 16 && k < 30) || (k > 40 && k < 43)) g.fillRect(x + i, y + j, 1, 1); }
+    P(x + 2, y + 2, '#ffffff'); P(x + 3, y + 2, 'rgba(255,255,255,.6)'); P(x + 2, y + 3, 'rgba(255,255,255,.6)');
+    P(x + w - 3, y + 6, 'rgba(255,255,255,.25)', 1, h - 14);        // bright edge on the right
+  }
+
+  // ---------- tape: a cassette, 92 x 64, drawn after Mihai's reference picture ----------
+  const T_LINE = '#3b3530', T_SHELL = '#e6dccb', T_HI = '#f6efe2', T_LO = '#cfc4b1', T_BAND = '#efe6d6', T_GROOVE = '#9b9183';
+  function round(x, y, w, h, fill, line) { // rounded rectangle with a 1 px outline and 2 px corners
+    P(x + 2, y, line, w - 4, 1); P(x + 2, y + h - 1, line, w - 4, 1); P(x, y + 2, line, 1, h - 4); P(x + w - 1, y + 2, line, 1, h - 4);
+    P(x + 1, y + 1, line); P(x + w - 2, y + 1, line); P(x + 1, y + h - 2, line); P(x + w - 2, y + h - 2, line);
+    if (fill) { P(x + 2, y + 1, fill, w - 4, h - 2); P(x + 1, y + 2, fill, w - 2, h - 4); }
+  }
+  function reel(cx, cy) { // white ring, dark inside, eight white teeth around the hub that turn while playing
+    for (let j = -7; j <= 7; j++) for (let i = -7; i <= 7; i++) {
+      const r = Math.hypot(i + 0.5, j + 0.5) - 0.5;
+      if (r <= 6.3 && r > 5.0) P(cx + i, cy + j, '#f7f2e8');
+      else if (r <= 5.0) P(cx + i, cy + j, '#1c1a20');
+      else if (r <= 7.0) P(cx + i, cy + j, '#b9ae9c');
+    }
+    for (let k = 0; k < 8; k++) {
+      const a = frame * Math.PI / 12 + k * Math.PI / 4;
+      P(Math.round(cx + Math.cos(a) * 4 - 0.5), Math.round(cy + Math.sin(a) * 4 - 0.5), '#f7f2e8');
+    }
+  }
+  function screw(a, b) { P(a, b, '#6d6a6c', 3, 3); P(a + 1, b, '#45424a'); P(a + 1, b + 1, '#9c98a0'); }
+  function drawTape() {
+    const x = 1, y = 13, w = 92, h = 64;
+    round(x, y, w, h, T_SHELL, T_LINE);                                 // shell
+    P(x + 2, y + 1, T_HI, w - 4, 1); P(x + 1, y + 2, T_HI, 1, h - 4);
+    P(x + 2, y + h - 2, T_LO, w - 4, 1); P(x + w - 2, y + 2, T_LO, 1, h - 4);
+    screw(x + 3, y + 3); screw(x + w - 6, y + 3); screw(x + 3, y + h - 6); screw(x + w - 6, y + h - 6);
+    // label: the cover, across the upper two thirds
+    const lx = x + 6, ly = y + 7, lw = 80, lh = 40;
+    cover(lx, ly, lw, lh);
+    round(lx - 1, ly - 1, lw + 2, lh + 2, null, '#4a4038');
+    [[lx, ly], [lx + lw - 1, ly], [lx, ly + lh - 1], [lx + lw - 1, ly + lh - 1]].forEach(([a, b]) => P(a, b, '#4a4038'));
+    logo(lx + 3, ly + 3);
+    bitmap(['.###.', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'], lx + lw - 10, ly + lh - 12, { '#': '#f4efe6' }); // side A
+    // the window band: two reels and the tape window between them
+    const bx = x + 17, by = y + 21, bw = 56, bh = 18;
+    round(bx, by, bw, bh, T_BAND, T_LINE);
+    P(bx + 2, by + 1, '#fbf7ef', bw - 4, 1);
+    reel(bx + 8, by + 9); reel(bx + bw - 9, by + 9);
+    const wx = bx + 19, wy = by + 3, ww = bw - 38, wh = bh - 6;     // tape window
+    P(wx, wy, '#56535c', ww, wh); P(wx + 1, wy + 1, '#2c2a31', ww - 2, wh - 2);
+    const sx = wx + Math.floor(ww / 2) - 1;                          // the brown tape spool in it
+    P(sx - 1, wy + 2, '#7d5640', 6, 1); P(sx, wy + 3, '#9a6c50', 4, wh - 6); P(sx - 1, wy + wh - 3, '#7d5640', 6, 1);
+    P(sx + 1, wy + 3, '#b9876a', 1, wh - 6);
+    // bottom: the raised part under the label, with its grooves and four holes
+    const ty = y + 49;
+    P(x + 17, ty, T_GROOVE, w - 34, 1);
+    for (let j = 1; j < h - 50; j++) { const d = Math.round(j * 0.35); P(x + 17 - d, ty + j, T_GROOVE); P(x + w - 18 + d, ty + j, T_GROOVE); P(x + 18 - d, ty + j, '#ece3d4', w - 36 + 2 * d, 1); }
+    [[x + 22, y + 58, 4, 3], [x + 32, y + 56, 3, 3], [x + w - 35, y + 56, 3, 3], [x + w - 26, y + 58, 4, 3]].forEach(([a, b, c, d]) => P(a, b, '#2b2622', c, d));
+  }
+
+  // ---------- cd: an 83 px disc ----------
+  function drawCd() {
+    const cx = 47, cy = 45, R = 41, D = 2 * R + 1;
+    // the disc: the cover printed on it upright, a silver rim, a clear centre ring and the hole. When "spin" is on it
+    // turns in steps of 1/16 of a circle, rotated on the cover's own pixel grid so it stays pixel art.
+    const G = Math.ceil(D / 2), small = document.createElement('canvas'); small.width = small.height = G;
+    const sg = small.getContext('2d', { willReadFrequently: true });
+    sg.imageSmoothingEnabled = false;
+    sg.save(); sg.translate(G / 2, G / 2); if (spin) sg.rotate(spinStep * Math.PI / 8);
+    sg.drawImage(coverGrid(COVER, COVER), -G / 2, -G / 2, G, G); sg.restore();
+    const disc = document.createElement('canvas'); disc.width = disc.height = D;
+    const dg = disc.getContext('2d', { willReadFrequently: true });
+    dg.imageSmoothingEnabled = false;
+    dg.drawImage(small, 0, 0, G * 2, G * 2);
+    const d = dg.getImageData(0, 0, D, D), p = d.data;
+    for (let j = 0; j < D; j++) for (let i = 0; i < D; i++) {
+      const r = Math.hypot(i - R, j - R), o = (j * D + i) * 4;
+      if (r > R + 0.3 || r < 4) { p[o + 3] = 0; continue; }   // outside, and the hole
+      let c = null;
+      if (r > R - 1.2) c = [110, 114, 128];                  // outer edge
+      else if (r > R - 2.4) c = [214, 218, 228];             // silver rim
+      else if (r < 5.2) c = [110, 114, 128];
+      else if (r < 11) c = [190, 196, 210];                  // clear plastic ring
+      else if (r < 12.2) c = [140, 144, 158];
+      if (c) { p[o] = c[0]; p[o + 1] = c[1]; p[o + 2] = c[2]; p[o + 3] = 255; }
+    }
+    dg.putImageData(d, 0, 0);
+    g.drawImage(disc, cx - R, cy - R);
+    // a rainbow glint on the plastic ring and a white highlight on the rim
+    [[-7, -6, '#ffd6f2'], [-8, -4, '#c9e8ff'], [-6, -8, '#fff4c4'], [6, 7, '#d6ffe0'], [7, 6, '#ffd6f2']].forEach(([dx, dy, c]) => P(cx + dx, cy + dy, c));
+    for (let a = 3.6; a < 4.4; a += 0.04) P(Math.round(cx + Math.cos(a) * (R - 2)), Math.round(cy + Math.sin(a) * (R - 2)), '#ffffff');
+    logo(cx - 4, cy - 30);
   }
 
   function draw() {
     if (!canvas) return;
-    if (style === 'tape') return drawTape();
-    const g = canvas.getContext('2d', { willReadFrequently: true });
-    g.clearRect(0, 0, W, H);
-    g.imageSmoothingEnabled = true;
-    // the case: dark see-through body, a lighter rim, and an inner lip
-    roundRect(g, 0, 0, W, H, 3, 'rgba(26,26,36,.92)');
-    outline(g, 0, 0, W, H, 'rgba(210,210,225,.75)');
-    outline(g, 2, 2, W - 4, H - 4, 'rgba(160,160,185,.28)');
-    g.fillStyle = 'rgba(255,255,255,.10)'; g.fillRect(4, 3, 1, H - 6);   // hinge line on the left
-    g.fillStyle = 'rgba(255,255,255,.22)'; g.fillRect(W - 3, 6, 1, H - 12); // bright edge on the right
-    // logo of the source
-    const src = source();
-    if (src === 'spotify') spotifyLogo(g, CX + 1, 6);
-    else if (src === 'youtube') youtubeLogo(g, CX, 5);
-    else noteLogo(g, CX + 1, 6);
-    // the cover, or a quiet checker while there is none
-    if (cover) g.drawImage(cover, CX, CY);
-    else for (let y = 0; y < CS; y += 4) for (let x = 0; x < CS; x += 4) { g.fillStyle = (x + y) % 8 ? '#3a3a44' : '#4a4a55'; g.fillRect(CX + x, CY + y, 4, 4); }
-    outline(g, CX - 1, CY - 1, CS + 2, CS + 2, 'rgba(0,0,0,.55)');
-    waveform(g, wave);
-    // the plastic: a soft diagonal shine over everything, and a few bright pixels on the corners
-    const shine = g.createLinearGradient(0, 0, W, H);
-    shine.addColorStop(0, 'rgba(255,255,255,.16)'); shine.addColorStop(.32, 'rgba(255,255,255,.03)');
-    shine.addColorStop(.33, 'rgba(255,255,255,0)'); shine.addColorStop(.62, 'rgba(255,255,255,0)');
-    shine.addColorStop(.63, 'rgba(255,255,255,.07)'); shine.addColorStop(.75, 'rgba(255,255,255,0)');
-    g.fillStyle = shine; roundRect(g, 1, 1, W - 2, H - 2, 2, shine);
-    ['#ffffff', 'rgba(255,255,255,.6)'].forEach((c, i) => { px(g, 3 + i, 1, c); px(g, 1, 3 + i, c); });
+    g = canvas.getContext('2d', { willReadFrequently: true });
+    g.imageSmoothingEnabled = false;
+    g.clearRect(0, 0, canvas.width, canvas.height);
+    if (look === 'tape') drawTape(); else if (look === 'cd') drawCd(); else drawCase();
+    writeName();
   }
-
-  // ---- the cassette ----
-  function reel(g, cx, cy, a) {
-    g.fillStyle = '#ece6da'; g.beginPath(); g.arc(cx, cy, 6, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#26262c'; g.beginPath(); g.arc(cx, cy, 3.6, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#ece6da';
-    for (let k = 0; k < 6; k++) { // the teeth, turning with the music
-      const t = a + k * Math.PI / 3;
-      g.fillRect(Math.round(cx + Math.cos(t) * 2.6 - 0.5), Math.round(cy + Math.sin(t) * 2.6 - 0.5), 1, 1);
+  // the album's name in the skin's own font, on up to two centred lines, shortened with ".." when it is too long
+  function writeName() {
+    if (!nameEl) return;
+    // on the case the name sits inside the box under the cover (13 characters a line); otherwise under the drawing
+    const inCase = look === 'case', per = inCase ? 13 : CHARS;
+    Object.assign(nameEl.style, inCase ? { left: CASE.x + 1 + 'px', width: CASE.w - 2 + 'px', top: CASE.y + 84 + 'px' } : { left: '3px', width: W - 8 + 'px', top: ART_H + 2 + 'px' });
+    const words = String(albumName || '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean), ls = [];
+    let cur = '';
+    for (let i = 0; i < words.length; i++) {
+      const wd = words[i].length > per ? words[i].slice(0, per) : words[i];
+      const next = cur ? cur + ' ' + wd : wd;
+      if (next.length <= per) { cur = next; continue; }
+      ls.push(cur); cur = wd;
+      if (ls.length === 2) { const rest = ls[1] + ' ' + words.slice(i).join(' '); ls[1] = rest.length > per ? rest.slice(0, per - 2).trimEnd() + '..' : rest; cur = ''; break; }
     }
-    g.fillStyle = '#26262c'; g.fillRect(cx - 0.5, cy - 0.5, 1, 1);
+    if (cur && ls.length < 2) ls.push(cur);
+    const key = look + ls.join('\n');
+    if (nameEl._key === key) return;
+    nameEl._key = key; nameEl.textContent = '';
+    ls.forEach((t, j) => {
+      const row = document.createElement('div');
+      row.style.cssText = `position:absolute;left:0;right:0;top:${(ls.length === 1 ? 5 : 1) + j * 9}px;height:6px;text-align:center;white-space:nowrap;`;
+      const inner = document.createElement('span'); inner.style.cssText = 'display:inline-block;height:6px;';
+      setText(inner, t); row.appendChild(inner); nameEl.appendChild(row);
+    });
   }
-  const LETTER_A = ['.###.', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'];
-  function drawTape() {
-    const g = canvas.getContext('2d', { willReadFrequently: true });
-    g.clearRect(0, 0, W, H);
-    g.imageSmoothingEnabled = true;
-    // shell: cream plastic with a dark edge and four screws
-    roundRect(g, 0, 0, W, H, 4, '#2a2a30');
-    roundRect(g, 1, 1, W - 2, H - 2, 3, '#d8cfbf');
-    g.fillStyle = 'rgba(255,255,255,.35)'; g.fillRect(3, 2, W - 6, 1);
-    g.fillStyle = 'rgba(0,0,0,.18)'; g.fillRect(3, H - 3, W - 6, 1);
-    [[3, 3], [W - 5, 3], [3, H - 5], [W - 5, H - 5]].forEach(([x, y]) => { g.fillStyle = '#7d7a74'; g.fillRect(x, y, 2, 2); px(g, x, y, '#b7b2a8'); });
-    // label: the cover, cut to the label's shape
-    if (label) g.drawImage(label, LX, LY);
-    else for (let y = 0; y < LH; y += 4) for (let x = 0; x < LW; x += 4) { g.fillStyle = (x + y) % 8 ? '#3a3a44' : '#4a4a55'; g.fillRect(LX + x, LY + y, 4, 4); }
-    outline(g, LX - 1, LY - 1, LW + 2, LH + 2, 'rgba(40,36,30,.6)');
-    // logo of the source, top left of the label
-    const src = source();
-    if (src === 'spotify') spotifyLogo(g, LX + 3, LY + 3);
-    else if (src === 'youtube') youtubeLogo(g, LX + 2, LY + 1);
-    else noteLogo(g, LX + 3, LY + 3);
-    // side "A", bottom right of the label
-    LETTER_A.forEach((row, y) => [...row].forEach((c, x) => { if (c === '#') px(g, LX + LW - 10 + x, LY + LH - 11 + y, '#f2f2f2'); }));
-    // the window with the two reels and the tape between them
-    const wx = 28, wy = 22, ww = 56, wh = 18;
-    roundRect(g, wx, wy, ww, wh, 3, '#1c1c22');
-    outline(g, wx, wy, ww, wh, '#0c0c10');
-    g.fillStyle = '#4a3224'; g.fillRect(wx + 15, wy + 4, ww - 30, wh - 8);  // tape
-    g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(wx + 15, wy + 4, ww - 30, 1);
-    reel(g, wx + 10, wy + wh / 2, spin);
-    reel(g, wx + ww - 10, wy + wh / 2, spin + 0.7);
-    // bottom: the head opening with its little holes
-    g.fillStyle = '#c9bfae';
-    g.beginPath(); g.moveTo(20, H - 1); g.lineTo(26, LY + LH + 5); g.lineTo(W - 26, LY + LH + 5); g.lineTo(W - 20, H - 1); g.closePath(); g.fill();
-    g.fillStyle = 'rgba(0,0,0,.25)'; g.fillRect(26, LY + LH + 5, W - 52, 1);
-    [[32, H - 10], [W - 35, H - 10], [44, H - 7], [W - 47, H - 7]].forEach(([x, y]) => { g.fillStyle = '#2a2a30'; g.fillRect(x, y, 3, 3); });
-    g.fillStyle = '#2a2a30'; g.fillRect(W / 2 - 3, H - 9, 6, 3);
-  }
-  // the reels turn about 12 times a second while something plays (nothing runs when it is paused or hidden)
+  // the reels and the disc move while something plays (nothing runs when paused, hidden, or showing the case)
   function animate() {
-    const want = open && style === 'tape' && playing && !document.hidden;
-    if (want && !spinTimer) spinTimer = setInterval(() => { spin += 0.35; if (canvas) drawTape(); }, 80);
-    if (!want && spinTimer) { clearInterval(spinTimer); spinTimer = null; }
+    const want = open && (look === 'tape' || (look === 'cd' && spin)) && playing && !document.hidden;
+    if (want && !timer) timer = setInterval(() => { frame++; spinStep = (spinStep + 1) % 16; draw(); }, look === 'cd' ? 450 : 180);
+    if (!want && timer) { clearInterval(timer); timer = null; }
   }
 
   function paint(dataUrl) {
-    const img = new Image();
+    const im = new Image();
     const mine = ++token;
-    img.onload = () => {
-      if (mine !== token) return;
-      const c = document.createElement('canvas'); c.width = c.height = CS;
-      const s = Math.min(img.naturalWidth, img.naturalHeight); // centre square (YouTube thumbnails are wide)
-      const g = c.getContext('2d', { willReadFrequently: true });
-      g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
-      g.drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - s) / 2, s, s, 0, 0, CS, CS);
-      const d = g.getImageData(0, 0, CS, CS), p = d.data, q = 255 / (LEVELS - 1);
-      for (let i = 0; i < p.length; i += 4) for (let k = 0; k < 3; k++) p[i + k] = Math.round(p[i + k] / q) * q;
-      g.putImageData(d, 0, 0);
-      // the tape's label: the middle band of the cover, stretched to the label's width
-      const l = document.createElement('canvas'); l.width = LW; l.height = LH;
-      const lg = l.getContext('2d', { willReadFrequently: true });
-      lg.imageSmoothingEnabled = true; lg.imageSmoothingQuality = 'high';
-      const sh = s * LH / LW;
-      lg.drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - sh) / 2, s, sh, 0, 0, LW, LH);
-      const ld = lg.getImageData(0, 0, LW, LH), lp = ld.data;
-      for (let i = 0; i < lp.length; i += 4) for (let k = 0; k < 3; k++) lp[i + k] = Math.round(lp[i + k] / q) * q;
-      lg.putImageData(ld, 0, 0);
-      cover = c; label = l; draw();
-    };
-    img.onerror = () => { api.log('album tab: picture could not be decoded'); cover = null; label = null; draw(); };
-    img.src = dataUrl;
+    im.onload = () => { if (mine === token) { img = im; draw(); } };
+    im.onerror = () => { api.log('album tab: picture could not be decoded'); img = null; draw(); };
+    im.src = dataUrl;
   }
 
   function set(on) {
@@ -202,25 +257,26 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     if (on) { ensure(); tab.style.display = ''; if (url) load(url); else draw(); }
     else if (tab) tab.style.display = 'none';
     animate();
+    api.albumState({ look, spin, open });
   }
 
   async function load(u) {
     if (!open || !canvas) return;
-    if (!u) { token++; cover = null; label = null; draw(); return; }
+    if (!u) { token++; img = null; draw(); return; }
     try {
       const d = await api.artGet(u);
       if (u !== url) return;
-      if (d) paint(d); else { api.log('album tab: no picture for ' + u); cover = null; label = null; draw(); }
-    } catch (e) { api.log('album tab error: ' + (e && e.message)); cover = null; label = null; draw(); }
+      if (d) paint(d); else { api.log('album tab: no picture for ' + u); img = null; draw(); }
+    } catch (e) { api.log('album tab error: ' + (e && e.message)); img = null; draw(); }
   }
 
-  // u: picture address ('' = none, null = nothing playing); song: title, so the sound-wave changes with the song
-  function setArt(u, song, isPlaying) {
+  // u: picture address ('' = none, null = nothing playing); song: title; isPlaying: moves the reels / disc; album: its name
+  function setArt(u, song, isPlaying, album) {
     const next = u === null ? '' : u;
     if (isPlaying !== undefined && !!isPlaying !== playing) { playing = !!isPlaying; animate(); }
+    const name = album || song || ''; // YouTube and local files have no album: the song title instead
     const src = source();
-    if (src !== lastSrc) { lastSrc = src; if (open && canvas) draw(); } // the logo follows the source
-    if (song !== undefined && song !== wave) { wave = song || ''; if (open && canvas && next === url) draw(); }
+    if (name !== albumName || src !== lastSrc) { albumName = name; lastSrc = src; if (open && canvas) draw(); }
     if (next === url) return;
     url = next;
     if (open) load(url);
@@ -235,11 +291,22 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     set(!open);
   }, true);
 
+  // from the menu: choose the look, or turn the CD's spinning on / off
+  function setOptions(o) {
+    if (o.look && LOOK_ORDER.includes(o.look)) look = o.look;
+    if (o.spin !== undefined) { spin = !!o.spin; if (!spin) spinStep = 0; }
+    try { localStorage.setItem('minapp.albumStyle', look); localStorage.setItem('minapp.albumSpin', spin ? '1' : '0'); } catch {}
+    if (timer) { clearInterval(timer); timer = null; }
+    if (!open) set(true); else { draw(); animate(); }
+    api.albumState({ look, spin, open });
+  }
   window.__albumTab = {
-    setArt,
-    // how far the player is pushed right to make room for the case
+    setArt, setOptions,
+    // how far the player is pushed right to make room for the panel
     offset: () => (open && tab && getWidgetMode() === 'off' ? W : 0),
   };
   document.addEventListener('visibilitychange', animate);
+  api.onAlbumOptions((o) => setOptions(o || {}));
+  api.albumState({ look, spin, open });
   if (open) ensure();
 }

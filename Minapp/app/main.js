@@ -83,7 +83,11 @@ if application "Spotify" is running then
     try
       set art to artwork url of t
     end try
-    return s & "|||" & (name of t) & "|||" & (artist of t) & "|||" & (duration of t) & "|||" & player position & "|||" & sound volume & "|||" & (id of t) & "|||" & shuffling & "|||" & repeating & "|||" & art
+    set alb to ""
+    try
+      set alb to album of t
+    end try
+    return s & "|||" & (name of t) & "|||" & (artist of t) & "|||" & (duration of t) & "|||" & player position & "|||" & sound volume & "|||" & (id of t) & "|||" & shuffling & "|||" & repeating & "|||" & art & "|||" & alb
   end tell
 else
   return "closed"
@@ -92,9 +96,10 @@ end if`;
 async function macState() {
   const out = await osa(STATE_SCRIPT);
   if (!out || out === 'closed' || out === 'stopped') return { status: out || 'closed' };
-  const [status, title, artist, dur, pos, vol, id, shuf, rep, art] = out.split('|||');
+  const [status, title, artist, dur, pos, vol, id, shuf, rep, art, album] = out.split('|||');
   const num = (x) => parseFloat(String(x).replace(',', '.')) || 0;
   const st = { status, title, artist, id, duration: num(dur) / 1000, position: num(pos), volume: num(vol) };
+  if (album && album.trim()) st.album = album.trim();
   if (SPOT_IMG.test((art || '').trim())) st.art = art.trim(); // the Spotify app tells us the cover itself, no login needed
   if (shuf === 'true' || shuf === 'false') st.shuffle = shuf === 'true';
   if (rep === 'true' || rep === 'false') st.repeat = rep === 'true';
@@ -667,7 +672,7 @@ async function refreshSpotifyQueue() {
     const imgs = (j.currently_playing && j.currently_playing.album && j.currently_playing.album.images) || [];
     const pick = imgs.filter((i) => i.width >= 64).pop() || imgs[imgs.length - 1]; // smallest picture that is still 64 px or more
     spotArt = cp && pick ? { title: norm(cp), url: pick.url } : null;
-    spotCur = cp && j.currently_playing.id ? { title: norm(cp), id: j.currently_playing.id } : spotCur;
+    spotCur = cp && j.currently_playing.id ? { title: norm(cp), id: j.currently_playing.id, album: (j.currently_playing.album && j.currently_playing.album.name) || '' } : spotCur;
     if (cp && lastSongTitle && norm(cp) !== norm(lastSongTitle)) { spotBackoffUntil = Date.now() + 1500; setTimeout(refreshSpotifyQueue, 1600); return; }
     const items = (j.queue || []).slice(0, 30).map((t) => ({
       id: t.id || t.uri, title: t.name || '',
@@ -872,7 +877,7 @@ async function apiTrackId(title) {
     if (r.status !== 200) { log('currently-playing: HTTP ' + r.status); return null; }
     const j = await r.json();
     if (!j.item || !j.item.id) return null;
-    spotCur = { title: norm(j.item.name), id: j.item.id };
+    spotCur = { title: norm(j.item.name), id: j.item.id, album: (j.item.album && j.item.album.name) || '' };
     return j.item.id;
   } catch (e) { log('currently-playing error: ' + e.message); return null; }
 }
@@ -1355,6 +1360,7 @@ ipcMain.handle('spotify:state', async () => {
   st.queue = spotifyQueue.items;
   if (!st.art && spotArt && st.title && spotArt.title === norm(st.title)) st.art = spotArt.url;
   const likeId = trackIdOf(st.id) || (spotCur && st.title && spotCur.title === norm(st.title) ? spotCur.id : null);
+  if (!st.album && spotCur && spotCur.album && st.title && spotCur.title === norm(st.title)) st.album = spotCur.album;
   if (likeId) { checkLiked(likeId); const lk = likedCache.get(likeId); if (lk !== undefined) st.liked = lk; }
   if (!st.art && isWin && st.title && !process.env.SKIN_FAKE) { const k = winThumb(st); if (k) st.art = k; }
   if (!st.art && st.id) { const c = spotCover(st.id); if (c) st.art = c; } // no login needed: Spotify's public oEmbed page
@@ -1425,6 +1431,8 @@ ipcMain.on('win:dragstart', () => {
   }, 8);
 });
 ipcMain.on('win:dragend', () => { if (dragTimer) { clearInterval(dragTimer); dragTimer = null; savePos(); } });
+let albumUi = { look: 'case', spin: false, open: false }; // what the album panel shows, for the menu's ticks
+ipcMain.on('album:state', (_e, st) => { if (st && typeof st === 'object') { albumUi = { look: String(st.look || 'case'), spin: !!st.spin, open: !!st.open }; buildMenu(); } });
 ipcMain.on('app:quit', () => app.quit());
 ipcMain.handle('app:version', () => app.getVersion());
 // the bulb in the player's corner
@@ -1572,6 +1580,11 @@ function menuItems() {
     { label: 'Playlist (queue)', click: send('playlist') },
     { label: 'Equalizer window', click: send('equalizer') },
     { label: 'Milkdrop', accelerator: 'CmdOrCtrl+Shift+K', click: () => win.webContents.send('milkdrop:toggle') },
+    { label: 'Album picture', submenu: [
+      ...[['case', 'Cassette box'], ['tape', 'Cassette'], ['cd', 'CD']].map(([k, label]) => ({ label, type: 'radio', checked: albumUi.look === k, click: () => win.webContents.send('album:options', { look: k }) })),
+      { type: 'separator' },
+      { label: 'Spin the CD (slowly, while playing)', type: 'checkbox', checked: !!albumUi.spin, click: () => win.webContents.send('album:options', { look: 'cd', spin: !albumUi.spin }) },
+    ] },
     { label: 'Mini mode', accelerator: 'CmdOrCtrl+Shift+M', click: () => win.webContents.send('mini:toggle') },
     { label: 'Widget', submenu: [
       { label: 'Off (full player)', type: 'radio', checked: widget === 'off', click: () => setWidget('off', true) },

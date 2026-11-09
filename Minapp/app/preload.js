@@ -40,5 +40,7 @@ contextBridge.exposeInMainWorld('bridge', {
   spotPlayList: (uri) => ipcRenderer.invoke('spotlists:play', uri),
   spotConnect: () => ipcRenderer.send('spotlists:connect'),
   onMini: (cb) => ipcRenderer.on('mini:toggle', cb),
+  albumState: (st) => ipcRenderer.send('album:state', st),
+  onAlbumOptions: (cb) => ipcRenderer.on('album:options', (_e, o) => cb(o)),
   onMilkdrop: (cb) => ipcRenderer.on('milkdrop:toggle', cb),
 });

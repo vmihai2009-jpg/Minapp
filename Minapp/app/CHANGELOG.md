@@ -1,5 +1,10 @@
 # What's new in Minapp
 
+## 1.9.10
+- New album panel, drawn as pixel art to match the player, with the album's name underneath in the skin's own font. Three looks: a cassette box, a cassette whose reels turn while music plays, and a CD. Click the panel to switch, or use the menu, Album picture.
+- Album picture, Spin the CD: the CD turns slowly in pixel steps while music plays (off by default, the cover then stays upright).
+- The album name is read from Spotify on both Mac and Windows; YouTube shows the video title.
+
 ## 1.9.9
 - The album picture now sits in a clear plastic case with the source's logo on top (Spotify or YouTube) and a little sound-wave under the cover that is different for every song.
 - Second style: a cassette tape with the cover as its label and reels that turn while music plays. Click the picture to switch between the two; click the song title or timer to show or hide it.
