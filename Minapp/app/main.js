@@ -897,7 +897,6 @@ async function toggleLike() {
     await spotLibrary(was ? 'DELETE' : 'PUT', tid);
     likedCache.set(tid, !was);
     log((was ? 'unliked ' : 'liked ') + tid);
-    try { new Notification({ title: was ? 'Removed from Liked Songs' : 'Added to Liked Songs', body: [st.artist, st.title].filter(Boolean).join(' - '), silent: true }).show(); } catch {}
   } catch (e) {
     if (e.scope || e.login) { writeCfg({ spotScope: null }); dialog.showMessageBox(win, { message: 'Spotify needs to be connected again', detail: 'Use the heart once more and choose Connect Spotify.' }); }
     else dialog.showMessageBox(win, { type: 'warning', message: 'Could not update Liked Songs', detail: String((e && e.message) || e) });
@@ -1143,8 +1142,7 @@ async function checkForUpdate(manual) {
     if (manual) dialog.showMessageBox(win, { message: `Minapp is up to date (version ${app.getVersion()})`, detail: info.none ? 'No release has been published on GitHub yet.' : '' });
     return;
   }
-  if (!manual) { // the bulb shows it; one quiet notification per version
-    if (readCfg().updNotified !== info.latest) { writeCfg({ updNotified: info.latest }); new Notification({ title: 'Minapp update available', body: `Version ${info.latest} is ready: click the light bulb in the player's corner.` }).show(); }
+  if (!manual) { // the light bulb shows it (no Windows/Mac notification)
     return;
   }
   await installUpdate();
@@ -1261,7 +1259,6 @@ async function downloadCurrentYouTube() {
       const detail = limited
         ? 'YouTube asked Minapp to slow down, and it still said so after waiting. Nothing is lost: choose Download again in about an hour and it picks up where it stopped.'
         : (res.error ? 'Some items were skipped (for example videos that are private or removed): ' + res.error : '');
-      if (n) new Notification({ title: limited ? 'Download paused' : 'Download finished', body: head }).show();
       if (n) {
         const r = await dialog.showMessageBox(win, { message: head, detail, buttons: ['Play them', 'OK'], defaultId: 1 });
         if (r.response === 0) await playLocal(path.basename(folder));
