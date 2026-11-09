@@ -25,7 +25,8 @@ jobs:
       - name: Publish
         env: { GH_TOKEN: '${{ github.token }}' }
         run: |
-          # release notes = this version's section of Minapp/app/CHANGELOG.md (shown in the app's update question)
-          awk -v v="## ${TAG#v}" '$0==v{f=1;next} /^## /{f=0} f' Minapp/app/CHANGELOG.md > notes.md
+          # release notes = every version's section of Minapp/app/CHANGELOG.md, newest first, so someone updating from an old
+          # version sees everything they missed (shown in the app's update question)
+          awk -v v="## ${TAG#v}" '$0==v{f=1} f' Minapp/app/CHANGELOG.md > notes.md
           if [ -s notes.md ]; then NOTES=(--notes-file notes.md); else NOTES=(--generate-notes); fi
           gh release create "$TAG" docs/downloads/Minapp-*-"$TAG".zip --target "$GITHUB_SHA" --title "Minapp ${TAG#v}" "${NOTES[@]}"

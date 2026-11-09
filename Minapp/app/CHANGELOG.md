@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.5
+- Catching up after a long gap: the What's new pop-up now lists every version you missed (scroll it with the mouse wheel), including when you come from an old version that did not remember which one you had. The update question and the release page also show the full history, newest first.
+
 ## 1.9.4
 - Heart button for Spotify: the eject button is now a heart. Click it (or the ADD button in the playlist window) to add the playing song to your Liked Songs; the heart turns red, click again to remove it. The first time, Minapp asks you to connect Spotify once more so it may change your Liked Songs. The menu is still on the O button and right-click.
 
