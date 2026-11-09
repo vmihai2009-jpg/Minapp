@@ -1,6 +1,6 @@
 {
   "name": "minapp",
-  "version": "1.9.3",
+  "version": "1.9.4",
   "description": "Minapp: a Winamp-skinned player for Spotify and YouTube",
   "main": "main.js",
   "scripts": {
