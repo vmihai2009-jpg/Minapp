@@ -14,7 +14,7 @@ const LOOK_ORDER = ['case', 'tape', 'cd'];
 
 export function initAlbumTab(webamp, api, getWidgetMode) {
   let open = false, tab = null, canvas = null, url = null, token = 0, img = null, look = 'case';
-  let spin = false, spinStep = 0, loading = false, dots = 0, dotTimer = null;
+  let spin = false, spinStep = 0, loading = false, dots = 0, dotTimer = null, stripe = 0;
   let playing = false, frame = 0, lastSrc = '', timer = null, albumName = '', grid = null, skinKey = '';
   try {
     open = localStorage.getItem('minapp.albumTab') === '1';
@@ -62,7 +62,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     const key = w + 'x' + h;
     if (!img && loading) { // waiting for the picture: dark, with faint diagonal stripes (the words go on top per look)
       const c = document.createElement('canvas'); c.width = w; c.height = h; const cg = c.getContext('2d');
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { cg.fillStyle = (x + y) % 6 < 1 ? '#2a2a3a' : (y < h / 2 ? '#1f1f2c' : '#1a1a25'); cg.fillRect(x, y, 1, 1); }
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { cg.fillStyle = (((x - stripe + y) % 6) + 6) % 6 < 1 ? '#2a2a3a' : (y < h / 2 ? '#1f1f2c' : '#1a1a25'); cg.fillRect(x, y, 1, 1); }
       return c;
     }
     if (grid && grid.key === key && grid.img === img) return grid.c;
@@ -351,8 +351,8 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
 
   function setLoading(on) {
     loading = on;
-    if (on && !dotTimer) dotTimer = setInterval(() => { dots = (dots + 1) % 4; if (open && !timer) draw(); }, 350);
-    if (!on && dotTimer) { clearInterval(dotTimer); dotTimer = null; dots = 0; }
+    if (on && !dotTimer) dotTimer = setInterval(() => { stripe = (stripe + 1) % 6; if (stripe % 3 === 0) dots = (dots + 1) % 4; if (open) draw(); }, 120); // stripes slide right, dots count
+    if (!on && dotTimer) { clearInterval(dotTimer); dotTimer = null; dots = 0; stripe = 0; }
   }
   function paint(dataUrl) {
     const im = new Image();
