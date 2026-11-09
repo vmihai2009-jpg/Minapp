@@ -1330,6 +1330,13 @@ ipcMain.handle('spotify:state', async () => {
     st.queue = i < 0 ? [] : localList.slice(i + 1, i + 31).map((t, k) => row(t, i + 1 + k));
     st.history = i <= 0 ? [] : localList.slice(Math.max(0, i - 30), i).map((t, k) => row(t, Math.max(0, i - 30) + k));
     st.source = 'local';
+    const cur = localList[i];
+    if (cur && st.status !== 'stopped') { // the cover and album saved with a downloaded song
+      const art = library.artFor(cur.path), d = library.detailsFor(cur.path);
+      st.art = art ? 'local:' + art : '';
+      st.album = d.album || '';
+      if (d.artist) st.artist = d.artist;
+    }
     onNowPlaying(st);
     return st;
   }
@@ -1396,6 +1403,17 @@ ipcMain.on('win:size', (_e, w, h, off = 0) => {
 ipcMain.handle('art:get', async (_e, url) => {
   url = String(url || '');
   if (url.startsWith('thumb:')) return thumbCache.get(url) || null; // Windows media-controls picture
+  if (url.startsWith('local:')) { // a cover saved next to a downloaded song: only from inside the library folder
+    const f = path.resolve(url.slice(6)), lib = path.resolve(library.dir) + path.sep;
+    if (!f.startsWith(lib) || !/\.(jpe?g|png|webp)$/i.test(f)) return null;
+    if (artCache.has(url)) return artCache.get(url);
+    try {
+      const ext = path.extname(f).slice(1).toLowerCase(), d = 'data:image/' + (ext === 'jpg' ? 'jpeg' : ext) + ';base64,' + fs.readFileSync(f).toString('base64');
+      if (artCache.size > 20) artCache.delete(artCache.keys().next().value);
+      artCache.set(url, d);
+      return d;
+    } catch (e) { log('local cover error: ' + e.message); return null; }
+  }
   if (!(SPOT_IMG.test(url) || /^https:\/\/i\.ytimg\.com\//.test(url))) return null;
   if (artCache.has(url)) return artCache.get(url);
   try {

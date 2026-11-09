@@ -411,8 +411,8 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     if (!open || !canvas) return;
     if (!u) { // no picture address: still on its way if something is playing (Spotify / Windows send it a bit later)
       token++; img = null; clearTimeout(giveUp);
-      if (url === '' && albumName && !stopped) { noCover = false; setLoading(true); giveUp = setTimeout(() => { if (url === '') { setLoading(false); noCover = true; draw(); } }, 10000); }
-      else { setLoading(false); noCover = false; }
+      if (url === '' && albumName && !stopped && source() !== 'local') { noCover = false; setLoading(true); giveUp = setTimeout(() => { if (url === '') { setLoading(false); noCover = true; draw(); } }, 10000); }
+      else { setLoading(false); noCover = !stopped && source() === 'local' && !!albumName; } // a local song without a saved cover
       draw(); return;
     }
     clearTimeout(giveUp); noCover = false;
