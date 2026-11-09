@@ -1,9 +1,10 @@
 # What's new in Minapp
 
 ## 1.9.11
-- Album panel restyled: the album name is in a small pixel font, white on the box and the CD, black on the cassette.
-- The panel and the inside of the box now have a pixel gradient in the album's own colours instead of flat black.
-- The cassette fills the whole panel and has a paper title strip at the bottom with the album name.
+- Album panel restyled. The album name is in a small pixel font: white on the box and the CD, black on the cassette.
+- The background takes the player's own colour with a hint of the album's, instead of flat black.
+- The cassette box is drawn after a real clear plastic box, turned slightly so its side shows, with the album title under the cover.
+- The cassette keeps its real proportions, with the title on a paper strip; the letters get bigger or smaller to fit the name.
 
 ## 1.9.10
 - New album panel, drawn as pixel art to match the player, with the album's name underneath in the skin's own font. Three looks: a cassette box, a cassette whose reels turn while music plays, and a CD. Click the panel to switch, or use the menu, Album picture.

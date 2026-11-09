@@ -102,12 +102,17 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
   };
   const glyph = (ch) => FONT[ch] || FONT['?'];
   const textW = (t) => [...t].reduce((n, ch) => n + glyph(ch)[0].length + 1, 0) - 1;
-  function text(t, cx, y, c, shadow) { // centred on cx
-    let x = Math.round(cx - textW(t) / 2);
-    for (const ch of t) { const gl = glyph(ch); if (shadow) bitmap(gl, x, y + 1, { '#': shadow }); bitmap(gl, x, y, { '#': c }); x += gl[0].length + 1; }
+  let textLift = null; // optional: how far up letters move at a given x (the turned box)
+  function text(t, cx, y, c, shadow, sc = 1) { // centred on cx; sc = 2 draws every font pixel as 2 x 2
+    let x = Math.round(cx - textW(t) * sc / 2);
+    const put = (gl, ox, oy, col) => gl.forEach((r, j) => [...r].forEach((ch, i) => { if (ch === '#') P(ox + i * sc, oy + j * sc, col, sc, sc); }));
+    for (const ch of t) {
+      const gl = glyph(ch), gy = y + (textLift ? textLift(x + gl[0].length * sc / 2) : 0); // whole letters follow a slope
+      if (shadow) put(gl, x, gy + 1, shadow); put(gl, x, gy, c); x += (gl[0].length + 1) * sc;
+    }
   }
   // the album name split into up to `max` lines that fit `width` pixels; shortened with ".." when it is too long
-  function nameLines(width, max) {
+  function nameLines(width, max, full) {
     const clean = String(albumName || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/\s+/g, ' ').trim();
     const words = clean.split(' ').filter(Boolean), ls = [];
     const cut = (w) => { while (w.length > 1 && textW(w + '..') > width) w = w.slice(0, -1); return w.trimEnd() + '..'; };
@@ -120,6 +125,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
       if (ls.length === max) { cur = ''; const rest = ls[max - 1] + ' ' + words.slice(i).join(' '); ls[max - 1] = textW(rest) <= width ? rest : cut(rest); break; }
     }
     if (cur && ls.length < max) ls.push(cur);
+    if (full) return { ls, fits: !ls.some((l) => l.endsWith('..')) && ls.join(' ').length >= clean.length };
     return ls;
   }
   function writeName(cx, top, width, max, c, shadow, lh = 7) {
@@ -143,6 +149,25 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     }
   }
   const shade = (c, k) => c.map((v) => v * k);
+  const mixc = (a, b, t) => a.map((v, k) => v + (b[k] - v) * t);
+  // the main window's own colour (average of the skin's main bitmap), so the panel's background matches the player
+  let tone = [44, 44, 62], toneKey = null;
+  function skinTone() {
+    let imgs = null; try { imgs = webamp.store.getState().display.skinImages; } catch {}
+    if (!imgs || imgs === toneKey) return tone;
+    toneKey = imgs;
+    const src = imgs.MAIN_WINDOW_BACKGROUND; if (!src) return tone;
+    const im = new Image();
+    im.onload = () => {
+      const c = document.createElement('canvas'); c.width = 24; c.height = 10;
+      const cg = c.getContext('2d', { willReadFrequently: true }); cg.drawImage(im, 0, 0, 24, 10);
+      const d = cg.getImageData(0, 0, 24, 10).data, a = [0, 0, 0];
+      for (let i = 0; i < d.length; i += 4) { a[0] += d[i]; a[1] += d[i + 1]; a[2] += d[i + 2]; }
+      tone = a.map((v) => v / (d.length / 4)); if (open) draw();
+    };
+    im.src = src;
+    return tone;
+  }
 
   const LOGO = {
     spotify: ['..#####..', '.#######.', '#ddddddd#', '#d#####d#', '##ddddd##', '##d###d##', '###ddd###', '.#######.', '..#####..'],
@@ -156,28 +181,43 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     else bitmap(LOGO.note, x, y, { '#': '#e8e8e8' });
   }
 
-  // ---------- case: a cassette box, 70 x 108 (the tall proportions of a real one), cover 64 x 64, name inside ----------
-  const CASE = { x: 11, y: 2, w: 70, h: 108 };
+  // ---------- case: the clear cassette box from Mihai's reference picture. Its plastic frame is that picture, traced at
+  // 74 x 110 (white edges, see-through elsewhere so the panel shows through); the card inside is drawn here ----------
+  const CASE = { x: 10, y: 2, w: 74, h: 110 };
+  // the card's place inside the traced frame. The box is turned a little, so the card is not a plain rectangle: its
+  // right side sits RISE px higher and SHRINK px shorter than its left side, measured on the reference picture
+  const CARD = { x: 9, y: 11, w: 61, h: 89, rise: 2, shrink: 1 };
+  const FRAME_SRC = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEoAAABuCAYAAACA7YVRAAAEHElEQVR4nO2dS3LrOAxFb7pSHnvg/QS9slZW1vB+PPDYox5EjGEEIKGXWE/qd0+Viz+QhK6p/4cAKfHiM66X2z8ApvVdAQDoHMoC+yW2llE9PZ4Of7fEg1CBSL5x30lWntVp9orY0SXtRe1nVNsVF58AvB9PB7y2XCOSukpZJ+LKes5MxkZNPOPcIsfTAdfLrWMKAHhL2hMTz/prfdk2xIRyvdymFwC4Xm7WKGrQ500mP3PAIrgLW7H/CSTIq/YtLvwU6l9npM5QXXnUeZaf1fsOlba1U7akDwEwvQYFUee9zrIyn+/bz8p6dj+JLDFuQqnJs3EZ5Gf1RnjbMz62EVtA8LizUQDyGtveDRBvVwTfw9ZXfIhUabP5IS79k0ymD0UglO1UsBxbR5N4j6qd3SOee4bVdiKul9uDP70R1ZA5VNz3Xi2NIG7T5+PpUOhiMd8RaAnaIpFQ4o3MEer7szzaIGoTfwUG4oynp7myIyKhSEAklK7txB7giCpCoYpQqCIUqgiFKkKhimRC6ZpO7AF/CrPWOdTu4KpXhEIVoVBFKFQRClVDR0IJfvY2027pCSVrObEHvFBbuWW0NSQbUbKmFxvnDPRXvWkdP/ZBdnNBUHvq5E/gDcjv6+l6fmyedNWTOdS1PNkDvAsz5g14FEpMXNf0ZA80oXQOBRQppPcgGTG0ESW/04k9wKsHRShUH2kRCtVHW4RC5YhNUKgiFCpHbcILxRugCRxRRXgpuAhHVBEKVYRCFaFQRXj1oAhHVBEecBbxt6t4HPWItAhXvT7aIhRqjALj9/XIDEdUEQpVY/hoIpmhUDXSJ+6IoyKUPNuJHVB6fJrg69MsPk5mRiNKQeEAcBtVhqcwRbgxL9J72FXWc2P78BWPGuGRubhQ1/Bk6/RGlKznxvYZfQyQzPAVjyL8kkaR6BUPdSFBfEtdQZG+YEeU/i4n9gCvcBahUEUoVBE+zVKETwUX4apXJHunmHwgLdL7QAQx8Jp5jtgEt1FF+IGIIrzMMkYAjqgy/MbdGAVq0538L+jMqNY7GxH8aUKhdnomJhQk88LYQsVOmKe86yEmVNRuntgyAeJJvmzj1pmHyQGfjVtVvBgSVNGkKR2UZ0ww2+jeqhc5AwBv80KMLsm0hcvaGaELyqI+Iv/8rIztN+pD7YyNUYXJVNLERoO8qHzCfV7NJfWB/p9ifZfcLKXS//sr8DGr2DxKpkJl64wm8ZFTiq8LlY0AwaO4vh/fTsWPT9vqjGovNjFPmNo6VtwnT20/wXj+zygPqA/z71Be8KU8bKOOp8P7PK+cIF+oKSkTF1bRQvkZyGeYXWPn8hJlmm3WNGepM5Egr4cm8RHPmp9vMaFQwOfu2U7wrIGZung47NtI2MpC/wqpUA1zQLeZf5dsmP8As9wA9R3SdwMAAAAASUVORK5CYII=';
+  let frameImg = null;
+  function caseFrame() {
+    if (frameImg) return frameImg.complete ? frameImg : null;
+    frameImg = new Image(); frameImg.onload = () => { if (open) draw(); }; frameImg.src = FRAME_SRC;
+    return null;
+  }
   function drawCase() {
-    const { x, y, w, h } = CASE;
-    P(x + 2, y + 2, '#1c1e2b', w, h);                               // the back of the box (depth)
-    P(x + w + 1, y + 3, '#5d6176', 1, h - 2); P(x + 3, y + h + 1, '#4a4e60', w - 2, 1);
-    const [ct, cb] = coverColours();                                // front: see-through plastic tinted by the cover
-    gradient(x, y, w, h, shade(ct, 0.85), shade(cb, 0.45));
-    box(x, y, w, h, '#9fa3b5');
-    P(x + 1, y + 1, '#d3d6e2', w - 2, 1); P(x + 1, y + 1, '#d3d6e2', 1, h - 2); // light top / left edges
-    P(x + 1, y + h - 2, '#585c6f', w - 2, 1); P(x + w - 2, y + 2, '#585c6f', 1, h - 3);
-    P(x + 2, y + 2, '#3a3d4e', w - 4, 1);                           // the lid's lip
-    logo(x + 4, y + 5);
-    const cx = x + 3, cy = y + 17;
-    box(cx - 1, cy - 1, 66, 66, '#07070b');
-    cover(cx, cy, 64, 64);
-    // shine across the plastic
-    g.fillStyle = 'rgba(255,255,255,.09)';
-    for (let j = 2; j < h - 2; j++) for (let i = 2; i < w - 2; i++) { const k = i + j; if ((k > 16 && k < 30) || (k > 40 && k < 43)) g.fillRect(x + i, y + j, 1, 1); }
-    P(x + 2, y + 2, '#ffffff'); P(x + 3, y + 2, 'rgba(255,255,255,.6)'); P(x + 2, y + 3, 'rgba(255,255,255,.6)');
-    P(x + w - 3, y + 6, 'rgba(255,255,255,.25)', 1, h - 14);        // bright edge on the right
-    writeName(x + w / 2, y + 86, w - 8, 3, '#ffffff', 'rgba(0,0,0,.55)');
+    const { x, y } = CASE, { w: kw, h: kh, rise, shrink } = CARD, [ct, cb] = coverColours();
+    const kx = x + CARD.x, ky = y + CARD.y;
+    // 1. the card drawn flat on its own canvas
+    const off = document.createElement('canvas'); off.width = kw; off.height = kh;
+    const main = g; g = off.getContext('2d', { willReadFrequently: true }); g.imageSmoothingEnabled = false;
+    gradient(0, 0, kw, kh, shade(ct, 0.75), shade(cb, 0.4));
+    logo(7, 5);
+    const cw = 52, ch = 44, cx = Math.floor((kw - cw) / 2), cy = 20;
+    cover(cx, cy, cw, ch);
+    g = main; g.imageSmoothingEnabled = false;
+    // 2. laid onto the box column by column, following the turn
+    const lift = (i) => Math.round(rise * i / (kw - 1)), colH = (i) => kh - Math.round(shrink * i / (kw - 1));
+    for (let i = 0; i < kw; i++) g.drawImage(off, i, 0, 1, kh, kx + i, ky - lift(i), 1, colH(i));
+    // 3. the title where the reference has its bars, written straight on top so the letters stay crisp
+    textLift = () => -lift(kw >> 1);                                  // the slope is only 2 px: keep each line straight
+    const room = kw - 6, one = nameLines(room / 2, 1, true), ty = ky + cy + ch + 6;
+    if (one.ls.length && one.fits) text(one.ls[0], kx + kw / 2, ty + 1, '#ffffff', 'rgba(0,0,0,.55)', 2);
+    else { const two = nameLines(room, 2, true); if (two.fits) writeName(kx + kw / 2, ty + 1, room, 2, '#ffffff', 'rgba(0,0,0,.55)'); else writeName(kx + kw / 2, ty - 1, room, 3, '#ffffff', 'rgba(0,0,0,.55)', 6); }
+    textLift = null;
+    // 4. the shine across the plastic, then the traced frame on top
+    g.fillStyle = 'rgba(255,255,255,.07)';
+    for (let j = 0; j < kh; j++) for (let i = 0; i < kw; i++) { const k = i - j * 0.6; if (k > 32 && k < 46) g.fillRect(kx + i, ky - lift(i) + j, 1, 1); }
+    const f = caseFrame(); if (f) g.drawImage(f, x, y);
   }
 
   // ---------- tape: a cassette drawn after Mihai's reference picture, stretched to fill the whole panel ----------
@@ -201,20 +241,19 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
   }
   function screw(a, b) { P(a, b, '#6d6a6c', 3, 3); P(a + 1, b, '#45424a'); P(a + 1, b + 1, '#9c98a0'); }
   function drawTape() {
-    const x = 0, y = 0, w = W - 2, h = H - 2;                          // the whole panel: no dark corners
+    const w = 92, h = 64, x = 1, y = Math.round((H - 2 - h) / 2);     // a real cassette's proportions, on the gradient
+    P(x + 2, y + h, 'rgba(0,0,0,.35)', w - 2, 1);                    // shadow
     round(x, y, w, h, T_SHELL, T_LINE);                                 // shell
     P(x + 2, y + 1, T_HI, w - 4, 1); P(x + 1, y + 2, T_HI, 1, h - 4);
     P(x + 2, y + h - 2, T_LO, w - 4, 1); P(x + w - 2, y + 2, T_LO, 1, h - 4);
-    screw(x + 3, y + 3); screw(x + w - 6, y + 3); screw(x + 3, y + h - 6); screw(x + w - 6, y + h - 6);
-    // label: the cover, across the top
-    const lx = x + 7, ly = y + 7, lw = 80, lh = 40;
+    screw(x + 2, y + 2); screw(x + w - 5, y + 2); screw(x + 2, y + h - 5); screw(x + w - 5, y + h - 5);
+    // label: the cover across the top, with the title strip under it
+    const lx = x + 6, ly = y + 5, lw = 80, lh = 30;
     cover(lx, ly, lw, lh);
-    round(lx - 1, ly - 1, lw + 2, lh + 2, null, '#4a4038');
-    [[lx, ly], [lx + lw - 1, ly], [lx, ly + lh - 1], [lx + lw - 1, ly + lh - 1]].forEach(([a, b]) => P(a, b, '#4a4038'));
-    logo(lx + 3, ly + 3);
-    bitmap(['.###.', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'], lx + lw - 10, ly + lh - 12, { '#': '#f4efe6' }); // side A
+    logo(lx + 2, ly + 2);
+    bitmap(['.###.', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'], lx + lw - 8, ly + 2, { '#': '#f4efe6' }); // side A
     // the window band: two reels and the tape window between them
-    const bx = x + 19, by = y + 21, bw = 56, bh = 18;
+    const bx = x + 18, by = ly + 6, bw = 56, bh = 18;
     round(bx, by, bw, bh, T_BAND, T_LINE);
     P(bx + 2, by + 1, '#fbf7ef', bw - 4, 1);
     reel(bx + 8, by + 9); reel(bx + bw - 9, by + 9);
@@ -223,19 +262,26 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     const sx = wx + Math.floor(ww / 2) - 1;                          // the brown tape spool in it
     P(sx - 1, wy + 2, '#7d5640', 6, 1); P(sx, wy + 3, '#9a6c50', 4, wh - 6); P(sx - 1, wy + wh - 3, '#7d5640', 6, 1);
     P(sx + 1, wy + 3, '#b9876a', 1, wh - 6);
-    // the title strip: a paper label with ruled lines and the album name in black
-    const px = x + 7, py = ly + lh + 4, pw = 80, ph = 30;
-    round(px - 1, py - 1, pw + 2, ph + 2, '#fbf8f1', '#8f8576');
-    P(px, py + 1, '#d84a3a', pw, 1);                                  // the red line at the top of a cassette label
-    for (let r = py + 9; r < py + ph - 1; r += 7) P(px + 2, r, '#e2dacb', pw - 4, 1);
-    const ls = nameLines(pw - 6, 3), top = py + 3 + Math.round((ph - 3 - ls.length * 7) / 2);
-    ls.forEach((t, j) => text(t, px + pw / 2, top + j * 7, '#1a1714'));
+    // the title strip: paper, a red line, the album name in black. The size adapts to the length: big letters for a
+    // short name, normal ones on up to two lines, then three tighter lines; only past that is it shortened with ".."
+    const px = lx, py = ly + lh, ph = 19;
+    P(px, py, '#fbf8f1', lw, ph);
+    P(px, py, '#d84a3a', lw, 1);
+    const ink = '#1a1714', room = lw - 4, one = nameLines(room / 2, 1, true);
+    if (one.ls.length && one.fits) text(one.ls[0], px + lw / 2, py + 4, ink, null, 2);
+    else {
+      const two = nameLines(room, 2, true), ls = two.fits ? two.ls : nameLines(room, 3), lh2 = ls.length === 3 ? 6 : 7;
+      const top = py + 2 + Math.round((ph - 2 - (ls.length * lh2 - (lh2 - 5))) / 2);
+      ls.forEach((t, j) => text(t, px + lw / 2, top + j * lh2, ink));
+    }
+    round(lx - 1, ly - 1, lw + 2, lh + ph + 2, null, '#4a4038');
+    [[lx, ly], [lx + lw - 1, ly], [lx, ly + lh + ph - 1], [lx + lw - 1, ly + lh + ph - 1]].forEach(([a, b]) => P(a, b, '#4a4038'));
     // bottom: the raised part with its grooves and four holes
-    const ty = y + h - 15;
-    P(x + 17, ty, T_GROOVE, w - 34, 1);
-    for (let j = 1; j < 14; j++) { const d = Math.round(j * 0.35); P(x + 17 - d, ty + j, T_GROOVE); P(x + w - 18 + d, ty + j, T_GROOVE); P(x + 18 - d, ty + j, '#ece3d4', w - 36 + 2 * d, 1); }
-    P(x + 2, y + h - 2, T_LO, w - 4, 1); P(x + 2, y + h - 1, T_LINE, w - 4, 1);
-    [[x + 22, ty + 8, 4, 3], [x + 33, ty + 6, 3, 3], [x + w - 36, ty + 6, 3, 3], [x + w - 26, ty + 8, 4, 3]].forEach(([a, b, c, d]) => P(a, b, '#2b2622', c, d));
+    const ty = py + ph + 1, rows = y + h - 1 - ty;
+    P(x + 19, ty, T_GROOVE, w - 38, 1);
+    for (let j = 1; j < rows; j++) { const d = Math.round(j * 0.6); P(x + 19 - d, ty + j, T_GROOVE); P(x + w - 20 + d, ty + j, T_GROOVE); P(x + 20 - d, ty + j, '#ece3d4', w - 40 + 2 * d, 1); }
+    P(x + 2, y + h - 2, T_LO, w - 4, 1);
+    [[x + 24, ty + 4, 4, 3], [x + 34, ty + 3, 3, 3], [x + w - 37, ty + 3, 3, 3], [x + w - 28, ty + 4, 4, 3]].forEach(([a, b, c, d]) => P(a, b, '#2b2622', c, d));
   }
 
   // ---------- cd: an 83 px disc ----------
@@ -278,7 +324,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     g = canvas.getContext('2d', { willReadFrequently: true });
     g.imageSmoothingEnabled = false;
     g.clearRect(0, 0, canvas.width, canvas.height);
-    if (look !== 'tape') { const [ct, cb] = coverColours(); gradient(0, 0, canvas.width, canvas.height, shade(ct, 0.5), shade(cb, 0.18)); } // full-panel backdrop
+    { const [ct, cb] = coverColours(), t = skinTone(); gradient(0, 0, canvas.width, canvas.height, mixc(shade(t, 1.1), ct, 0.15), mixc(shade(t, 0.8), cb, 0.1)); } // backdrop: the player's colour, a hint of the cover
     if (look === 'tape') drawTape(); else if (look === 'cd') drawCd(); else drawCase();
   }
   // the reels and the disc move while something plays (nothing runs when paused, hidden, or showing the case)
