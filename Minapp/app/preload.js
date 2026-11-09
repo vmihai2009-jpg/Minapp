@@ -34,6 +34,9 @@ contextBridge.exposeInMainWorld('bridge', {
   widgetGet: () => ipcRenderer.invoke('widget:get'),
   widgetSet: (m) => ipcRenderer.send('widget:set', m),
   onWidget: (cb) => ipcRenderer.on('widget:mode', (_e, m) => cb(m)),
+  spotLists: (force) => ipcRenderer.invoke('spotlists:get', force),
+  spotPlayList: (uri) => ipcRenderer.invoke('spotlists:play', uri),
+  spotConnect: () => ipcRenderer.send('spotlists:connect'),
   onMini: (cb) => ipcRenderer.on('mini:toggle', cb),
   onMilkdrop: (cb) => ipcRenderer.on('milkdrop:toggle', cb),
 });

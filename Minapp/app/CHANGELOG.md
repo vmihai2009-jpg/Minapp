@@ -1,5 +1,9 @@
 # What's new in Minapp
 
+## 1.9.0
+- Pick a Spotify playlist: press LIST in the playlist window to see your playlists (Liked songs, My playlists, Saved from others) in the skin's own font. Click one to play it.
+- If Spotify was connected before, the list asks you to connect once more so Minapp may read your playlists.
+
 ## 1.8.9
 - Faster and lighter: the visualizer is paced like the original Winamp, which halves its drawing work, and long YouTube playlists no longer resend their whole song list twice a second.
 - Go back to an earlier version: Settings, Go back to an earlier version. Minapp keeps the last 3 versions from now on.
