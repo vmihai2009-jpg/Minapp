@@ -16,7 +16,8 @@ const TABS = [['playlist', 'PLAYLIST'], ['library', 'LIBRARY'], ['lyrics', 'LYRI
 const SORTS = [['shuffle', 'SHUF'], ['az', 'A-Z'], ['artist', 'ARTST'], ['reverse', 'REV']];
 
 export function initPlaylistView(webamp, api) {
-  let tab = 'playlist', lw = 100, hoverAt = 0, menuOpen = false, bar = null, infoBox = null, infoCur = -1, infoTop = 0, infoHover = -1, infoRows = [];
+  let tools = true, tab = 'playlist', lw = 100, hoverAt = 0, menuOpen = false, bar = null, infoBox = null, infoCur = -1, infoTop = 0, infoHover = -1, infoRows = [];
+  try { tools = localStorage.getItem('minapp.pvTools') !== '0'; } catch {}
   try { const t = localStorage.getItem('minapp.pvTab'); if (TABS.some((x) => x[0] === t)) tab = t; } catch {}
   let root = null, left = null, right = null, line = null, data = null, loadedAt = 0, skinKey = '';
   let pick = { kind: 'queue' }, songs = null, results = null, busy = false, find = null, sort = 'order', sortOpen = false;
@@ -136,6 +137,11 @@ export function initPlaylistView(webamp, api) {
       b.style.cssText = `flex:1;text-align:center;height:${ROW}px;cursor:pointer;color:${k === tab ? cur : fg};` + (k === tab ? 'text-decoration:underline;text-underline-offset:2px;' : 'opacity:.8;');
       bar.appendChild(b);
     }
+    const t = document.createElement('div'); // show / hide the bottom tools bar
+    t.dataset.tools = '1'; t.textContent = tools ? '\u25be' : '\u25b4';
+    t.title = tools ? 'Hide the buttons at the bottom (more room for songs)' : 'Show the buttons at the bottom';
+    t.style.cssText = `flex:none;width:14px;text-align:center;height:${ROW}px;cursor:pointer;color:${fg};`;
+    bar.appendChild(t);
   }
   function setTab(k) {
     if (!TABS.some((x) => x[0] === k)) return;
@@ -199,18 +205,21 @@ export function initPlaylistView(webamp, api) {
         const g = webamp.store.getState().windows.genWindows.playlist, sz = (g && g.size) || [0, 0];
         if (sz[0] < 4 || sz[1] < 4) webamp.store.dispatch({ type: 'WINDOW_SIZE_CHANGED', windowId: 'playlist', size: [Math.max(4, sz[0]), Math.max(4, sz[1])] }); // 12 songs in view
       }
-      if (!localStorage.getItem('minapp.pvTall')) { // 1.9.27: a few more rows than before
-        localStorage.setItem('minapp.pvTall', '1');
+      if (!localStorage.getItem('minapp.pvTall2')) { // 1.9.28: a proper page of songs (about 14 rows), not one or two
+        localStorage.setItem('minapp.pvTall2', '1');
         const g = webamp.store.getState().windows.genWindows.playlist, sz = (g && g.size) || [0, 0];
-        if (sz[1] < 4) webamp.store.dispatch({ type: 'WINDOW_SIZE_CHANGED', windowId: 'playlist', size: [sz[0], 4] });
+        if (sz[1] < 8) webamp.store.dispatch({ type: 'WINDOW_SIZE_CHANGED', windowId: 'playlist', size: [sz[0], 8] });
       }
     } catch {}
-    const r = tracks.getBoundingClientRect(), { bg, fg, font } = colours();
+    const r0 = tracks.getBoundingClientRect(), { bg, fg, font } = colours();
+    // tools hidden: the list also covers the bottom bar (buttons, timer), all but the resize corner on the right
+    const wr = w.getBoundingClientRect();
+    const r = tools ? r0 : { left: r0.left, top: r0.top, width: r0.width, right: r0.right, height: Math.max(r0.height, wr.bottom - r0.top - 3) };
     // with the cassette above, the library column lines up under it; otherwise about a third of the width
     lw = Math.max(90, Math.round(r.width * 0.36));
     const art = document.getElementById('album-tab'), a = art && art.style.display !== 'none' ? art.getBoundingClientRect() : null;
     if (a && a.width && a.bottom <= r.top + 2 && a.right > r.left + 60 && a.right < r.right - 100) lw = Math.round(a.right - r.left) - 1;
-    const key = [r.left, r.top, r.width, r.height, bg, fg, font, lw].join();
+    const key = [r.left, r.top, r.width, r.height, bg, fg, font, lw, tools].join();
     root.style.display = '';
     if (key !== skinKey) {
       skinKey = key;
@@ -224,7 +233,7 @@ export function initPlaylistView(webamp, api) {
       infoBox.style.cssText = `position:absolute;left:0;right:0;top:${T}px;bottom:0;overflow:hidden;`;
       draw();
     }
-    buttons(false);
+    if (tools) buttons(false); else { hideButtons(); if (menuOpen) closeMenu(); }
     extras();
     try { // the scrollbar was dragged
       const pos = webamp.store.getState().display.playlistScrollPosition;
@@ -244,7 +253,10 @@ export function initPlaylistView(webamp, api) {
     left = document.createElement('div'); line = document.createElement('div'); right = document.createElement('div');
     bar = document.createElement('div'); infoBox = document.createElement('div');
     root.append(bar, left, line, right, infoBox);
-    bar.addEventListener('click', (e) => { const t = e.target.closest && e.target.closest('[data-tab]'); if (t) setTab(t.dataset.tab); });
+    bar.addEventListener('click', (e) => {
+      if (e.target.closest && e.target.closest('[data-tools]')) { tools = !tools; try { localStorage.setItem('minapp.pvTools', tools ? '1' : '0'); } catch {} skinKey = ''; place(); return; }
+      const t = e.target.closest && e.target.closest('[data-tab]'); if (t) setTab(t.dataset.tab);
+    });
     infoBox.addEventListener('mousemove', (e) => { const i = rowOf(e); if (i !== infoHover) { infoHover = i; draw(); } });
     infoBox.addEventListener('click', (e) => { const r = infoRows[rowOf(e)]; if (r && window.__infoTab) window.__infoTab.click(r); });
     infoBox.addEventListener('wheel', (e) => { e.preventDefault(); infoTop += e.deltaY > 0 ? 3 : -3; infoHands = Date.now() + 6000; draw(); }, { passive: false });
@@ -299,6 +311,7 @@ export function initPlaylistView(webamp, api) {
   function hideButtons() { for (const k in btnEls) btnEls[k].style.display = 'none'; }
   function buttons(redraw) {
     const w = win(); if (!w) return;
+    if (!tools) { hideButtons(); return; }
     for (const b of BUTTONS) {
       const el = w.querySelector(b.sel); if (!el) continue;
       const r = el.getBoundingClientRect();

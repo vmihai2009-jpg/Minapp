@@ -1,5 +1,12 @@
 # What's new in Minapp
 
+## 1.9.28
+- New PLAYLIST tab: what's playing, in order, like the classic playlist. Click a song to jump to it.
+- The playlist opens much taller (about 14 rows). The small arrow at the end of the top bar hides the bottom buttons for even more room.
+- No more blue fills: the row under the pointer and the picked one just turn white. Long titles slide along while you point at them.
+- The playlist timer shows the playing song's time.
+- MENU opens Minapp's own menu in the skin's look (click MENU again, click outside or press Esc to close).
+
 ## 1.9.27
 - The YouTube Music window no longer pops up by itself (it was being shown each time Minapp read your YT Music library).
 
