@@ -1,5 +1,10 @@
 # What's new in Minapp
 
+## 1.9.19
+- ALBUM tab next to Lyrics and Artist: the album's songs (the playing one lit up), a short text about the album, and a button that plays the whole album on Spotify.
+- Halfway through an album, the cassette turns over to side B and the record slides out of its sleeve, turns round and goes back in.
+- About the artist finds the band more reliably when its name is also an ordinary word.
+
 ## 1.9.18
 - Lyrics and About the artist: the repeat button is now INFO. It opens a panel under the player with the song's lyrics (the sung line lights up when the lyrics are timed) or a short text about the artist.
 - Playlists under the album picture: Spotify, YouTube and local playlists in folders that open and close. Click one to play it.
