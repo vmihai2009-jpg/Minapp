@@ -1095,6 +1095,7 @@ ipcMain.on('ytm:state', (_e, s) => { ytmState = s || { status: 'closed' }; });
 
 // ---------- Local playlists + YouTube download (personal use) ----------
 const library = require('./library').create({ dir: path.join(app.getPath('userData'), 'library'), binDir: path.join(app.getPath('userData'), 'bin'), log });
+const { songInfo } = require('./songinfo');
 
 async function playLocal(name, start = 0) {
   const tracks = library.tracks(name);
@@ -1456,6 +1457,9 @@ ipcMain.on('win:dragstart', () => {
 });
 ipcMain.on('win:dragend', () => { if (dragTimer) { clearInterval(dragTimer); dragTimer = null; savePos(); } });
 let albumUi = { look: 'case', spin: false, open: false }; // what the album panel shows, for the menu's ticks
+let infoUi = { open: false, kind: 'lyrics' };
+ipcMain.on('info:state', (_e, st) => { if (st && typeof st === 'object') { infoUi = { open: !!st.open, kind: st.kind === 'artist' ? 'artist' : 'lyrics' }; buildMenu(); } });
+ipcMain.handle('info:get', (_e, kind, song) => songInfo(kind === 'artist' ? 'artist' : 'lyrics', song && typeof song === 'object' ? song : {}));
 ipcMain.on('album:state', (_e, st) => { if (st && typeof st === 'object') { albumUi = { look: String(st.look || 'case'), spin: !!st.spin, open: !!st.open }; buildMenu(); } });
 ipcMain.on('app:quit', () => app.quit());
 ipcMain.handle('app:version', () => app.getVersion());
@@ -1609,6 +1613,7 @@ function menuItems() {
       { type: 'separator' },
       { label: 'Spin the CD (slowly, while playing)', type: 'checkbox', checked: !!albumUi.spin, click: () => win.webContents.send('album:options', { look: 'cd', spin: !albumUi.spin }) },
     ] },
+    { label: 'Lyrics / about the artist', type: 'checkbox', checked: infoUi.open, accelerator: 'CmdOrCtrl+Shift+L', click: () => win.webContents.send('info:options', { open: !infoUi.open }) },
     { label: 'Mini mode', accelerator: 'CmdOrCtrl+Shift+M', click: () => win.webContents.send('mini:toggle') },
     { label: 'Widget', submenu: [
       { label: 'Off (full player)', type: 'radio', checked: widget === 'off', click: () => setWidget('off', true) },

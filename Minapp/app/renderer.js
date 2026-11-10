@@ -171,7 +171,7 @@
     if (document.hidden) return;
     restack();
     // only the few top-level boxes are measured (cheap); a full-tree scan every tick made the playlist feel laggy
-    const els = [...document.querySelectorAll('#main-window, #equalizer-window, #playlist-window, #milkdrop-window, #dl-panel, #whatsnew-panel, #album-tab')];
+    const els = [...document.querySelectorAll('#main-window, #equalizer-window, #playlist-window, #milkdrop-window, #dl-panel, #whatsnew-panel, #album-tab, #info-tab')];
     for (const c of document.body.children) {
       if (c.id !== 'app' && !['SCRIPT', 'STYLE'].includes(c.tagName)) els.push(c);
     }
@@ -243,6 +243,7 @@
   import('./playlist-picker.js').then((m) => m.initPlaylistPicker(webamp, api)).catch((e) => api.log('playlist picker failed: ' + e.message));
   import('./album-tab.js').then((m) => m.initAlbumTab(webamp, api, () => widgetMode)).catch((e) => api.log('album tab failed: ' + e.message));
   import('./update-bulb.js').then((m) => m.initUpdateBulb(api)).catch((e) => api.log('update bulb failed: ' + e.message));
+  import('./info-tab.js').then((m) => m.initInfoTab(webamp, api, () => widgetMode)).catch((e) => api.log('info tab failed: ' + e.message));
   import('./download-bar.js').then((m) => m.initDownloadBar(webamp, api)).catch((e) => api.log('download bar failed: ' + e.message));
   setInterval(() => { const b = document.getElementById('eject'); if (b) b.title = document.documentElement.classList.contains('src-youtube') ? 'Record: download this YouTube link (personal use)' : (document.documentElement.dataset.source || 'spotify') === 'spotify' ? (document.documentElement.classList.contains('liked') ? 'Liked: click to remove from Liked Songs' : 'Like: add this song to Liked Songs') : ''; }, 1500);
   let modeHoldUntil = 0, holdUntil = 0;
@@ -604,6 +605,7 @@
       document.documentElement.dataset.source = s.source || 'spotify';
       document.documentElement.classList.toggle('liked', !!s.liked);
       if (window.__albumTab) window.__albumTab.setArt(s.status === 'closed' || s.status === 'stopped' ? null : s.art || '', s.title || '', s.status === 'playing', s.album || '');
+      if (window.__infoTab) window.__infoTab.setSong(s.status === 'closed' || s.status === 'stopped' ? null : s);
       const status = webamp.getMediaStatus();
       if (s.status === 'closed' || s.status === 'stopped') {
         if (status === 'PLAYING') webamp.pause();

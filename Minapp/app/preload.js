@@ -42,5 +42,8 @@ contextBridge.exposeInMainWorld('bridge', {
   onMini: (cb) => ipcRenderer.on('mini:toggle', cb),
   albumState: (st) => ipcRenderer.send('album:state', st),
   onAlbumOptions: (cb) => ipcRenderer.on('album:options', (_e, o) => cb(o)),
+  infoGet: (kind, song) => ipcRenderer.invoke('info:get', kind, song),
+  infoState: (st) => ipcRenderer.send('info:state', st),
+  onInfo: (cb) => ipcRenderer.on('info:options', (_e, o) => cb(o)),
   onMilkdrop: (cb) => ipcRenderer.on('milkdrop:toggle', cb),
 });
