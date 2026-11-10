@@ -1,6 +1,6 @@
 // "What's new" pop-up after an update, drawn like the rest of the player: the skin's song-title font (TEXT.BMP), the
 // playlist colours, with a close mark. It opens under the player and closes with its X or a click.
-import { setText } from './download-bar.js';
+import { setText, textBg } from './download-bar.js';
 
 const MAX_LINES = 26, W = 275, PAD = 7, CHARS = Math.floor((W - 2 * PAD) / 5); // 52 characters of 5 px per line
 
@@ -22,7 +22,7 @@ export function initWhatsNew(webamp, api) {
   api.onWhatsNew(({ version, sections }) => {
     document.getElementById('whatsnew-panel')?.remove();
     const st = (() => { try { return webamp.store.getState().display.skinPlaylistStyle || {}; } catch { return {}; } })();
-    const bg = st.normalbg || '#000', hi = st.current || '#fff';
+    const bg = textBg(st.normalbg || '#000'), hi = st.current || '#fff';
     const lines = [];
     for (const s of sections) {
       lines.push({ t: `Version ${s.version}`, head: true });

@@ -2,7 +2,7 @@
 // Local folders (+ closed / - open), each with its playlists underneath; a click plays one. The magnifier at the right
 // of a folder searches that library: type, Enter, click a result to play it. Drawn in the skin's song-title
 // font and playlist colours, like the rest of the player. It shows whenever the album picture does.
-import { setText } from './download-bar.js';
+import { setText, skinImage, textBg, selBg, blendFor, paintWord } from './download-bar.js';
 
 const W = 96, ROW = 9, PAD = 4, CW = 16, HEAD = 13; // CW: letters per line; HEAD: the closed panel's height
 
@@ -25,7 +25,7 @@ export function initListsTab(webamp, api, getWidgetMode) {
         if (key === 'spotify' && (search.results || search.busy)) { // what to show: a small drop-down
           const names = { '': 'ALL', track: 'SONGS', album: 'ALBUMS', artist: 'ARTISTS' };
           rows.push({ t: `${search.pick ? '-' : '+'} SHOW ${names[search.only || '']}`, act: 'pick', indent: 2, bright: true });
-          if (search.pick) for (const k of Object.keys(names)) rows.push({ t: ((search.only || '') === k ? '>' : ' ') + names[k], only: k, indent: 3 });
+          if (search.pick) for (const k of Object.keys(names)) rows.push({ t: ((search.only || '') === k ? '*' : ' ') + names[k], only: k, indent: 3 });
         }
         if (search.busy) rows.push({ t: 'Searching...', dim: true, indent: 2 });
         else if (search.results) { for (const r of search.results) rows.push({ ...r, indent: 2 }); if (!search.results.length) rows.push({ t: 'Nothing found', dim: true, indent: 2 }); }
@@ -73,7 +73,7 @@ export function initListsTab(webamp, api, getWidgetMode) {
 
   function draw() {
     if (!panel) return;
-    const st = skin(), sel = st.selectedbg || '#0000c6', hi = st.current || '#fff';
+    const st = skin(), sel = selBg(st.selectedbg || '#0000c6'), hi = st.current || '#fff', blend = blendFor(textBg(st.normalbg || '#000'));
     const body = panel.firstChild;
     body.textContent = '';
     const maxTop = Math.max(0, rows.length - vis);
@@ -85,7 +85,7 @@ export function initListsTab(webamp, api, getWidgetMode) {
       d.style.cssText = `position:absolute;left:0;right:0;top:${i * ROW}px;height:${ROW}px;` + (live ? 'cursor:pointer;' : '') +
         (live && top + i === hover ? `background:${sel};` : '') + (r.dim ? 'opacity:.6;' : '') + (r.folder || r.bright ? 'filter:brightness(1.35);' : '');
       const t = document.createElement('div');
-      t.style.cssText = `position:absolute;left:${PAD + (r.indent || 0) * 5}px;top:1px;height:6px;white-space:nowrap;`;
+      t.style.cssText = `position:absolute;left:${PAD + (r.indent || 0) * 5}px;top:1px;height:6px;white-space:nowrap;` + (live && top + i === hover ? `mix-blend-mode:${blend};` : '');
       setText(t, cut(r.t, CW - (r.indent || 0) - (r.find ? 2 : 0)));
       d.appendChild(t);
       if (r.find && (r.folder || top + i === hover)) { // magnifier (on a playlist: while the mouse is over it): a 5 px ring with a handle, in the text colour
@@ -122,11 +122,11 @@ export function initListsTab(webamp, api, getWidgetMode) {
       const r = rows[rowOf(e)]; if (!r) return;
       if (r.find && !r.folder && e.target.classList.contains('lt-find')) {
         const s0 = search = { key: r.kind, q: '', inList: { kind: r.kind, id: r.id || '', name: r.t }, songs: null };
-        build(); draw();
+        build(); toInput(); draw();
         api.listsSongs(r.kind, r.id || '').then((x) => { if (search === s0) { s0.songs = x || []; build(); draw(); } }).catch(() => { if (search === s0) { s0.songs = []; build(); draw(); } });
         return;
       }
-      if (r.find && e.target.classList.contains('lt-find')) { search = { key: r.folder, q: '', results: null }; open[r.folder] = true; build(); draw(); return; }
+      if (r.find && e.target.classList.contains('lt-find')) { search = { key: r.folder, q: '', results: null }; open[r.folder] = true; build(); toInput(); draw(); return; }
       if (r.act === 'endsearch') { search = null; build(); draw(); return; }
       if (r.act === 'pick') { search.pick = !search.pick; build(); draw(); return; }
       if (r.only !== undefined && search) { search.only = r.only; search.pick = false; run(); return; }
@@ -143,6 +143,8 @@ export function initListsTab(webamp, api, getWidgetMode) {
     build(); load(false);
   }
 
+  // a search line just opened (or typed into) is scrolled to the top of the panel, so what it finds shows under it
+  function toInput() { const i = rows.findIndex((r) => r.input); if (i >= 0 && (i < top || i > top + 1)) top = Math.max(0, i - 1); }
   // fills the space left of the windows stacked under the player (or a few rows when there are none)
   function place() {
     const art = document.getElementById('album-tab');
@@ -157,13 +159,13 @@ export function initListsTab(webamp, api, getWidgetMode) {
     }
     // it starts HEAD px up, over the foot of the album picture, so that closed it ends level with the player
     const y0 = a.bottom - HEAD, h = open.libs ? Math.max(8 * ROW + 8, Math.round(bottom - y0)) : HEAD, v = Math.max(1, Math.floor((h - 4) / ROW));
-    const st = skin(), bg = st.normalbg || '#000', key = [a.left, y0, a.width, h, bg].join();
+    const st = skin(), bg = textBg(st.normalbg || '#000'), key = [a.left, y0, a.width, h, bg, selBg(st.selectedbg || '#0000c6'), st.current].join();
     if (key !== skinKey) {
       skinKey = key;
       panel.style.cssText = `position:fixed;left:${a.left}px;top:${y0}px;width:${a.width}px;height:${h}px;box-sizing:border-box;z-index:40;background:${bg};user-select:none;` +
         'border:1px solid;border-color:rgba(255,255,255,.35) rgba(0,0,0,.6) rgba(0,0,0,.6) rgba(255,255,255,.35);' +
         `box-shadow:inset 0 0 0 1px ${bg},inset 0 0 0 2px rgba(0,0,0,.45);` + (a.width > W + 1 ? '' : '');
-      if (v !== vis) { vis = v; draw(); }
+      vis = v; draw();
     }
     if (Date.now() - loadedAt > 5 * 60000) load(false); // playlists change now and then
   }
@@ -176,7 +178,7 @@ export function initListsTab(webamp, api, getWidgetMode) {
     else if (e.key.length === 1 && search.q.length < 40) search.q += e.key;
     else return;
     e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-    build(); draw();
+    build(); if (search) toInput(); draw();
   }, true);
   async function run() {
     const s = search; s.busy = true; s.results = null; build(); draw();
@@ -188,5 +190,44 @@ export function initListsTab(webamp, api, getWidgetMode) {
   }
   setInterval(() => { if (search && open.libs && panel && !document.hidden) { build(); draw(); } }, 500); // the blinking cursor
   setInterval(() => { if (!document.hidden) place(); }, 300);
-  window.__listsTab = { load, place };
+
+  function toggle(v) {
+    open.libs = v === undefined ? !open.libs : !!v; skinKey = '';
+    try { localStorage.setItem('minapp.listsOpen', JSON.stringify(open)); } catch {}
+    if (panel) { build(); draw(); }
+    place(); libButton();
+  }
+
+  // ---------- the skin's PL button becomes LIB: it opens and closes LIBRARIES (the old playlist window is gone) ----------
+  // The button is repainted from the skin's own image: each row of its face is wiped with that row's commonest colour
+  // (so bevels and gradients stay), then LIB is drawn in the colour that stood out most from the face (the old letters).
+  let btnKey = '';
+  function libButton() {
+    const b = document.getElementById('playlist-button');
+    if (!b) return;
+    const src = skinImage(open.libs ? '#webamp #playlist-button.selected' : '#webamp #playlist-button') || skinImage('#webamp #playlist-button');
+    const key = src + open.libs;
+    if (key === btnKey && b.querySelector('canvas')) return;
+    btnKey = key;
+    const m = /url\("?(.*?)"?\)$/.exec(src || '');
+    if (!m) return;
+    const im = new Image();
+    im.onload = () => {
+      let c = b.querySelector('canvas');
+      if (!c) { c = document.createElement('canvas'); c.style.cssText = 'position:absolute;left:0;top:0;pointer-events:none;image-rendering:pixelated;'; if (getComputedStyle(b).position === 'static') b.style.position = 'relative'; b.appendChild(c); }
+      const w = b.offsetWidth || 23, h = b.offsetHeight || 12;
+      c.width = w; c.height = h; c.style.width = w + 'px'; c.style.height = h + 'px';
+      const g = c.getContext('2d', { willReadFrequently: true });
+      g.drawImage(im, 0, 0, w, h);
+      paintWord(g, w, h, 2, 'LIB', true);
+    };
+    im.src = m[1];
+    b.title = 'Libraries: Spotify, YouTube and local playlists';
+  }
+  const onLib = (e) => e.target.closest && e.target.closest('#playlist-button');
+  const swallow = (e) => { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); };
+  ['mousedown', 'mouseup', 'dblclick'].forEach((ev) => document.addEventListener(ev, (e) => { if (onLib(e)) swallow(e); }, true));
+  document.addEventListener('click', (e) => { if (onLib(e)) { swallow(e); toggle(); } }, true);
+  setInterval(libButton, 1000);
+  window.__listsTab = { load, place, toggle, isOpen: () => open.libs };
 }

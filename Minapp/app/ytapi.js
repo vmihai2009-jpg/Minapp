@@ -98,6 +98,17 @@ function create({ shell, dialog, readCfg, writeCfg, askText, getWin, log, onChan
     refreshPlaylists();
     return { id: p.id, added };
   }
+  // the LIKE button for YouTube: the video goes into a private "Minapp likes" playlist (made the first time)
+  let likesId = '';
+  async function addToLikes(videoId) {
+    if (!likesId) {
+      const j = await api('playlists', { part: 'snippet', mine: 'true', maxResults: '50' });
+      const hit = (j.items || []).find((p) => p.snippet && p.snippet.title === 'Minapp likes');
+      likesId = hit ? hit.id : (await api('playlists', { part: 'snippet,status' }, { snippet: { title: 'Minapp likes', description: 'Songs liked in Minapp' }, status: { privacyStatus: 'private' } })).id;
+    }
+    await api('playlistItems', { part: 'snippet' }, { snippet: { playlistId: likesId, resourceId: { kind: 'youtube#video', videoId } } });
+    refreshPlaylists();
+  }
 
   async function ensureClient() {
     const c = readCfg();
@@ -171,7 +182,7 @@ function create({ shell, dialog, readCfg, writeCfg, askText, getWin, log, onChan
     onChange();
   }
 
-  return { signedIn, signIn, signOut, refreshPlaylists, videoIds, titles, canWrite, makePlaylist, playlists: () => playlists, error: () => err, loading: () => loading };
+  return { signedIn, signIn, signOut, refreshPlaylists, videoIds, titles, canWrite, makePlaylist, addToLikes, playlists: () => playlists, error: () => err, loading: () => loading };
 }
 
 module.exports = { create };
