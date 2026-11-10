@@ -593,7 +593,7 @@
   }, true);
 
   // ----- Spotify -> skin (poll) -----
-  let pendingFix = null, curId = null, busy = false, lastQSig = '', lastBuild = 0;
+  let rebuilds = 0, rowAt = 0, rowLen = -1, pendingFix = null, curId = null, busy = false, lastQSig = '', lastBuild = 0;
   const queueUrl = silentWav(5); // placeholder audio for the upcoming items (never actually heard)
   let vizBuf = new Uint8Array(0), lastStatus = 'closed';
   async function tick() {
@@ -635,7 +635,8 @@
           const pos = pendingFix.scroll != null ? pendingFix.scroll : overflow ? Math.min(100, (pendingFix.h / overflow) * 100) : 0;
           webamp.store.dispatch({ type: 'SET_PLAYLIST_SCROLL_POSITION', position: pos });
           pendingFix = null;
-        } else if (++pendingFix.tries > 8) pendingFix = null;
+          rebuilds = 0;
+        } else if (++pendingFix.tries > 8) { pendingFix = null; if (++rebuilds <= 2) curId = null; } // the list never settled: build it again (twice at most)
         return;
       }
       // some sources report no length (or 0): use a placeholder so the placeholder track can still be built
@@ -645,9 +646,11 @@
       const hist = Array.isArray(s.history) ? s.history.slice(-30) : [];
       lastHist = hist;
       const qSig = hist.map((x) => x.id + '~' + x.title).join('|') + '||' + q.map((x) => x.id + '~' + x.title).join('|');
-      const changed = s.id !== curId;
+      // the song's name counts too: some sources keep the same id (or give none) from one song to the next
+      const songKey = `${s.id}|${s.artist}|${s.title}`;
+      const changed = songKey !== curId;
       if (changed || (qSig !== lastQSig && Date.now() - lastBuild > 4000)) {
-        curId = s.id; lastQSig = qSig; lastBuild = Date.now();
+        curId = songKey; lastQSig = qSig; lastBuild = Date.now(); rowAt = hist.length; rowLen = hist.length + 1 + q.length;
         if (changed) {
           if (silentUrl) URL.revokeObjectURL(silentUrl);
           silentUrl = silentWav(Math.max(1, Math.ceil(s.duration)));
@@ -662,6 +665,12 @@
         ]);
         pendingFix = { h: hist.length, len: hist.length + 1 + q.length, tries: 0, scroll: changed ? null : keepScroll };
         return; // next tick syncs position/play state once the track has loaded
+      }
+      // the title and clock come from the row Webamp is on: if it slipped to another row (its silent stand-in track ran
+      // out a moment early, or it started on an old row), put it back on the song that is really playing
+      if (Date.now() > holdUntil) {
+        const ps = webamp.store.getState().playlist, want = ps.trackOrder[rowAt];
+        if (ps.trackOrder.length === rowLen && want !== undefined && ps.currentTrack !== want) { webamp.store.dispatch({ type: 'PLAY_TRACK', id: want }); return; }
       }
       followVolume(s.volume);
       followModes(s);

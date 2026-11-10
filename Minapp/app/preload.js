@@ -43,7 +43,7 @@ contextBridge.exposeInMainWorld('bridge', {
   albumState: (st) => ipcRenderer.send('album:state', st),
   onAlbumOptions: (cb) => ipcRenderer.on('album:options', (_e, o) => cb(o)),
   infoGet: (kind, song) => ipcRenderer.invoke('info:get', kind, song),
-  infoPlay: (uri) => ipcRenderer.invoke('info:play', uri),
+  infoPlay: (uri, ctx) => ipcRenderer.invoke('info:play', uri, ctx),
   infoState: (st) => ipcRenderer.send('info:state', st),
   onInfo: (cb) => ipcRenderer.on('info:options', (_e, o) => cb(o)),
   onSleep: (cb) => ipcRenderer.on('sleep:state', (_e, s) => cb(s)),
@@ -51,7 +51,7 @@ contextBridge.exposeInMainWorld('bridge', {
   sleepNow: () => ipcRenderer.send('sleep:now'),
   listsAll: (force) => ipcRenderer.invoke('lists:all', force),
   listsPlay: (kind, id, name) => ipcRenderer.invoke('lists:play', kind, id, name),
-  listsSearch: (key, q) => ipcRenderer.invoke('lists:search', key, q),
+  listsSearch: (key, q, only) => ipcRenderer.invoke('lists:search', key, q, only),
   listsFound: (r) => ipcRenderer.invoke('lists:found', r),
   onMilkdrop: (cb) => ipcRenderer.on('milkdrop:toggle', cb),
 });

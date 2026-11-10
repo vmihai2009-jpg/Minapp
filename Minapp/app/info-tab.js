@@ -60,7 +60,7 @@ export function initInfoTab(webamp, api, getWidgetMode) {
       if (d.tracks.length) rows.push({ t: '' });
       d.tracks.forEach((t, i) => {
         const time = t.ms ? mmss(t.ms) : '', no = String(i + 1).padStart(2, ' ') + '. ';
-        rows.push({ t: no + t.name.slice(0, CW - no.length - time.length - 1).padEnd(CW - no.length - time.length, ' ') + time, now: same(t.name, song.title) });
+        rows.push({ t: no + t.name.slice(0, CW - no.length - time.length - 1).padEnd(CW - no.length - time.length, ' ') + time, now: same(t.name, song.title), act: t.uri && d.uri ? 'song' : '', uri: t.uri });
       });
       if (d.text) { for (const para of d.text.split(/\n+/)) { rows.push({ t: '' }); for (const t of wrap(para, CW)) rows.push({ t }); } rows.push({ t: '' }); rows.push({ t: 'From Wikipedia', dim: true }); }
     } else {
@@ -180,8 +180,9 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     const body = panel.querySelector('.it-body');
     const rowOf = (e) => { const d = e.target.closest && e.target.closest('.it-row'); return d ? Number(d.dataset.i) : -1; };
     body.addEventListener('mousemove', (e) => { const i = rowOf(e); if (i !== hover) { hover = i; if (rows.some((r) => r.act)) draw(); } });
-    body.addEventListener('mouseleave', () => { hover = -1; });
-    body.addEventListener('click', (e) => { const r = rows[rowOf(e)]; if (r && r.act === 'retry') load(true); if (r && r.act === 'play' && data.album && data.album.uri) api.infoPlay(data.album.uri).catch(() => {}); });
+    body.addEventListener('mouseleave', () => { hover = -1; if (rows.some((r) => r.act)) draw(); });
+    body.addEventListener('click', (e) => { const r = rows[rowOf(e)]; if (r && r.act === 'retry') load(true); if (r && r.act === 'song' && data.album) api.infoPlay(r.uri, data.album.uri).catch(() => {});
+      if (r && r.act === 'play' && data.album && data.album.uri) api.infoPlay(data.album.uri).catch(() => {}); });
     panel.addEventListener('wheel', (e) => { e.preventDefault(); top += e.deltaY > 0 ? 3 : -3; handsOff = Date.now() + 6000; draw(); }, { passive: false });
     panel.addEventListener('mousedown', (e) => e.stopPropagation());
     (document.getElementById('webamp') || document.body).appendChild(panel);
@@ -231,7 +232,7 @@ export function initInfoTab(webamp, api, getWidgetMode) {
   }
 
   // ---------- the repeat button becomes INFO: it opens and closes this panel, its light shows when it is open ----------
-  const TINY = { I: ['#', '#', '#', '#', '#'], N: ['#..#', '##.#', '#.##', '#..#', '#..#'], F: ['###', '#..', '##.', '#..', '#..'], O: ['.##.', '#..#', '#..#', '#..#', '.##.'] };
+  const TINY = { I: ['#', '#', '#', '#', '#'], N: ['#..#', '##.#', '#.##', '#..#', '#..#'], F: ['###', '#..', '##.', '#..', '#..'], O: ['###', '#.#', '#.#', '#.#', '###'] };
   let btnKey = '';
   function infoButton() {
     const b = document.getElementById('repeat');
@@ -252,12 +253,13 @@ export function initInfoTab(webamp, api, getWidgetMode) {
       cg.drawImage(im, 0, 0);
       // the icon sits right of the light: paint over it with the button face, then the word in the icon's darkest colour
       const d = cg.getImageData(0, 0, w, h).data, at = (x, y) => { const o = (y * w + x) * 4; return [d[o], d[o + 1], d[o + 2]]; };
-      const face = at(Math.round(w * 0.75), 2);
-      let ink = face, dark = 999;
+      // the darkest colour of the icon is the ink; then the icon is wiped row by row with the button's own surface
+      // (taken from the clean strip between the light and the icon), so its shading stays and no box shows behind the word
+      let ink = at(11, 3), dark = 999;
       for (let y = 3; y < h - 3; y++) for (let x = 11; x < w - 3; x++) { const p = at(x, y), l = p[0] + p[1] + p[2]; if (l < dark) { dark = l; ink = p; } }
-      cg.fillStyle = `rgb(${face})`; cg.fillRect(10, 3, w - 13, h - 6);
+      for (let y = 2; y < h - 2; y++) { cg.fillStyle = `rgb(${at(10, y)})`; cg.fillRect(10, y, w - 13, 1); }
       cg.fillStyle = `rgb(${ink})`;
-      let x = 11, y = Math.round((h - 5) / 2);
+      let x = 10, y = Math.round((h - 5) / 2);
       for (const ch of 'INFO') { TINY[ch].forEach((r, j) => [...r].forEach((q, i) => { if (q === '#') cg.fillRect(x + i, y + j, 1, 1); })); x += TINY[ch][0].length + 1; }
     };
     im.src = m[1];
