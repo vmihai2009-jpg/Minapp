@@ -196,7 +196,7 @@ export function initPlaylistView(webamp, api) {
     const w = win(), tracks = w && w.querySelector('.playlist-tracks');
     const show = !!(tracks && w.offsetParent !== null);
     document.documentElement.classList.toggle('pv-on', show);
-    if (!show) { if (root) root.style.display = 'none'; hideButtons(); return; }
+    if (!show) { if (root) root.style.display = 'none'; if (gripEl) gripEl.style.display = 'none'; hideButtons(); return; }
     if (!root) build();
     // the first time: make the window wider so the libraries fit beside the songs (it can still be resized)
     try {
@@ -235,6 +235,7 @@ export function initPlaylistView(webamp, api) {
     }
     if (tools) buttons(false); else { hideButtons(); if (menuOpen) closeMenu(); }
     extras();
+    grip(w);
     try { // the scrollbar was dragged
       const pos = webamp.store.getState().display.playlistScrollPosition;
       if (barSet >= 0 && Math.abs(pos - barSet) > 0.5) { barSet = pos; rTop = Math.round((pos / 100) * rMax); draw(); }
@@ -435,6 +436,34 @@ export function initPlaylistView(webamp, api) {
     loadedAt = Date.now();
     try { data = await api.listsAll(!!force); } catch (e) { api.log('playlists failed: ' + (e && e.message)); }
     draw();
+  }
+
+  // ---------- drag the bottom edge of the playlist to make it taller or shorter (in the skin's 29 px steps) ----------
+  let gripEl = null;
+  function grip(w) {
+    if (!gripEl) {
+      gripEl = document.createElement('div'); gripEl.id = 'pv-grip'; gripEl.title = 'Drag to make the playlist taller or shorter';
+      let start = null;
+      gripEl.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const g = webamp.store.getState().windows.genWindows.playlist;
+        start = { y: e.screenY, size: ((g && g.size) || [0, 0]).slice() };
+        gripEl.setPointerCapture(e.pointerId);
+      });
+      gripEl.addEventListener('pointermove', (e) => {
+        if (!start) return;
+        const h = Math.max(0, Math.min(30, start.size[1] + Math.round((e.screenY - start.y) / 29)));
+        const g = webamp.store.getState().windows.genWindows.playlist, sz = (g && g.size) || [0, 0];
+        if (h !== sz[1]) webamp.store.dispatch({ type: 'WINDOW_SIZE_CHANGED', windowId: 'playlist', size: [sz[0], h] });
+      });
+      const end = () => { start = null; };
+      gripEl.addEventListener('pointerup', end); gripEl.addEventListener('pointercancel', end);
+      gripEl.addEventListener('mousedown', (e) => e.stopPropagation());
+      (document.getElementById('webamp') || document.body).appendChild(gripEl);
+    }
+    const r = w.getBoundingClientRect();
+    gripEl.style.cssText = `position:fixed;left:${r.left}px;top:${r.bottom - 4}px;width:${r.width - 20}px;height:7px;z-index:33;cursor:ns-resize;`;
   }
 
   // ---------- the black box and the timer at the bottom of the window ----------
