@@ -15,7 +15,7 @@ const { execFile } = require('child_process');
 const PORT = 47831;
 const ALLOWED = new Set(['playpause', 'next', 'previous']);
 const HOST_APPS = ['/Applications/Minapp Widget.app', path.join(os.homedir(), 'Applications', 'Minapp Widget.app')];
-let capture = null, frame = null, frameAt = 0, bars = [], secret = null, current = null, lastWrite = 0, doCmd = null, log = () => {};
+let capture = null, frame = null, frameAt = 0, bars = [], secret = null, current = null, doCmd = null, log = () => {};
 
 function loadSecret(file) {
   try { secret = fs.readFileSync(file, 'utf8').trim(); } catch {}

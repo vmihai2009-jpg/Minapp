@@ -14,7 +14,7 @@ const LOOK_ORDER = ['case', 'tape', 'cd'];
 
 export function initAlbumTab(webamp, api, getWidgetMode) {
   let open = false, tab = null, canvas = null, url = null, token = 0, img = null, look = 'case';
-  let spin = false, spinStep = 0, loading = false, dots = 0, dotTimer = null, stripe = 0, noCover = false, giveUp = null, stopped = true;
+  let spin = false, spinStep = 0, loading = false, dots = 0, dotTimer = null, stripe = 0, noCover = false, giveUp = null, stopped = true, backdrop = null;
   let playing = false, frame = 0, lastSrc = '', timer = null, albumName = '', grid = null, skinKey = '';
   try {
     open = localStorage.getItem('minapp.albumTab') === '1';
@@ -56,7 +56,6 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
   let g = null;
   const P = (x, y, c, w = 1, h = 1) => { g.fillStyle = c; g.fillRect(x, y, w, h); };
   const bitmap = (rows, x, y, map) => rows.forEach((r, j) => [...r].forEach((ch, i) => { if (map[ch]) P(x + i, y + j, map[ch]); }));
-  const box = (x, y, w, h, c) => { P(x, y, c, w, 1); P(x, y + h - 1, c, w, 1); P(x, y, c, 1, h); P(x + w - 1, y, c, 1, h); };
   // the cover at the size it is drawn, dithered to the album's own palette (cached per picture and size)
   function coverGrid(w, h) {
     const key = w + 'x' + h;
@@ -239,7 +238,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     return null;
   }
   function drawCase() {
-    const { x, y } = CASE, { w: kw, h: kh, rise, shrink } = CARD, [ct, cb] = coverColours();
+    const { x, y } = CASE, { w: kw, h: kh, rise, shrink } = CARD;
     const kx = x + CARD.x, ky = y + CARD.y;
     // 1. the card drawn flat on its own canvas
     const off = document.createElement('canvas'); off.width = kw; off.height = kh;
@@ -375,7 +374,15 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     g = canvas.getContext('2d', { willReadFrequently: true });
     g.imageSmoothingEnabled = false;
     g.clearRect(0, 0, canvas.width, canvas.height);
-    { const [ct, cb] = coverColours(), t = skinTone(); gradient(0, 0, canvas.width, canvas.height, mixc(shade(t, 1.1), ct, 0.15), mixc(shade(t, 0.8), cb, 0.1)); } // backdrop: the player's colour, a hint of the cover
+    // backdrop: the player's colour with a hint of the cover. It only changes with the picture or the skin, so it is
+    // painted once and reused on every animation frame (it was most of the work of a frame)
+    const t = skinTone(), bkey = t.join(',');
+    if (!backdrop || backdrop.key !== bkey || backdrop.img !== img) {
+      const [ct, cb] = coverColours(), c = document.createElement('canvas'); c.width = canvas.width; c.height = canvas.height;
+      const keep = g; g = c.getContext('2d'); gradient(0, 0, c.width, c.height, mixc(shade(t, 1.1), ct, 0.15), mixc(shade(t, 0.8), cb, 0.1)); g = keep;
+      backdrop = { key: bkey, img, c };
+    }
+    g.drawImage(backdrop.c, 0, 0);
     if (look === 'tape') drawTape(); else if (look === 'cd') drawCd(); else drawCase();
   }
   // the reels and the disc move while something plays (nothing runs when paused, hidden, or showing the case)

@@ -7,6 +7,9 @@ const crypto = require('crypto');
 const b64 = (b) => Buffer.from(b).toString('base64url');
 const SCOPE = 'https://www.googleapis.com/auth/youtube.readonly';
 
+const netFetch = globalThis.fetch;
+const fetch = (url, opts = {}) => netFetch(url, { signal: AbortSignal.timeout(15000), ...opts }); // never wait forever on a hung connection
+
 function create({ shell, dialog, readCfg, writeCfg, askText, getWin, log, onChange }) {
   let access = null, exp = 0, playlists = [], loading = false, err = '';
 

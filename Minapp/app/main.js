@@ -6,6 +6,11 @@ const crypto = require('crypto');
 const path = require('path');
 const widgetBridge = require('./widget-bridge');
 
+// Every web request gets a time limit: a connection that hangs (sleeping laptop, captive Wi-Fi) must not leave the
+// queue, cover or update checks waiting forever.
+const netFetch = globalThis.fetch;
+const fetch = (url, opts = {}) => netFetch(url, { signal: AbortSignal.timeout(15000), ...opts });
+
 const isWin = process.platform === 'win32';
 const isMac = process.platform === 'darwin';
 // Portable: keep settings next to the app (a "data" folder) instead of in %APPDATA% / Library.
@@ -33,7 +38,7 @@ let win, ytWin = null, ytmWin = null, localWin = null, zoom = 1, lastSize = { w:
 let source = 'spotify';
 let ytState = { status: 'closed' }, ytmState = { status: 'closed' };
 let ytServer = null, ytPort = 0;
-let localState = { status: 'closed' }, localList = [], localName = '';
+let localState = { status: 'closed' }, localList = [], localName = '', localMeta = { path: '' };
 const isPlayerSrc = () => source === 'youtube' || source === 'ytmusic' || source === 'local'; // sources played in their own window
 const playerWin = () => (source === 'local' ? localWin : source === 'ytmusic' ? ytmWin : ytWin);
 
@@ -628,7 +633,7 @@ function winThumb(st) {
       if (n < 4) setTimeout(() => thumbCache.delete(k), 4000);
     }
   });
-  if (thumbCache.size > 30) thumbCache.delete(thumbCache.keys().next().value);
+  if (thumbCache.size > 30) { const old = thumbCache.keys().next().value; thumbCache.delete(old); thumbTries.delete(old); }
   return '';
 }
 const oembedCache = new Map(); // spotify track id -> cover url ('' = none found) // url -> data URL
@@ -835,7 +840,7 @@ function spotCover(id) {
   fetch('https://open.spotify.com/oembed?url=' + encodeURIComponent('spotify:track:' + k))
     .then((r) => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
     .then((j) => { const u = String(j.thumbnail_url || ''); if (SPOT_IMG.test(u)) oembedCache.set(k, u); else log('cover: unexpected address ' + u.slice(0, 80)); })
-    .catch((e) => { oembedCache.delete(k); log('cover lookup failed: ' + ((e && e.message) || e)); });
+    .catch((e) => { setTimeout(() => oembedCache.delete(k), 30000); log('cover lookup failed: ' + ((e && e.message) || e)); }); // offline: ask again in 30 s, not on every poll
   if (oembedCache.size > 200) oembedCache.delete(oembedCache.keys().next().value);
   return '';
 }
@@ -864,7 +869,7 @@ function checkLiked(id) {
   const tid = trackIdOf(id);
   if (!tid || likedCache.has(tid) || !readCfg().spotRefresh || !String(readCfg().spotScope || '').includes('user-library-read')) return;
   likedCache.set(tid, false); // marks "asking"
-  spotLibrary('GET', tid).then((v) => likedCache.set(tid, v)).catch((e) => { likedCache.delete(tid); log('liked check failed: ' + e.message); });
+  spotLibrary('GET', tid).then((v) => likedCache.set(tid, v)).catch((e) => { setTimeout(() => { if (likedCache.get(tid) === false) likedCache.delete(tid); }, 30000); log('liked check failed: ' + e.message); }); // ask again in 30 s, not on every poll
   if (likedCache.size > 100) likedCache.delete(likedCache.keys().next().value);
 }
 // the playing song's Spotify id from the Web API (needed on Windows, whose media controls only give title and artist)
@@ -1332,7 +1337,8 @@ ipcMain.handle('spotify:state', async () => {
     st.source = 'local';
     const cur = localList[i];
     if (cur && st.status !== 'stopped') { // the cover and album saved with a downloaded song
-      const art = library.artFor(cur.path), d = library.detailsFor(cur.path);
+      if (localMeta.path !== cur.path) localMeta = { path: cur.path, art: library.artFor(cur.path), d: library.detailsFor(cur.path) }; // read from disk once per song, not on every poll
+      const { art, d } = localMeta;
       st.art = art ? 'local:' + art : '';
       st.album = d.album || '';
       if (d.artist) st.artist = d.artist;

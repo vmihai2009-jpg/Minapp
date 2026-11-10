@@ -1,5 +1,12 @@
 # What's new in Minapp
 
+## 1.9.17
+- Tune-up. With no internet, Minapp no longer asks Spotify for the cover and the heart on every tick; it waits 30 seconds between tries.
+- A web request that hangs (sleeping laptop, hotel Wi-Fi) now gives up after 15 seconds instead of freezing the queue or covers.
+- Local playlists read each song's cover from disk once, not several times a second.
+- The album panel's animations (cassette reels, spinning CD) do about half the work per frame.
+- Small clean-ups from a full code check.
+
 ## 1.9.16
 - Downloads now save each song's cover and album name next to it (MP3s also get the cover built in), so local playlists show the album panel too.
 - Local songs without a saved cover say NO COVER straight away.
