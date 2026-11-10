@@ -303,6 +303,21 @@ async function setSpotMode(cmd, on) {
     else log(`${cmd} via Spotify's Web API: HTTP ${r.status}`);
   } catch (e) { log(cmd + ' via the Web API failed: ' + e.message); }
 }
+// where the song sits on its album (track 3 of 10): the cassette and the record turn over halfway through.
+// Windows' media controls report it; otherwise Spotify's Web API is asked once per song, when Spotify is connected.
+const posCache = new Map();
+function albumPos(st) {
+  if (st.trackNo > 0 && st.trackCount > 0) return;
+  const tid = trackIdOf(st.id) || (spotCur && st.title && spotCur.title === norm(st.title) ? spotCur.id : null);
+  if (!tid || !readCfg().spotRefresh) return;
+  const p = posCache.get(tid);
+  if (p) { if (p.no) { st.trackNo = p.no; st.trackCount = p.of; } return; }
+  posCache.set(tid, {});
+  if (posCache.size > 500) posCache.delete(posCache.keys().next().value);
+  spotAccessToken().then((tok) => tok && spotApi('/tracks/' + tid, tok)).then((t) => {
+    if (t && t.album) posCache.set(tid, { no: t.track_number || 0, of: t.album.total_tracks || 0 });
+  }).catch(() => {});
+}
 function applySpotMode(st) {
   for (const k of ['shuffle', 'repeat']) {
     const m = spotMode[k]; if (!m) continue;
@@ -830,7 +845,7 @@ async function getSpotifyPlaylists(force) {
   }
 }
 async function playSpotifyContext(uri) {
-  if (!/^spotify:(playlist:[A-Za-z0-9]+|user:[^:\s]+:collection)$/.test(uri)) return { ok: false, message: 'Unknown playlist' };
+  if (!/^spotify:((playlist|album):[A-Za-z0-9]+|user:[^:\s]+:collection)$/.test(uri)) return { ok: false, message: 'Unknown playlist' };
   if (source !== 'spotify') await setSource('spotify');
   if (isMac && !process.env.SKIN_FAKE) {
     // the desktop app plays a playlist straight from its address (it is started first if it is closed)
@@ -1141,7 +1156,7 @@ ipcMain.on('ytm:state', (_e, s) => { ytmState = s || { status: 'closed' }; });
 
 // ---------- Local playlists + YouTube download (personal use) ----------
 const library = require('./library').create({ dir: path.join(app.getPath('userData'), 'library'), binDir: path.join(app.getPath('userData'), 'bin'), log });
-const { songInfo } = require('./songinfo');
+const { songInfo, albumInfo } = require('./songinfo');
 
 async function playLocal(name, start = 0) {
   const tracks = library.tracks(name);
@@ -1412,6 +1427,7 @@ ipcMain.handle('spotify:state', async () => {
     st.queue = i < 0 ? [] : localList.slice(i + 1, i + 31).map((t, k) => row(t, i + 1 + k));
     st.history = i <= 0 ? [] : localList.slice(Math.max(0, i - 30), i).map((t, k) => row(t, Math.max(0, i - 30) + k));
     st.source = 'local';
+    if (i >= 0 && localList.length > 1) { st.trackNo = i + 1; st.trackCount = localList.length; }
     const cur = localList[i];
     if (cur && st.status !== 'stopped') { // the cover and album saved with a downloaded song
       if (localMeta.path !== cur.path) localMeta = { path: cur.path, art: library.artFor(cur.path), d: library.detailsFor(cur.path) }; // read from disk once per song, not on every poll
@@ -1447,6 +1463,7 @@ ipcMain.handle('spotify:state', async () => {
     holdQueue();
   }
   applySpotMode(st);
+  albumPos(st);
   if (st.title) lastSongTitle = st.title;
   st.queue = spotifyQueue.items;
   if (!st.art && spotArt && st.title && spotArt.title === norm(st.title)) st.art = spotArt.url;
@@ -1536,7 +1553,15 @@ ipcMain.on('win:dragend', () => { if (dragTimer) { clearInterval(dragTimer); dra
 let albumUi = { look: 'case', spin: false, open: false, filter: 'dots32', big: false }; // what the album panel shows, for the menu's ticks
 let infoUi = { open: false, kind: 'lyrics' };
 ipcMain.on('info:state', (_e, st) => { if (st && typeof st === 'object') { infoUi = { open: !!st.open, kind: st.kind === 'artist' ? 'artist' : 'lyrics' }; buildMenu(); } });
-ipcMain.handle('info:get', (_e, kind, song) => songInfo(kind === 'artist' ? 'artist' : 'lyrics', song && typeof song === 'object' ? song : {}));
+ipcMain.handle('info:get', async (_e, kind, song) => {
+  song = song && typeof song === 'object' ? song : {};
+  if (kind !== 'album') return songInfo(kind === 'artist' ? 'artist' : 'lyrics', song);
+  const tok = readCfg().spotRefresh ? await spotAccessToken().catch(() => null) : null;
+  const spot = tok ? (p) => spotApi(p, tok).catch(() => null) : null;
+  const trackId = source === 'spotify' ? trackIdOf(song.id) || (spotCur && song.title && spotCur.title === norm(song.title) ? spotCur.id : null) : null;
+  return albumInfo({ artist: song.artist, title: song.title, album: song.album, trackId }, spot);
+});
+ipcMain.handle('info:play', (_e, uri) => playSpotifyContext(String(uri || '')));
 ipcMain.on('album:state', (_e, st) => { if (st && typeof st === 'object') { albumUi = { look: String(st.look || 'case'), spin: !!st.spin, open: !!st.open, filter: String(st.filter || 'dots32'), big: !!st.big }; buildMenu(); } });
 ipcMain.on('app:quit', () => app.quit());
 ipcMain.handle('app:version', () => app.getVersion());

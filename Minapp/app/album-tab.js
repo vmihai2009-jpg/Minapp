@@ -18,7 +18,7 @@ const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]; // the 4 
 export function initAlbumTab(webamp, api, getWidgetMode) {
   let open = false, tab = null, canvas = null, url = null, token = 0, img = null, look = 'case';
   let spin = false, spinStep = 0, loading = false, dots = 0, dotTimer = null, stripe = 0, noCover = false, giveUp = null, stopped = true, backdrop = null;
-  let filter = 'dots32', big = false, progress = 0, side = 0, lastSong = null;
+  let filter = 'dots32', big = false, progress = 0, side = 0, lastSong = null, turnAnim = null;
   let playing = false, frame = 0, lastSrc = '', timer = null, albumName = '', grid = null, skinKey = '';
   try {
     open = localStorage.getItem('minapp.albumTab') === '1';
@@ -299,7 +299,26 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     }
   }
   function screw(a, b) { P(a, b, '#6d6a6c', 3, 3); P(a + 1, b, '#45424a'); P(a + 1, b + 1, '#9c98a0'); }
+  // 0..1 while the cassette or record is turning over, -1 otherwise
+  function turnPhase() { if (!turnAnim) return -1; const p = (performance.now() - turnAnim) / 1600; if (p >= 1) { turnAnim = null; return -1; } return p; }
+  function startTurn() {
+    if (!(open && canvas && (look === 'tape' || look === 'vinyl') && !document.hidden)) return;
+    turnAnim = performance.now();
+    const t = setInterval(() => { draw(); if (!turnAnim) { clearInterval(t); draw(); } }, 50);
+  }
   function drawTape() {
+    const tp = turnPhase();
+    if (tp >= 0) { // turning over: the whole cassette narrows to its edge and widens again showing the other side
+      const shown = tp < 0.5 ? 1 - side : side, keep = g, c = document.createElement('canvas'); c.width = canvas.width; c.height = canvas.height;
+      g = c.getContext('2d'); g.imageSmoothingEnabled = false;
+      const real = side; side = shown; drawTapeFlat(); side = real; g = keep;
+      const k = Math.max(0.02, Math.abs(Math.cos(Math.PI * tp))), w = Math.round(94 * k);
+      g.drawImage(c, 0, 0, 94, c.height, Math.round(47 - w / 2), 0, w, c.height);
+      return;
+    }
+    drawTapeFlat();
+  }
+  function drawTapeFlat() {
     const w = 92, h = 64, x = 1, y = Math.round((H - 2 - h) / 2);     // a real cassette's proportions, on the gradient
     P(x + 2, y + h, 'rgba(0,0,0,.35)', w - 2, 1);                    // shadow
     round(x, y, w, h, T_SHELL, T_LINE);                                 // shell
@@ -410,8 +429,16 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
   }
   // ---------- vinyl: the sleeve with the record half out of it ----------
   function drawVinyl() {
-    const S = 60, sx = 2, sy = 15, cx = sx + S + 1, cy = sy + S / 2, R = 28;
-    P(sx + 3, sy + S, 'rgba(0,0,0,.35)', S + R - 6, 1);
+    // turning over (halfway through the album): the record slides out of the sleeve while the view follows it, turns
+    // round, and slides back in
+    const tp = turnPhase(), ease = (x) => x * x * (3 - 2 * x);
+    const out = tp < 0 ? 0 : tp < 0.3 ? ease(tp / 0.3) : tp < 0.7 ? 1 : ease((1 - tp) / 0.3);
+    const flip = tp >= 0.3 && tp < 0.7 ? Math.abs(Math.cos(Math.PI * (tp - 0.3) / 0.4)) : 1;
+    const back = tp >= 0 && tp < 0.5 ? 1 - side : side; // the side that shows: the old one until the turn is halfway
+    const S = 60, sy = 15, R = 28, sx = 2 - Math.round(out * 26), cy = sy + S / 2;
+    P(sx + 3, sy + S, 'rgba(0,0,0,.35)', S + R - 6 + Math.round(out * 29), 1);
+    const keep = g, rec = document.createElement('canvas'); rec.width = rec.height = 2 * R + 1;
+    g = rec.getContext('2d'); const cx = R;
     // the record: black with fine grooves, a sheen that turns while it plays, the cover's colours on its label
     const [ct, cb] = coverColours();
     const turn = playing ? frame * Math.PI / 8 : 0.6;
@@ -420,7 +447,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
       if (r > R + 0.3) continue;
       let c;
       if (r < 1.5) c = '#0b0b0e';
-      else if (r < 9.5) { const a = Math.atan2(j, i) - turn, half = Math.sin(a) > 0; c = r > 8.5 ? '#17171c' : `rgb(${(half ? ct : cb).map((v) => Math.round(v)).join(',')})`; if (r < 8.5 && Math.abs(Math.sin(a)) < 0.16 && r > 3) c = '#f4f0e6'; }
+      else if (r < 9.5) { const a = Math.atan2(j, i) - turn, half = Math.sin(a) > 0; c = r > 8.5 ? '#17171c' : `rgb(${(half !== !!back ? ct : cb).map((v) => Math.round(v)).join(',')})`; if (r < 8.5 && Math.abs(Math.sin(a)) < 0.16 && r > 3) c = '#f4f0e6'; }
       else if (r > R - 1) c = '#2a2a32';
       else {
         const a = Math.atan2(j, i) - turn * 0.25, sheen = Math.max(0, Math.cos(2 * (a - 0.9))) ** 6;
@@ -429,6 +456,9 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
       }
       P(cx + i, cy + j, c);
     }
+    g = keep;
+    const rx = sx + S + 1 + Math.round(out * 29), rw = Math.max(1, Math.round((2 * R + 1) * flip));
+    g.drawImage(rec, rx - Math.floor(rw / 2), cy - R, rw, 2 * R + 1);
     // the sleeve in front, with the whole cover on it
     P(sx - 1, sy - 1, '#101014', S + 2, S + 2);
     cover(sx, sy, S, S);
@@ -479,7 +509,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     const next = u === null ? '' : u;
     const wasStopped = stopped; stopped = u === null;
     if (isPlaying !== undefined && !!isPlaying !== playing) { playing = !!isPlaying; animate(); }
-    if (song && song !== lastSong) { if (lastSong !== null) side = 1 - side; lastSong = song; progress = 0; }
+    if (song && song !== lastSong) { lastSong = song; progress = 0; }
     const name = album || song || ''; // YouTube and local files have no album: the song title instead
     const src = source();
     const changed = name !== albumName || src !== lastSrc;
@@ -514,6 +544,11 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
   window.__albumTab = {
     setArt, setOptions,
     // how far into the song we are (0..1): the cassette's tape winds across with it
+    // track no of total on the album: side B from halfway (unknown: stays on side A)
+    setPos(no, total) {
+      const want = total > 1 && no > total / 2 ? 1 : 0;
+      if (want !== side) { side = want; startTurn(); if (!turnAnim && open) draw(); }
+    },
     setProgress(f) { const v = Math.max(0, Math.min(1, Number(f) || 0)); if (Math.abs(v - progress) >= 0.04 || (v === 0) !== (progress === 0)) { progress = v; if (open && look === 'tape' && !timer) draw(); } },
     // how far the player is pushed right to make room for the panel
     offset: () => (open && tab && getWidgetMode() === 'off' ? W * (big ? 2 : 1) : 0),
