@@ -607,6 +607,7 @@
       document.documentElement.classList.toggle('liked', !!s.liked);
       if (window.__albumTab) window.__albumTab.setArt(s.status === 'closed' || s.status === 'stopped' ? null : s.art || '', s.title || '', s.status === 'playing', s.album || '');
       if (window.__albumTab && s.duration > 0) window.__albumTab.setProgress(s.position / s.duration);
+      if (window.__albumTab && s.status !== 'closed') window.__albumTab.setPos(s.trackNo || 0, s.trackCount || 0);
       if (window.__sleep && s.status === 'playing') window.__sleep.song(s.id || `${s.artist}|${s.title}`);
       if (window.__infoTab) window.__infoTab.setSong(s.status === 'closed' || s.status === 'stopped' ? null : s);
       const status = webamp.getMediaStatus();

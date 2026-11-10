@@ -4,7 +4,14 @@
 import { setText, skinImage } from './download-bar.js';
 
 const W = 275, H = 116, PAD = 7, ROW = 9, HEAD = 20, VIS = 10, CW = 50;
-const KINDS = [['lyrics', 'LYRICS'], ['artist', 'ARTIST']];
+const KINDS = [['lyrics', 'LYRICS'], ['artist', 'ARTIST'], ['album', 'ALBUM']];
+const SAY = { // what each tab says while it waits, fails or finds nothing
+  lyrics: ['Play a song to see its lyrics.', 'Looking for the lyrics...', 'Could not reach the lyrics service.', 'No lyrics found for this song.'],
+  artist: ['Play a song to read about the artist.', 'Looking up the artist...', 'Could not reach Wikipedia.', 'Nothing found about this artist.'],
+  album: ['Play a song to see its album.', 'Looking up the album...', 'Could not reach the album services.', 'Nothing found about this album.'],
+};
+const mmss = (ms) => { const t = Math.round(ms / 1000); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+const same = (a, b) => { const n = (x) => String(x || '').toLowerCase().replace(/\s*[-(\[].*$/, '').replace(/[^\p{L}\p{N}]/gu, ''); return !!n(a) && n(a) === n(b); };
 
 // the skin font has capitals, digits and a few signs: everything else is brought down to those
 function plain(t) {
@@ -25,7 +32,7 @@ function wrap(t, width) {
 export function initInfoTab(webamp, api, getWidgetMode) {
   let open = false, kind = 'lyrics', panel = null, skinKey = '';
   let song = null, songKey = '', data = {}, rows = [], top = 0, cur = -1, handsOff = 0, ticket = 0, hover = -1, hasComma = true;
-  try { open = localStorage.getItem('minapp.infoTab') === '1'; if (localStorage.getItem('minapp.infoKind') === 'artist') kind = 'artist'; } catch {}
+  try { open = localStorage.getItem('minapp.infoTab') === '1'; const k = localStorage.getItem('minapp.infoKind'); if (k === 'artist' || k === 'album') kind = k; } catch {}
   const skin = () => { try { return webamp.store.getState().display.skinPlaylistStyle || {}; } catch { return {}; } };
   const colours = () => { const st = skin(); return { bg: st.normalbg || '#000', hi: st.current || '#fff', sel: st.selectedbg || '#0000c6' }; };
   const visible = () => open && getWidgetMode() === 'off';
@@ -36,15 +43,26 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     rows = [];
     const d = data[kind];
     const note = (...lines) => { rows.push({ t: '' }); for (const t of lines) rows.push({ t, dim: true, mid: true }); };
-    if (!song || !song.title) note(kind === 'lyrics' ? 'Play a song to see its lyrics.' : 'Play a song to read about the artist.');
-    else if (!d) note(kind === 'lyrics' ? 'Looking for the lyrics...' : 'Looking up the artist...');
-    else if (d.status === 'error') { note(kind === 'lyrics' ? 'Could not reach the lyrics service.' : 'Could not reach Wikipedia.'); rows.push({ t: '' }); rows.push({ t: '[ Try again ]', act: 'retry', mid: true }); }
-    else if (d.status !== 'ok') note(kind === 'lyrics' ? 'No lyrics found for this song.' : 'Nothing found about this artist.');
+    const say = SAY[kind];
+    if (!song || !song.title) note(say[0]);
+    else if (!d) note(say[1]);
+    else if (d.status === 'error') { note(say[2]); rows.push({ t: '' }); rows.push({ t: '[ Try again ]', act: 'retry', mid: true }); }
+    else if (d.status !== 'ok') note(say[3]);
     else if (kind === 'lyrics') {
       if (d.instrumental) note('Instrumental', '(this one has no words)');
       else if (d.synced) d.synced.forEach((l, i) => { if (!l.s) rows.push({ t: '', li: i }); else for (const t of wrap(l.s, CW)) rows.push({ t, li: i }); });
       else { let blank = true; for (const l of d.text.split(/\r?\n/)) { if (!l.trim()) { if (!blank) rows.push({ t: '' }); blank = true; } else { blank = false; for (const t of wrap(l, CW)) rows.push({ t }); } } }
       if (!d.instrumental) { rows.push({ t: '' }); rows.push({ t: 'Lyrics from LRCLIB', dim: true }); }
+    } else if (kind === 'album') {
+      rows.push({ t: d.name || song.album || '', bright: true });
+      rows.push({ t: [d.artist, d.year].filter(Boolean).join('  '), dim: true });
+      if (d.uri) rows.push({ t: '[ PLAY THE ALBUM ]', act: 'play' });
+      if (d.tracks.length) rows.push({ t: '' });
+      d.tracks.forEach((t, i) => {
+        const time = t.ms ? mmss(t.ms) : '', no = String(i + 1).padStart(2, ' ') + '. ';
+        rows.push({ t: no + t.name.slice(0, CW - no.length - time.length - 1).padEnd(CW - no.length - time.length, ' ') + time, now: same(t.name, song.title) });
+      });
+      if (d.text) { for (const para of d.text.split(/\n+/)) { rows.push({ t: '' }); for (const t of wrap(para, CW)) rows.push({ t }); } rows.push({ t: '' }); rows.push({ t: 'From Wikipedia', dim: true }); }
     } else {
       rows.push({ t: d.name || song.artist || '', bright: true });
       if (d.about) for (const t of wrap(d.about, CW)) rows.push({ t, dim: true });
@@ -78,7 +96,7 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     rows.slice(top, top + VIS).forEach((r, i) => {
       const d = document.createElement('div');
       d.className = 'it-row'; d.dataset.i = String(top + i);
-      const now = timed && r.li === cur && r.li !== undefined;
+      const now = r.now || (timed && r.li === cur && r.li !== undefined);
       d.style.cssText = `position:absolute;left:2px;right:2px;top:${i * ROW}px;height:${ROW}px;` + (r.act ? 'cursor:pointer;' : '') +
         (now ? `background:${sel};` : '') + (r.act && top + i === hover ? `background:${sel};` : '') +
         (r.dim ? 'opacity:.6;' : timed && r.li !== undefined && !now ? 'opacity:.55;' : '') + (r.bright || now ? 'filter:brightness(1.35);' : '');
@@ -123,7 +141,7 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     if (data[k] && !force) { build(); follow(true); return; }
     data[k] = null; build(); draw();
     let res;
-    try { res = await api.infoGet(k, { artist: song.artist, title: song.title, duration: song.duration }); } catch (e) { res = { status: 'error', message: String((e && e.message) || e) }; }
+    try { res = await api.infoGet(k, song); } catch (e) { res = { status: 'error', message: String((e && e.message) || e) }; }
     if (key !== songKey) return; // the song changed while we were asking
     data[k] = res || { status: 'none' };
     if (mine !== ticket && k !== kind) return;
@@ -163,7 +181,7 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     const rowOf = (e) => { const d = e.target.closest && e.target.closest('.it-row'); return d ? Number(d.dataset.i) : -1; };
     body.addEventListener('mousemove', (e) => { const i = rowOf(e); if (i !== hover) { hover = i; if (rows.some((r) => r.act)) draw(); } });
     body.addEventListener('mouseleave', () => { hover = -1; });
-    body.addEventListener('click', (e) => { const r = rows[rowOf(e)]; if (r && r.act === 'retry') load(true); });
+    body.addEventListener('click', (e) => { const r = rows[rowOf(e)]; if (r && r.act === 'retry') load(true); if (r && r.act === 'play' && data.album && data.album.uri) api.infoPlay(data.album.uri).catch(() => {}); });
     panel.addEventListener('wheel', (e) => { e.preventDefault(); top += e.deltaY > 0 ? 3 : -3; handsOff = Date.now() + 6000; draw(); }, { passive: false });
     panel.addEventListener('mousedown', (e) => e.stopPropagation());
     (document.getElementById('webamp') || document.body).appendChild(panel);
@@ -196,7 +214,7 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     report(); infoButton();
   }
   function setKind(k) {
-    if (k !== 'lyrics' && k !== 'artist') return;
+    if (!SAY[k]) return;
     kind = k; top = 0; cur = -1; handsOff = 0;
     try { localStorage.setItem('minapp.infoKind', kind); } catch {}
     if (!open) set(true); else load(false);
@@ -204,10 +222,11 @@ export function initInfoTab(webamp, api, getWidgetMode) {
   }
   // called with every poll of the player: reload when the song changes
   function setSong(s) {
-    const next = s && s.title ? { artist: s.artist || '', title: s.title, duration: s.duration } : null;
+    const next = s && s.title ? { artist: s.artist || '', title: s.title, duration: s.duration, album: s.album || '', id: s.id || '' } : null;
     const key = next ? `${next.artist}|${next.title}` : '';
-    if (key === songKey) return;
-    songKey = key; song = next; data = {}; top = 0; cur = -1; handsOff = 0;
+    if (key === songKey) { if (next && song && next.album && !song.album) song.album = next.album; return; } // the album name can arrive a moment later
+    const keepAlbum = next && song && data.album && next.album && next.album === song.album && data.album.status === 'ok';
+    songKey = key; song = next; data = keepAlbum ? { album: data.album } : {}; top = 0; cur = -1; handsOff = 0;
     if (open) load(false);
   }
 

@@ -43,6 +43,7 @@ contextBridge.exposeInMainWorld('bridge', {
   albumState: (st) => ipcRenderer.send('album:state', st),
   onAlbumOptions: (cb) => ipcRenderer.on('album:options', (_e, o) => cb(o)),
   infoGet: (kind, song) => ipcRenderer.invoke('info:get', kind, song),
+  infoPlay: (uri) => ipcRenderer.invoke('info:play', uri),
   infoState: (st) => ipcRenderer.send('info:state', st),
   onInfo: (cb) => ipcRenderer.on('info:options', (_e, o) => cb(o)),
   onSleep: (cb) => ipcRenderer.on('sleep:state', (_e, s) => cb(s)),
