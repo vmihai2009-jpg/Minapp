@@ -20,7 +20,7 @@ export function initListsTab(webamp, api, getWidgetMode) {
     const folder = (key, label, list, empty) => {
       rows.push({ t: `${open[key] ? '-' : '+'} ${label}`, folder: key, indent: 1, find: !copyFrom });
       if (!open[key]) return;
-      if (search && search.key === key) { // the search line, then what it found
+      if (search && search.key === key && !search.inList) { // the search line, then what it found
         rows.push({ t: '?' + search.q.slice(-(CW - 4)) + (Date.now() % 1000 < 550 ? '_' : ' '), input: true, indent: 2 }); // the end of a long text stays in view
         if (key === 'spotify' && (search.results || search.busy)) { // what to show: a small drop-down
           const names = { '': 'ALL', track: 'SONGS', album: 'ALBUMS', artist: 'ARTISTS' };
@@ -34,7 +34,19 @@ export function initListsTab(webamp, api, getWidgetMode) {
         return;
       }
       if (!data) { rows.push({ t: 'Loading...', dim: true, indent: 2 }); return; }
-      for (const r of list) rows.push({ ...r, indent: 2 });
+      for (const r of list) {
+        rows.push({ ...r, indent: 2, find: !copyFrom && !!r.kind && ['spotify', 'youtube', 'ytlink', 'ytsaved', 'local'].includes(r.kind) && !/^\[/.test(r.t) });
+        if (search && search.inList && search.inList.kind === r.kind && search.inList.id === (r.id || '')) { // searching inside this playlist
+          rows.push({ t: '?' + search.q.slice(-(CW - 5)) + (Date.now() % 1000 < 550 ? '_' : ' '), input: true, indent: 3 });
+          if (!search.songs) rows.push({ t: 'Loading songs...', dim: true, indent: 3 });
+          else {
+            const n = (x) => x.toLowerCase(), hits = search.songs.filter((x) => !search.q || n(x.t).includes(n(search.q))).slice(0, 60);
+            for (const x of hits) rows.push({ t: x.t, found: x, indent: 3 });
+            if (!hits.length) rows.push({ t: 'Nothing found', dim: true, indent: 3 });
+          }
+          rows.push({ t: '[ Close search ]', act: 'endsearch', indent: 3 });
+        }
+      }
       if (!list.length && empty) rows.push({ t: empty, dim: true, indent: 2 });
     };
     const sp = data && data.spotify;
@@ -76,8 +88,8 @@ export function initListsTab(webamp, api, getWidgetMode) {
       t.style.cssText = `position:absolute;left:${PAD + (r.indent || 0) * 5}px;top:1px;height:6px;white-space:nowrap;`;
       setText(t, cut(r.t, CW - (r.indent || 0) - (r.find ? 2 : 0)));
       d.appendChild(t);
-      if (r.find) { // magnifier: a 5 px ring with a handle, in the text colour
-        const m = document.createElement('canvas'); m.width = 7; m.height = 7; m.className = 'lt-find'; m.title = 'Search ' + r.folder;
+      if (r.find && (r.folder || top + i === hover)) { // magnifier (on a playlist: while the mouse is over it): a 5 px ring with a handle, in the text colour
+        const m = document.createElement('canvas'); m.width = 7; m.height = 7; m.className = 'lt-find'; m.title = r.folder ? 'Search ' + r.folder : 'Find a song in this playlist';
         m.style.cssText = `position:absolute;right:${PAD + 2}px;top:1px;width:7px;height:7px;cursor:pointer;`;
         const mg = m.getContext('2d'); mg.fillStyle = st.normal || '#00ff00';
         [[1, 0], [2, 0], [3, 0], [0, 1], [4, 1], [0, 2], [4, 2], [0, 3], [4, 3], [1, 4], [2, 4], [3, 4], [4, 5], [5, 5], [5, 6], [6, 6]].forEach(([x, y]) => mg.fillRect(x, y, 1, 1));
@@ -108,6 +120,12 @@ export function initListsTab(webamp, api, getWidgetMode) {
     body.addEventListener('click', (e) => {
       e.stopPropagation();
       const r = rows[rowOf(e)]; if (!r) return;
+      if (r.find && !r.folder && e.target.classList.contains('lt-find')) {
+        const s0 = search = { key: r.kind, q: '', inList: { kind: r.kind, id: r.id || '', name: r.t }, songs: null };
+        build(); draw();
+        api.listsSongs(r.kind, r.id || '').then((x) => { if (search === s0) { s0.songs = x || []; build(); draw(); } }).catch(() => { if (search === s0) { s0.songs = []; build(); draw(); } });
+        return;
+      }
       if (r.find && e.target.classList.contains('lt-find')) { search = { key: r.folder, q: '', results: null }; open[r.folder] = true; build(); draw(); return; }
       if (r.act === 'endsearch') { search = null; build(); draw(); return; }
       if (r.act === 'pick') { search.pick = !search.pick; build(); draw(); return; }
@@ -153,7 +171,7 @@ export function initListsTab(webamp, api, getWidgetMode) {
   document.addEventListener('keydown', (e) => {
     if (!search || !panel || panel.style.display === 'none' || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === 'Escape') search = null;
-    else if (e.key === 'Enter') { if (search.q.trim()) run(); }
+    else if (e.key === 'Enter') { if (search.q.trim() && !search.inList) run(); }
     else if (e.key === 'Backspace') search.q = search.q.slice(0, -1);
     else if (e.key.length === 1 && search.q.length < 40) search.q += e.key;
     else return;

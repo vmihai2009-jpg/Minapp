@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld('bridge', {
   listsAll: (force) => ipcRenderer.invoke('lists:all', force),
   listsPlay: (kind, id, name) => ipcRenderer.invoke('lists:play', kind, id, name),
   listsSearch: (key, q, only) => ipcRenderer.invoke('lists:search', key, q, only),
+  listsSongs: (kind, id) => ipcRenderer.invoke('lists:songs', kind, id),
   listsFound: (r) => ipcRenderer.invoke('lists:found', r),
   onMilkdrop: (cb) => ipcRenderer.on('milkdrop:toggle', cb),
 });

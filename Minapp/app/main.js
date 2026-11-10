@@ -1025,6 +1025,33 @@ ipcMain.handle('lists:search', async (_e, key, q, only) => {
   for (const p of library.playlists()) library.tracks(p.name).forEach((t, i) => { if (out.length < 40 && n(t.title + ' ' + t.artist).includes(n(q))) out.push({ t: t.title, kind: 'local', list: p.name, i }); });
   return out;
 });
+// the songs of one playlist, for searching inside it: [{ t, ...how to play it }]
+ipcMain.handle('lists:songs', async (_e, kind, id) => {
+  const by = (t) => (t.artist ? t.title + ' - ' + t.artist : t.title);
+  if (kind === 'spotify') {
+    const tok = readCfg().spotRefresh ? await spotAccessToken().catch(() => null) : null;
+    if (!tok) return [];
+    const liked = /^spotify:user:/.test(id), pid = liked ? 'liked' : String(id).split(':').pop();
+    const out = [];
+    let p = liked ? '/me/tracks?limit=50' : `/playlists/${pid}/items?limit=50`;
+    for (let k = 0; p && k < 20; k++) {
+      let j = await spotApi(p, tok).catch(() => null);
+      if (!j && !k && !liked) j = await spotApi(`/playlists/${pid}/tracks?limit=50`, tok).catch(() => null);
+      for (const x of (j && j.items) || []) { const t = x.item || x.track; if (t && t.uri) out.push({ t: by({ title: t.name, artist: t.artists && t.artists[0] ? t.artists[0].name : '' }), kind: 'spotify', uri: t.uri, ctx: liked ? '' : id }); }
+      p = j && j.next ? j.next.replace('https://api.spotify.com/v1', '') : null;
+    }
+    return out;
+  }
+  if (kind === 'local') return library.tracks(String(id || '')).map((t, i) => ({ t: t.title, kind: 'local', list: id, i }));
+  let vids = [];
+  try {
+    if (kind === 'youtube') vids = await ytApi.titles(await ytApi.videoIds(id));
+    else if (kind === 'ytlink') { const t = readCfg().yt || {}; vids = await library.ytEntries(t.list ? 'https://www.youtube.com/playlist?list=' + t.list : 'https://www.youtube.com/watch?v=' + t.v); }
+    else if (kind === 'ytsaved') { const l = (readCfg().ytLists || []).find((x) => x.name === id); if (l) vids = ytApi.signedIn() ? await ytApi.titles(l.ids) : []; }
+  } catch (e) { log('playlist songs: ' + e.message); }
+  const all = vids.map((v) => v.id);
+  return vids.map((v) => ({ t: v.title, kind: 'youtube', id: v.id, all }));
+});
 ipcMain.handle('lists:found', async (_e, r) => {
   if (!r || typeof r !== 'object') return;
   if (r.kind === 'spotify') return playSpotifyContext(String(r.uri || ''), String(r.ctx || ''));
