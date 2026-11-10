@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.27
+- The YouTube Music window no longer pops up by itself (it was being shown each time Minapp read your YT Music library).
+
 ## 1.9.26
 - A thin bar on top of the playlist is always there: LIBRARY, LYRICS, ARTIST and ALBUM. Lyrics and artist/album info now show right inside the playlist (no separate INFO panel).
 - With the album picture open, the playlist stretches all the way under it, so your libraries sit under the cassette. Roll the player up into a bar and the playlist goes back to its normal size.

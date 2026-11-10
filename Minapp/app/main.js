@@ -1505,6 +1505,7 @@ async function openYouTubeMusic(hidden) {
     ytmWin.webContents.once('did-finish-load', () => { if (eqOn || vizOn) setTimeout(applyAudio, 1500); });
     ytmWin.loadURL('https://music.youtube.com/');
   }
+  if (hidden) return; // reading the library in the background: stay out of sight
   ytmWin.show();
   ytmWin.focus();
 }
