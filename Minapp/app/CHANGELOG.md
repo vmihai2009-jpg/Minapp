@@ -1,5 +1,10 @@
 # What's new in Minapp
 
+## 1.9.20
+- Copy a playlist between Spotify and YouTube: in the playlist panel, "Copy to YouTube" (under SPOTIFY) or "Copy to Spotify" (under YOUTUBE), then pick the playlist. Each song is looked up by name; the bar under the player shows the progress and can stop it.
+- Playing a playlist no longer brings the Spotify window to the front.
+- The cassette shows its edge while it turns over.
+
 ## 1.9.19
 - ALBUM tab next to Lyrics and Artist: the album's songs (the playing one lit up), a short text about the album, and a button that plays the whole album on Spotify.
 - Halfway through an album, the cassette turns over to side B and the record slides out of its sleeve, turns round and goes back in.
