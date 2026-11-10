@@ -98,6 +98,10 @@ function create({ shell, dialog, readCfg, writeCfg, askText, getWin, log, onChan
     refreshPlaylists();
     return { id: p.id, added };
   }
+  // the ADD button: one video into one of the account's playlists
+  async function addTo(playlistId, videoId) {
+    await api('playlistItems', { part: 'snippet' }, { snippet: { playlistId, resourceId: { kind: 'youtube#video', videoId } } });
+  }
   // the LIKE button for YouTube: the video goes into a private "Minapp likes" playlist (made the first time)
   let likesId = '';
   async function addToLikes(videoId) {
@@ -182,7 +186,7 @@ function create({ shell, dialog, readCfg, writeCfg, askText, getWin, log, onChan
     onChange();
   }
 
-  return { signedIn, signIn, signOut, refreshPlaylists, videoIds, titles, canWrite, makePlaylist, addToLikes, playlists: () => playlists, error: () => err, loading: () => loading };
+  return { signedIn, signIn, signOut, refreshPlaylists, videoIds, titles, canWrite, makePlaylist, addToLikes, addTo, playlists: () => playlists, error: () => err, loading: () => loading };
 }
 
 module.exports = { create };

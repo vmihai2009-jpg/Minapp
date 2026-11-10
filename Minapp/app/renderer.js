@@ -100,6 +100,7 @@
   const SEL = { main: '#main-window', equalizer: '#equalizer-window', playlist: '#playlist-window' };
   let lastSig = '';
   const artOffset = () => (window.__albumTab ? window.__albumTab.offset() : 0);
+  let plWide = null; // the playlist's own width while it is stretched under the album panel
   function restack() {
     try {
       const gen = webamp.store.getState().windows.genWindows;
@@ -114,14 +115,23 @@
       }
       const milk = !!(gen.milkdrop && gen.milkdrop.open);
       const ao = artOffset();
-      const sig = JSON.stringify([h, milk, ao]);
+      const pos = (k) => (gen[k] && gen[k].position) || null;
+      const sig = JSON.stringify([h, milk, ao, gen.playlist && gen.playlist.size, pos('main'), pos('playlist')]);
       if (sig === lastSig) return;
       lastSig = sig;
       let y = 0;
       const positions = {};
+      // with the album panel open (and the player not rolled up into a bar) the playlist runs under it as well: its
+      // library column sits under the cassette. It is made exactly as wide as panel + player (Webamp widens in 25 px steps).
+      const under = ao > 0 && ao % 25 === 0 && !gen.main.shade && !!h.playlist;
       for (const id of ['main', 'equalizer', 'playlist']) {
-        if (h[id]) { positions[id] = { x: ao, y }; y += h[id]; }
+        if (h[id]) { positions[id] = { x: id === 'playlist' && under ? 0 : ao, y }; y += h[id]; }
       }
+      try {
+        const pl = gen.playlist, sz = (pl && pl.size) || [0, 0];
+        if (under && sz[0] !== ao / 25) { if (plWide === null) plWide = sz[0]; webamp.store.dispatch({ type: 'WINDOW_SIZE_CHANGED', windowId: 'playlist', size: [ao / 25, sz[1]] }); }
+        if (!under && plWide !== null) { webamp.store.dispatch({ type: 'WINDOW_SIZE_CHANGED', windowId: 'playlist', size: [plWide, sz[1]] }); plWide = null; }
+      } catch {}
       if (milk) positions.milkdrop = { x: ao + 275, y: 0 };
       webamp.store.dispatch({ type: 'UPDATE_WINDOW_POSITIONS', positions });
     } catch (e) { console.warn('restack failed', e); }
@@ -186,6 +196,8 @@
       if (m && m.open) { right = Math.max(right, artOffset() + 275 + 275); bottom = Math.max(bottom, 232); }
     } catch {}
     const ao2 = widgetMode === 'off' ? artOffset() : 0;
+    // leave room for the player beside the album panel before it is moved there, or Webamp pushes it back into view
+    if (ao2) right = Math.max(right, ao2 + 275);
     let w = Math.round(right), h = Math.round(bottom);
     if (widgetMode === 'small') { w = SMALL.w; h = SMALL.h; }
     else if (Date.now() < expandUntil) { w = Math.max(w, 420); h = Math.max(h, 400); }
@@ -214,7 +226,7 @@
     const b = e.target.closest('#play, #pause, #stop, #next, #previous');
     if (b && MAP[b.id]) { api.cmd(MAP[b.id]); kickPoll(300); }
     // shuffle / repeat: Webamp flips its own switch, then the source is told the new value
-    const sr = e.target.closest('#shuffle'); // (the repeat button is the INFO button now: see info-tab.js)
+    const sr = e.target.closest('#shuffle, #repeat');
     if (sr) setTimeout(() => {
       try {
         const m = webamp.store.getState().media;
@@ -253,6 +265,7 @@
     try {
       const m = webamp.store.getState().media;
       if (typeof s.shuffle === 'boolean' && s.shuffle !== !!m.shuffle) webamp.store.dispatch({ type: 'TOGGLE_SHUFFLE' });
+      if (typeof s.repeat === 'boolean' && s.repeat !== !!m.repeat) webamp.store.dispatch({ type: 'TOGGLE_REPEAT' });
     } catch {}
   };
 
