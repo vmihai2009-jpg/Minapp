@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.21
+- A playlist copied from Spotify to your YouTube account now shows once in the playlist panel, not twice.
+
 ## 1.9.20
 - Copy a playlist between Spotify and YouTube: in the playlist panel, "Copy to YouTube" (under SPOTIFY) or "Copy to Spotify" (under YOUTUBE), then pick the playlist. Each song is looked up by name; the bar under the player shows the progress and can stop it.
 - Playing a playlist no longer brings the Spotify window to the front.
