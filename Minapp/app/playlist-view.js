@@ -8,7 +8,7 @@ const ROW = 13;
 const BUTTONS = [ // the skin's button, where it sits inside the bottom pieces of the window, and its new job
   { sel: '#playlist-add-menu', piece: 'left', x: 14, word: 'FIND', tip: 'Find a song in the list on the right (Enter searches a whole library)' },
   { sel: '#playlist-remove-menu', piece: 'left', x: 43, word: 'LIKE', tip: 'Spotify: like the song. YouTube: save it to Minapp likes. Local: copy it to Liked' },
-  { sel: '#playlist-selection-menu', piece: 'left', x: 72, word: 'COPY', tip: 'Copy the picked playlist: Spotify to YouTube, or YouTube to Spotify' },
+  { sel: '#playlist-selection-menu', piece: 'left', x: 72, word: 'COPY', tip: 'Copy the picked playlist: Spotify to YouTube / YT Music, or YouTube / YT Music to Spotify' },
   { sel: '#playlist-misc-menu', piece: 'left', x: 101, word: 'SORT', tip: 'Shuffle, or sort the list' },
   { sel: '#playlist-list-menu', piece: 'right', x: -44, word: 'INFO', tip: 'Lyrics, the artist and the album' },
 ];
@@ -19,7 +19,7 @@ export function initPlaylistView(webamp, api) {
   let pick = { kind: 'queue' }, songs = null, results = null, busy = false, find = null, sort = 'order', sortOpen = false;
   let lTop = 0, rTop = 0, lHover = -1, rHover = -1, lRows = [], rRows = [], flash = '', flashUntil = 0;
   let queue = { hist: [], cur: null, q: [] }, qSig = '';
-  const open = { spotify: true, youtube: false, local: false };
+  const open = { spotify: true, youtube: false, ytmusic: false, local: false };
   try { Object.assign(open, JSON.parse(localStorage.getItem('minapp.pvOpen') || '{}')); } catch {}
   const skin = () => { try { return webamp.store.getState().display.skinPlaylistStyle || {}; } catch { return {}; } };
   const colours = () => { const s = skin(); return { bg: s.normalbg || '#000', fg: s.normal || '#00ff00', cur: s.current || '#fff', sel: s.selectedbg || '#0000c6', font: s.font || 'Arial' }; };
@@ -49,6 +49,9 @@ export function initPlaylistView(webamp, api) {
       if (!yt.signedIn) ytl.push({ t: '[ Sign in ]', kind: 'ytsignin', act: true });
     }
     folder('youtube', 'YOUTUBE', ytl, yt && yt.loading ? 'Loading...' : 'No playlists');
+    const ym = data && data.ytmusic, yml = [];
+    if (ym) { for (const p of ym.items) yml.push({ t: p.name, kind: 'ytmusic', id: p.id }); if (!ym.signedIn) yml.push({ t: '[ Sign in ]', kind: 'ytsignin', act: true }); }
+    folder('ytmusic', 'YT MUSIC', yml, ym && ym.loading ? 'Loading...' : 'No playlists');
     folder('local', 'LOCAL', ((data && data.local) || []).map((p) => ({ t: p.name, kind: 'local', id: p.name })), 'No playlists');
   }
   const same = (r) => r.kind === pick.kind && (r.kind === 'queue' || (r.folder ? r.folder === pick.key : (r.id || '') === (pick.id || '')));
@@ -173,7 +176,7 @@ export function initPlaylistView(webamp, api) {
     if (!r || r.dim) return;
     if (r.folder) {
       if (!twice) { open[r.folder] = !open[r.folder]; try { localStorage.setItem('minapp.pvOpen', JSON.stringify(open)); } catch {} }
-      pick = { kind: 'search', key: r.folder, folder: r.folder, name: r.folder === 'spotify' ? 'Spotify' : r.folder === 'youtube' ? 'YouTube' : 'your files' };
+      pick = { kind: 'search', key: r.folder, folder: r.folder, name: { spotify: 'Spotify', youtube: 'YouTube', ytmusic: 'YouTube Music', local: 'your files' }[r.folder] };
       results = null; rTop = 0; draw(); return;
     }
     if (r.act) { api.listsPlay(r.kind, r.id || '', r.t.trim()).then(() => load(true)).catch(() => {}); return; }
@@ -271,9 +274,9 @@ export function initPlaylistView(webamp, api) {
     draw();
   }
   function copy() {
-    const ok = pick.kind === 'spotify' || pick.kind === 'youtube' || pick.kind === 'ytsaved' || pick.kind === 'ytlink';
+    const ok = ['spotify', 'youtube', 'ytmusic', 'ytsaved', 'ytlink'].includes(pick.kind);
     if (!ok) { say('PICK A PLAYLIST'); return; }
-    say(pick.kind === 'spotify' ? 'COPYING TO YOUTUBE' : 'COPYING TO SPOTIFY');
+    say(pick.kind === 'spotify' ? 'COPYING TO YOUTUBE + YT MUSIC' : 'COPYING TO SPOTIFY');
     api.listsPlay('copy-' + pick.kind, pick.id, pick.name).then(() => load(true)).catch(() => {});
   }
   // a short note in the title bar's place for a few seconds (LIKED, COPYING...)
