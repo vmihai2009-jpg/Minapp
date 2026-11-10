@@ -130,7 +130,7 @@ function create({ dir, binDir, log }) {
         ...(mp3 ? ['-x', '--audio-format', 'mp3', '--audio-quality', '320K', '--embed-metadata', '--ffmpeg-location', ffBin()] : []),
         // the cover (YouTube thumbnail) saved next to each song, plus its details (album, artist) for the album panel;
         // MP3s also get the cover embedded, so DJ apps and Finder / Explorer show it too
-        '--write-thumbnail', '--write-info-json', '--no-write-playlist-metafiles', '--no-clean-info-json',
+        '--write-thumbnail', '--write-info-json', '--no-write-playlist-metafiles',
         ...(mp3 ? ['--convert-thumbnails', 'jpg', '--embed-thumbnail'] : []),
         '--print', 'after_move:filepath', '-o', out, '-P', dir, '--', url];
       // own process group off Windows, so a stop can take down yt-dlp and everything it started

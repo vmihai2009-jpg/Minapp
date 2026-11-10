@@ -453,7 +453,7 @@
     // repaint the old logo's spot by blending the clean row above it into the clean row below it, column by column,
     // so the skin's own shading (and the panel edge on the right) carries straight through
     const tmp = document.createElement('canvas'); tmp.width = logoBg.naturalWidth; tmp.height = logoBg.naturalHeight;
-    const t = tmp.getContext('2d'); t.drawImage(logoBg, 0, 0);
+    const t = tmp.getContext('2d', { willReadFrequently: true }); t.drawImage(logoBg, 0, 0);
     const top = t.getImageData(LOGO.x, LOGO.y - 1, LOGO.w, 1).data, bot = t.getImageData(LOGO.x, LOGO.y + LOGO.h, LOGO.w, 1).data;
     const out = c.createImageData(LOGO.w, LOGO.h);
     for (let y = 0; y < LOGO.h; y++) {
