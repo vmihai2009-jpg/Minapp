@@ -834,6 +834,9 @@ async function getSpotifyPlaylists(force) {
       }
       path = j.next ? j.next.replace('https://api.spotify.com/v1', '') : null;
     }
+    // playlists Spotify made (Daily Mix, Discover Weekly...) are left out of this list by Spotify for apps like this one:
+    // the ones pasted as a link are added (see spotify:addlink)
+    for (const l of readCfg().spotLinks || []) if (!items.some((p) => p.id === l.id)) items.push({ id: l.id, name: l.name, tracks: null, mine: false, link: true });
     const data = { status: 'ok', userId: me.id, items };
     spotLists = { at: Date.now(), data };
     log('playlists: ' + items.length);
@@ -1029,6 +1032,29 @@ ipcMain.handle('lists:search', async (_e, key, q, only) => {
   return out;
 });
 // the songs of one playlist, for searching inside it: [{ t, ...how to play it }]
+// a playlist's songs from Spotify's public embed page (works for playlists Spotify made, which its Web API refuses)
+async function spotEmbedSongs(pid) {
+  try {
+    const r = await fetch('https://open.spotify.com/embed/playlist/' + encodeURIComponent(pid), { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(12000) });
+    const html = await r.text();
+    const m = /<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/.exec(html);
+    const j = m ? JSON.parse(m[1]) : null;
+    const ent = j && j.props && j.props.pageProps && j.props.pageProps.state && j.props.pageProps.state.data && j.props.pageProps.state.data.entity;
+    return { name: (ent && (ent.name || ent.title)) || '', songs: ((ent && ent.trackList) || []).filter((t) => t && t.uri).map((t) => ({ title: t.title || '', artist: t.subtitle || '', uri: t.uri })) };
+  } catch (e) { log('embed songs: ' + e.message); return { name: '', songs: [] }; }
+}
+// paste a Spotify playlist link (for the playlists Spotify made, which it does not list for apps)
+ipcMain.handle('spotify:addlink', async () => {
+  const link = await askText({ title: 'Add a Spotify playlist', label: 'Paste the playlist link (Share > Copy link to playlist in Spotify):', placeholder: 'https://open.spotify.com/playlist/...', button: 'Add' });
+  const m = /playlist[/:]([A-Za-z0-9]{22})/.exec(String(link || ''));
+  if (!m) return false;
+  const e = await spotEmbedSongs(m[1]);
+  const list = (readCfg().spotLinks || []).filter((x) => x.id !== m[1]);
+  list.push({ id: m[1], name: e.name || 'Spotify playlist' });
+  writeCfg({ spotLinks: list });
+  spotLists = null;
+  return true;
+});
 ipcMain.handle('lists:songs', async (_e, kind, id) => {
   const by = (t) => (t.artist ? t.title + ' - ' + t.artist : t.title);
   if (kind === 'spotify') {
@@ -1043,6 +1069,7 @@ ipcMain.handle('lists:songs', async (_e, kind, id) => {
       for (const x of (j && j.items) || []) { const t = x.item || x.track; if (t && t.uri) out.push({ t: by({ title: t.name, artist: t.artists && t.artists[0] ? t.artists[0].name : '' }), kind: 'spotify', uri: t.uri, ctx: liked ? '' : id }); }
       p = j && j.next ? j.next.replace('https://api.spotify.com/v1', '') : null;
     }
+    if (!out.length && !liked) for (const t of (await spotEmbedSongs(pid)).songs) out.push({ t: by(t), kind: 'spotify', uri: t.uri, ctx: id });
     return out;
   }
   if (kind === 'local') return library.tracks(String(id || '')).map((t, i) => ({ t: t.title, kind: 'local', list: id, i }));

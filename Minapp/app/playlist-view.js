@@ -18,7 +18,7 @@ export function initPlaylistView(webamp, api) {
   let root = null, left = null, right = null, line = null, data = null, loadedAt = 0, skinKey = '';
   let pick = { kind: 'queue' }, songs = null, results = null, busy = false, find = null, sort = 'order', sortOpen = false;
   let lTop = 0, rTop = 0, lHover = -1, rHover = -1, lRows = [], rRows = [], flash = '', flashUntil = 0;
-  let queue = { hist: [], cur: null, q: [] }, qSig = '';
+  let queue = { hist: [], cur: null, q: [] }, qSig = '', rMax = 0, barSet = -1;
   const open = { spotify: true, youtube: false, ytmusic: false, local: false };
   try { Object.assign(open, JSON.parse(localStorage.getItem('minapp.pvOpen') || '{}')); } catch {}
   const skin = () => { try { return webamp.store.getState().display.skinPlaylistStyle || {}; } catch { return {}; } };
@@ -38,7 +38,8 @@ export function initPlaylistView(webamp, api) {
     };
     const sp = data && data.spotify;
     let spl = [];
-    if (sp && sp.status === 'ok') spl = [{ t: 'Liked songs', kind: 'spotify', id: `spotify:user:${sp.userId}:collection` }, ...sp.items.map((p) => ({ t: p.name, kind: 'spotify', id: 'spotify:playlist:' + p.id }))];
+    if (sp && sp.status === 'ok') spl = [{ t: 'Liked songs', kind: 'spotify', id: `spotify:user:${sp.userId}:collection` }, ...sp.items.map((p) => ({ t: p.name, kind: 'spotify', id: 'spotify:playlist:' + p.id })),
+      { t: '[ Add a Spotify-made playlist ]', kind: 'spotaddlink', act: true }]; // Daily Mix and the like: Spotify does not list them for apps
     else if (sp && (sp.status === 'login' || sp.status === 'rescope')) spl = [{ t: '[ Connect ]', kind: 'spotconnect', act: true }];
     folder('spotify', 'SPOTIFY', spl, 'Could not load');
     const yt = data && data.youtube, ytl = [];
@@ -114,6 +115,10 @@ export function initPlaylistView(webamp, api) {
     buildLeft(); buildRight();
     lTop = paint(left, lRows, lTop, lHover, 'L');
     rTop = paint(right, rRows, rTop, rHover, 'R');
+    // the skin's scrollbar follows the right side, and dragging it scrolls the right side
+    rMax = Math.max(0, rRows.length - Math.max(1, Math.floor(right.clientHeight / ROW)));
+    const pct = rMax ? (rTop / rMax) * 100 : 0;
+    if (Math.abs(pct - barSet) > 0.01) { barSet = pct; try { webamp.store.dispatch({ type: 'SET_PLAYLIST_SCROLL_POSITION', position: pct }); } catch {} }
     if (sortOpen) sortMenu(); else { const m = document.getElementById('pv-sort'); if (m) m.remove(); }
     buttons(true);
   }
@@ -131,7 +136,7 @@ export function initPlaylistView(webamp, api) {
       if (!localStorage.getItem('minapp.pvWide')) {
         localStorage.setItem('minapp.pvWide', '1');
         const g = webamp.store.getState().windows.genWindows.playlist, sz = (g && g.size) || [0, 0];
-        if (sz[0] < 4) webamp.store.dispatch({ type: 'WINDOW_SIZE_CHANGED', windowId: 'playlist', size: [4, Math.max(2, sz[1])] });
+        if (sz[0] < 4 || sz[1] < 4) webamp.store.dispatch({ type: 'WINDOW_SIZE_CHANGED', windowId: 'playlist', size: [Math.max(4, sz[0]), Math.max(4, sz[1])] }); // 12 songs in view
       }
     } catch {}
     const r = tracks.getBoundingClientRect(), { bg, fg, font } = colours();
@@ -147,6 +152,10 @@ export function initPlaylistView(webamp, api) {
       draw();
     }
     buttons(false);
+    try { // the scrollbar was dragged
+      const pos = webamp.store.getState().display.playlistScrollPosition;
+      if (barSet >= 0 && Math.abs(pos - barSet) > 0.5) { barSet = pos; rTop = Math.round((pos / 100) * rMax); draw(); }
+    } catch {}
     if (Date.now() - loadedAt > 5 * 60000) load(false);
   }
   function build() {
@@ -166,7 +175,7 @@ export function initPlaylistView(webamp, api) {
     left.addEventListener('dblclick', (e) => clickLeft(lRows[rowOf(e)], true));
     right.addEventListener('click', (e) => clickRight(rRows[rowOf(e)]));
     left.addEventListener('wheel', (e) => { e.preventDefault(); lTop += e.deltaY > 0 ? 2 : -2; draw(); }, { passive: false });
-    right.addEventListener('wheel', (e) => { e.preventDefault(); rTop += e.deltaY > 0 ? 2 : -2; draw(); }, { passive: false });
+    right.addEventListener('wheel', (e) => { e.preventDefault(); rTop += e.deltaY > 0 ? 3 : -3; draw(); }, { passive: false });
     root.addEventListener('mousedown', (e) => e.stopPropagation());
     root.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); });
   }
@@ -179,6 +188,7 @@ export function initPlaylistView(webamp, api) {
       pick = { kind: 'search', key: r.folder, folder: r.folder, name: { spotify: 'Spotify', youtube: 'YouTube', ytmusic: 'YouTube Music', local: 'your files' }[r.folder] };
       results = null; rTop = 0; draw(); return;
     }
+    if (r.kind === 'spotaddlink') { api.spotAddLink().then((ok) => { if (ok) load(true); }).catch(() => {}); return; }
     if (r.act) { api.listsPlay(r.kind, r.id || '', r.t.trim()).then(() => load(true)).catch(() => {}); return; }
     if (r.kind === 'queue') { pick = { kind: 'queue' }; rTop = 0; draw(); return; }
     if (twice) { say('PLAYING'); api.listsPlay(r.kind, r.id || '', r.t.trim()).catch(() => {}); return; } // double-click: play the whole playlist
