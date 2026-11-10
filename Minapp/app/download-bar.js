@@ -17,11 +17,84 @@ export function skinImage(selector) {
   return 'none';
 }
 
-// The colour behind the letters of the skin font (its space character). Panels use it as their background so the
-// letters sit cleanly on it in every skin, even where the skin's playlist colour is different. Until the font has been
-// read (and when a skin has none) the playlist colour is used.
+// The panels' background is the player's own colour (the average of the skin's main window picture), and the skin
+// font is redrawn without the little blocks behind its letters (see themeFont), so the letters sit on that colour in
+// every skin. Until both are ready (and for a skin without a main picture) the playlist colour is used.
 const fontBg = { src: '', col: '' };
+const theme = { webamp: null, imgs: null, tone: null, fontKey: '', ready: false, style: null };
+const PANELS = ['#info-tab', '#lists-tab', '#dl-panel', '#whatsnew-panel', '#playlist-picker'];
 export function textBg(fallback) {
+  readFontBg();
+  if (theme.ready && theme.tone) return `rgb(${theme.tone.map(Math.round).join(',')})`;
+  return fallback;
+}
+export function initTheme(webamp) {
+  if (theme.webamp) return;
+  theme.webamp = webamp;
+  setInterval(themeTick, 1000); themeTick();
+}
+function themeTick() {
+  if (document.hidden) return;
+  // the main window's picture: from the loaded skin, or (the built-in skin) from the page's style sheet
+  let src = ''; try { src = (theme.webamp.store.getState().display.skinImages || {}).MAIN_WINDOW_BACKGROUND || ''; } catch {}
+  if (!src) { const m = /url\("?(.*?)"?\)$/.exec(skinImage('#webamp #main-window')); src = m ? m[1] : ''; }
+  if (src && src !== theme.imgs) {
+    theme.imgs = src;
+    const im = new Image();
+    im.onload = () => {
+      const c = document.createElement('canvas'); c.width = 24; c.height = 10;
+      const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(im, 0, 0, 24, 10);
+      const d = g.getImageData(0, 0, 24, 10).data, a = [0, 0, 0];
+      for (let i = 0; i < d.length; i += 4) { a[0] += d[i]; a[1] += d[i + 1]; a[2] += d[i + 2]; }
+      theme.tone = a.map((v) => v / (d.length / 4)); theme.fontKey = ''; // redo the font: its contrast depends on the tone
+    };
+    im.src = src;
+  }
+  readFontBg();
+  const key = fontBg.src + '|' + (fontBg.rgb || '') + '|' + (fontBg.ink || '') + '|' + (theme.tone || '');
+  if (!theme.tone || !fontBg.rgb || !fontBg.ink || key === theme.fontKey) return;
+  theme.fontKey = key;
+  themeFont(key);
+}
+// every character of the skin font, with its background colour made see-through. Letters that would be hard to read
+// on the player's colour are redrawn in white or black instead (their shape and soft edges stay).
+async function themeFont(key) {
+  const codes = new Map();
+  for (const sheet of sheetsNewestFirst()) {
+    let rules; try { rules = sheet.cssRules; } catch { continue; }
+    for (const r of rules) { const m = r.selectorText && /\.character-(\d+)$/.exec(r.selectorText); if (m && r.style && r.style.backgroundImage && !codes.has(m[1])) codes.set(m[1], r.style.backgroundImage); }
+  }
+  const b = fontBg.rgb, ink = fontBg.ink, tone = theme.tone;
+  const span = Math.max(40, Math.abs(ink[0] - b[0]) + Math.abs(ink[1] - b[1]) + Math.abs(ink[2] - b[2]));
+  const poor = Math.abs(lum(ink) - lum(tone)) < 80, fixed = lum(tone) < 128 ? [255, 255, 255] : [0, 0, 0];
+  const load = (src) => new Promise((ok) => { const m = /url\("?(.*?)"?\)$/.exec(src); if (!m) return ok(null); const im = new Image(); im.onload = () => ok(im); im.onerror = () => ok(null); im.src = m[1]; });
+  const rules = [];
+  for (const [code, src] of codes) {
+    const im = await load(src);
+    if (!im || key !== theme.fontKey) { if (key !== theme.fontKey) return; continue; }
+    const c = document.createElement('canvas'); c.width = im.width; c.height = im.height;
+    const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(im, 0, 0);
+    const id = g.getImageData(0, 0, c.width, c.height), d = id.data;
+    for (let o = 0; o < d.length; o += 4) {
+      const k = Math.abs(d[o] - b[0]) + Math.abs(d[o + 1] - b[1]) + Math.abs(d[o + 2] - b[2]);
+      d[o + 3] = Math.min(255, Math.round((k / span) * 1.3 * 255));
+      if (poor) { d[o] = fixed[0]; d[o + 1] = fixed[1]; d[o + 2] = fixed[2]; }
+    }
+    g.putImageData(id, 0, 0);
+    rules.push(`${PANELS.map((p) => p + ' .character-' + code).join(',')}{background-image:url(${c.toDataURL()}) !important}`);
+  }
+  if (!theme.style) { theme.style = document.createElement('style'); theme.style.id = 'minapp-font'; }
+  theme.style.textContent = rules.join('\n');
+  document.head.appendChild(theme.style); // last in the page, so it wins over the skin's own
+  theme.ready = true;
+}
+// the colour the panel letters are drawn in (for little drawings next to them, such as the magnifier)
+export function textInk(fallback) {
+  const ink = fontBg.ink, t = theme.tone;
+  if (!theme.ready || !ink || !t) return fallback ? rgbOf(fallback) : null;
+  return Math.abs(lum(ink) - lum(t)) < 80 ? (lum(t) < 128 ? [255, 255, 255] : [0, 0, 0]) : ink;
+}
+function readFontBg() {
   const src = fontRule('32');
   if (src !== fontBg.src) {
     fontBg.src = src; fontBg.col = ''; fontBg.rgb = null; fontBg.ink = null;
@@ -52,7 +125,6 @@ export function textBg(fallback) {
       }
     }
   }
-  return fontBg.col || fallback;
 }
 const lum = (c) => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
 const rgbOf = (t) => { const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(t); if (m) return [1, 2, 3].map((i) => parseInt(m[i], 16)); const r = /(\d+)\D+(\d+)\D+(\d+)/.exec(t); return r ? [1, 2, 3].map((i) => Number(r[i])) : null; };
@@ -60,6 +132,11 @@ const rgbOf = (t) => { const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.e
 // disappear), which only works when the highlight is on the background's side of the letters: a skin whose highlight
 // is brighter than its dark-background font (or darker than its light-background font) gets a toned-down highlight.
 export function selBg(sel) {
+  if (theme.ready) { // the letters have no blocks behind them any more: the skin's highlight works unless it is close to the letters
+    const s = rgbOf(sel), ink = textInk(), t = theme.tone;
+    if (!s || !ink || Math.abs(lum(s) - lum(ink)) >= 100) return sel;
+    return `rgb(${s.map((v, i) => Math.round(t[i] + (v - t[i]) * 0.4)).join(',')})`;
+  }
   const s = rgbOf(sel), b = fontBg.rgb, ink = fontBg.ink;
   if (!s || !b || !ink) return sel;
   const dark = lum(b) < lum(ink), gap = lum(ink) - lum(b);
@@ -96,7 +173,7 @@ export function paintWord(g, w, h, x0, word, centre) {
   for (const ch of word) { TINY[ch].forEach((r, j) => [...r].forEach((q, i) => { if (q === '#') g.fillRect(x + i, y + j, 1, 1); })); x += TINY[ch][0].length + 1; }
 }
 // how letters are laid on a highlight so the blocks behind them disappear: brighter-wins on a dark font background
-export function blendFor(bg) { const c = rgbOf(bg); return !c || lum(c) < 128 ? 'lighten' : 'darken'; }
+export function blendFor(bg) { if (theme.ready) return 'normal'; const c = rgbOf(bg); return !c || lum(c) < 128 ? 'lighten' : 'darken'; }
 function fontRule(code) {
   for (const sheet of sheetsNewestFirst()) {
     let rules; try { rules = sheet.cssRules; } catch { continue; }
@@ -120,6 +197,7 @@ export function setText(el, text) {
 }
 
 export function initDownloadBar(webamp, api) {
+  initTheme(webamp);
   let panel = null, style = null, info = null, skinKey = null, fontKey = '', offset = 0, scrollText = '';
 
   function buildStyle() {

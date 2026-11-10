@@ -2,7 +2,7 @@
 // Local folders (+ closed / - open), each with its playlists underneath; a click plays one. The magnifier at the right
 // of a folder searches that library: type, Enter, click a result to play it. Drawn in the skin's song-title
 // font and playlist colours, like the rest of the player. It shows whenever the album picture does.
-import { setText, skinImage, textBg, selBg, blendFor, paintWord } from './download-bar.js';
+import { setText, skinImage, textBg, selBg, blendFor, paintWord, textInk } from './download-bar.js';
 
 const W = 96, ROW = 9, PAD = 4, CW = 16, HEAD = 13; // CW: letters per line; HEAD: the closed panel's height
 
@@ -91,7 +91,7 @@ export function initListsTab(webamp, api, getWidgetMode) {
       if (r.find && (r.folder || top + i === hover)) { // magnifier (on a playlist: while the mouse is over it): a 5 px ring with a handle, in the text colour
         const m = document.createElement('canvas'); m.width = 7; m.height = 7; m.className = 'lt-find'; m.title = r.folder ? 'Search ' + r.folder : 'Find a song in this playlist';
         m.style.cssText = `position:absolute;right:${PAD + 2}px;top:1px;width:7px;height:7px;cursor:pointer;`;
-        const mg = m.getContext('2d'); mg.fillStyle = st.normal || '#00ff00';
+        const mg = m.getContext('2d'); mg.fillStyle = `rgb(${textInk(st.normal || '#00ff00') || [0, 255, 0]})`;
         [[1, 0], [2, 0], [3, 0], [0, 1], [4, 1], [0, 2], [4, 2], [0, 3], [4, 3], [1, 4], [2, 4], [3, 4], [4, 5], [5, 5], [5, 6], [6, 6]].forEach(([x, y]) => mg.fillRect(x, y, 1, 1));
         d.appendChild(m);
       }
