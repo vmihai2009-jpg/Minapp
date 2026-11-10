@@ -198,10 +198,45 @@ function create({ dir, binDir, log }) {
     }
     return { ok: files.length > 0, files, error: res.error, rateLimited: !!res.rateLimited, total };
   }
+  // ----- covers for songs saved before Minapp kept them -----
+  // every song in the library that has no picture next to it
+  const withoutCover = () => playlists().flatMap((p) => tracks(p.name)).filter((t) => !artFor(t.path));
+  // Looks each song up on YouTube by its title and saves the picture and details of the first match next to it.
+  // Nothing is downloaded again. Resolves { found, missed, total, cancelled, rateLimited }.
+  async function fillCovers(onProgress) {
+    cancelled = false; paused = false;
+    const list = withoutCover();
+    const out = { found: 0, missed: 0, total: list.length, cancelled: false, rateLimited: false };
+    if (!list.length) return out;
+    if (!haveBin()) { onProgress('Fetching yt-dlp…', { phase: 'preparing', i: 0, n: list.length, title: 'Fetching yt-dlp…', pct: 0 }); await fetchBin(); }
+    for (let i = 0; i < list.length; i++) {
+      while (paused && !cancelled) { onProgress('Paused', { phase: 'paused', i: i + 1, n: list.length, title: list[i].title, pct: 0 }); await sleep(1000); }
+      if (cancelled) { out.cancelled = true; break; }
+      const t = list[i];
+      onProgress(`Cover ${i + 1} of ${list.length}: ${t.title}`, { phase: 'downloading', i: i + 1, n: list.length, title: 'Cover: ' + t.title, pct: 50, saved: out.found });
+      const limited = await new Promise((resolve) => {
+        const args = ['--skip-download', '--no-playlist', '--write-thumbnail', '--write-info-json', '--no-colors', '--sleep-requests', '1.5',
+          '--retries', '3', '-o', base(t.path).replace(/%/g, '%%') + '.%(ext)s', '--', 'ytsearch1:' + t.title];
+        const p = spawn(bin(), args, { windowsHide: true, detached: process.platform !== 'win32' });
+        child = p; let err = '', done = false;
+        const end = () => { if (done) return; done = true; child = null; resolve(RATE.test(err)); };
+        p.stderr.on('data', (d) => { err += d; if (err.length > 4000) err = err.slice(-4000); });
+        p.stdout.on('data', () => {});
+        p.on('error', end); p.on('close', end);
+      });
+      if (paused) { i--; continue; } // stopped by Pause: the same song again after Resume
+      keepDetails(t.path);
+      if (artFor(t.path)) out.found++; else out.missed++;
+      if (limited) { out.rateLimited = true; break; }
+      if (!cancelled && i < list.length - 1) await sleep(1500); // be gentle with YouTube
+    }
+    if (cancelled) out.cancelled = true;
+    return out;
+  }
   const cancel = () => { cancelled = true; paused = false; try { child && killTree(child); } catch {} if (wake) wake(); };
   // pause(true) stops yt-dlp until pause(false); a pause during a rate-limit wait is just shown, the wait keeps counting
   const pause = (on) => { paused = !!on; if (paused) { try { child && killTree(child); } catch {} } else if (wake) wake(); };
   const isPaused = () => paused;
-  return { dir, playlists, tracks, importFiles, audioIn, download, cancel, pause, isPaused, haveBin, haveFf, safeName, artFor, detailsFor };
+  return { dir, playlists, tracks, importFiles, audioIn, download, cancel, pause, isPaused, haveBin, haveFf, safeName, artFor, detailsFor, withoutCover, fillCovers };
 }
 module.exports = { create, AUDIO };

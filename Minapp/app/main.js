@@ -1287,6 +1287,36 @@ async function downloadCurrentYouTube() {
   }
 }
 
+// Songs saved before 1.9.16 have no picture: look each one up by its title and save the cover next to it
+async function fillMissingCovers() {
+  if (downloading) return;
+  const n = library.withoutCover().length;
+  if (!n) { dialog.showMessageBox(win, { message: 'Every song in your library already has its cover.' }); return; }
+  const r = await dialog.showMessageBox(win, {
+    type: 'question', buttons: ['Get covers', 'Cancel'], defaultId: 0, cancelId: 1,
+    message: `Look up covers for ${n} song${n === 1 ? '' : 's'}?`,
+    detail: 'Minapp searches YouTube for each song by its name and saves the picture of the first match next to the song. The songs themselves are not downloaded again. It takes a few seconds per song, and you can pause or stop it from the bar under the player.',
+  });
+  if (r.response !== 0) return;
+  downloading = true; buildMenu();
+  win.webContents.send('download:state', true);
+  const note = (m, info) => { try { win.setTitle(m); } catch {} lastTitle = ''; if (info && win && !win.isDestroyed()) win.webContents.send('download:progress', { ...info, paused: library.isPaused() }); };
+  try {
+    const res = await library.fillCovers(note);
+    localMeta = { path: '' }; // the playing song may have just got its cover
+    const head = `Found covers for ${res.found} of ${res.total} songs`;
+    const detail = res.rateLimited ? 'YouTube asked Minapp to slow down. Choose "Get missing covers" again in about an hour and it carries on with the rest.'
+      : res.cancelled ? 'Stopped. Choose "Get missing covers" again to carry on with the rest.'
+        : res.missed ? `No match was found for ${res.missed}.` : '';
+    dialog.showMessageBox(win, { message: head, detail });
+  } catch (e) {
+    dialog.showMessageBox(win, { type: 'error', message: 'Could not get the covers', detail: String((e && e.message) || e) });
+  } finally {
+    downloading = false; lastTitle = ''; buildMenu();
+    if (win && !win.isDestroyed()) { win.webContents.send('download:state', false); win.webContents.send('download:progress', null); }
+  }
+}
+
 async function setSource(s) {
   try {
     try { await runCapture(null); } catch {}
@@ -1569,6 +1599,32 @@ function toggleVisible() {
   if (win.isVisible() && !win.isMinimized()) win.hide(); else { win.show(); win.focus(); }
 }
 
+// ---------- sleep timer ----------
+// pauses the music after a while, or when the playing song ends (the renderer tells us when the next one starts)
+let sleepAt = 0, sleepSong = false, sleepTimer = null, sleepMin = 0, sleepTick = null;
+const sleepSend = () => { if (win && !win.isDestroyed()) win.webContents.send('sleep:state', { at: sleepAt, song: sleepSong }); };
+function sleepFire() {
+  log('sleep timer: pausing');
+  setSleep(0);
+  doCmd('pause').catch((e) => log('sleep pause failed: ' + e.message));
+}
+function setSleep(min) {
+  clearTimeout(sleepTimer); clearInterval(sleepTick); sleepTimer = sleepTick = null; sleepAt = 0; sleepSong = false; sleepMin = 0;
+  if (min === 'song') sleepSong = true;
+  else if (min > 0) { sleepMin = min; sleepAt = Date.now() + min * 60000; sleepTimer = setTimeout(sleepFire, min * 60000); sleepTick = setInterval(buildMenu, 60000); } // the menu shows the minutes left
+  sleepSend(); buildMenu();
+}
+ipcMain.handle('sleep:get', () => ({ at: sleepAt, song: sleepSong }));
+ipcMain.on('sleep:now', () => { if (sleepSong) sleepFire(); });
+function sleepMenu() {
+  const left = sleepAt ? Math.max(1, Math.round((sleepAt - Date.now()) / 60000)) : 0;
+  return { label: sleepAt ? `Sleep timer (${left} min left)` : sleepSong ? 'Sleep timer (after this song)' : 'Sleep timer', submenu: [
+    { label: 'Off', type: 'radio', checked: !sleepAt && !sleepSong, click: () => setSleep(0) },
+    ...[15, 30, 45, 60, 90].map((m) => ({ label: `Pause in ${m} minutes`, type: 'radio', checked: !!sleepAt && sleepMin === m, click: () => setSleep(m) })),
+    { label: 'Pause after this song', type: 'radio', checked: sleepSong, click: () => setSleep('song') },
+  ] };
+}
+
 // ---------- menus ----------
 const toggleCfg = (key, dflt) => () => { writeCfg({ [key]: !(readCfg()[key] === undefined ? dflt : readCfg()[key]) }); buildMenu(); };
 const cfgOn = (key, dflt) => (readCfg()[key] === undefined ? dflt : !!readCfg()[key]);
@@ -1600,6 +1656,7 @@ function menuItems() {
       ...(downloading ? [{ label: library.isPaused() ? 'Resume download' : 'Pause download', click: () => { library.pause(!library.isPaused()); buildMenu(); } },
         { label: 'Stop download', click: () => library.cancel() }]
         : source === 'youtube' ? [{ label: 'Download current YouTube link (personal use)…', click: downloadCurrentYouTube }] : []),
+      ...(!downloading ? [{ label: 'Get missing covers…', click: fillMissingCovers }] : []),
       { label: 'Save downloads as MP3 320 (works in every DJ app)', type: 'checkbox', checked: cfgOn('dlMp3', true), click: toggleCfg('dlMp3', true) },
       { label: 'Open library folder', click: () => { fs.mkdirSync(library.dir, { recursive: true }); shell.openPath(library.dir); } },
     ] },
@@ -1614,6 +1671,7 @@ function menuItems() {
       { label: 'Spin the CD (slowly, while playing)', type: 'checkbox', checked: !!albumUi.spin, click: () => win.webContents.send('album:options', { look: 'cd', spin: !albumUi.spin }) },
     ] },
     { label: 'Lyrics / about the artist', type: 'checkbox', checked: infoUi.open, accelerator: 'CmdOrCtrl+Shift+L', click: () => win.webContents.send('info:options', { open: !infoUi.open }) },
+    sleepMenu(),
     { label: 'Mini mode', accelerator: 'CmdOrCtrl+Shift+M', click: () => win.webContents.send('mini:toggle') },
     { label: 'Widget', submenu: [
       { label: 'Off (full player)', type: 'radio', checked: widget === 'off', click: () => setWidget('off', true) },

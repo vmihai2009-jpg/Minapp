@@ -45,5 +45,8 @@ contextBridge.exposeInMainWorld('bridge', {
   infoGet: (kind, song) => ipcRenderer.invoke('info:get', kind, song),
   infoState: (st) => ipcRenderer.send('info:state', st),
   onInfo: (cb) => ipcRenderer.on('info:options', (_e, o) => cb(o)),
+  onSleep: (cb) => ipcRenderer.on('sleep:state', (_e, s) => cb(s)),
+  sleepGet: () => ipcRenderer.invoke('sleep:get'),
+  sleepNow: () => ipcRenderer.send('sleep:now'),
   onMilkdrop: (cb) => ipcRenderer.on('milkdrop:toggle', cb),
 });
