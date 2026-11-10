@@ -158,7 +158,7 @@
     }
     // the queue is open in the large widget, closed in the small one; leaving widget mode keeps whatever is open
     if (mode === 'large' && !windowOpen('playlist')) webamp.store.dispatch({ type: 'TOGGLE_WINDOW', windowId: 'playlist' });
-    if (mode !== 'large' && windowOpen('playlist')) webamp.store.dispatch({ type: 'TOGGLE_WINDOW', windowId: 'playlist' });
+    if (mode === 'small' && windowOpen('playlist')) webamp.store.dispatch({ type: 'TOGGLE_WINDOW', windowId: 'playlist' });
     lastSig = ''; lw = 0; lh = 0;
     if (fromUser) api.widgetSet(mode);
   }
@@ -240,11 +240,10 @@
   }, true));
   api.onDownload((on) => document.documentElement.classList.toggle('downloading', !!on));
   import('./whatsnew-panel.js').then((m) => m.initWhatsNew(webamp, api)).catch((e) => api.log('whats new failed: ' + e.message));
-  import('./playlist-picker.js').then((m) => m.initPlaylistPicker(webamp, api)).catch((e) => api.log('playlist picker failed: ' + e.message));
   import('./album-tab.js').then((m) => m.initAlbumTab(webamp, api, () => widgetMode)).catch((e) => api.log('album tab failed: ' + e.message));
   import('./update-bulb.js').then((m) => m.initUpdateBulb(api)).catch((e) => api.log('update bulb failed: ' + e.message));
   import('./sleep-clock.js').then((m) => m.initSleepClock(api)).catch((e) => api.log('sleep clock failed: ' + e.message));
-  import('./lists-tab.js').then((m) => m.initListsTab(webamp, api, () => widgetMode)).catch((e) => api.log('playlist panel failed: ' + e.message));
+  import('./playlist-view.js').then((m) => m.initPlaylistView(webamp, api)).catch((e) => api.log('playlist view failed: ' + e.message));
   import('./info-tab.js').then((m) => m.initInfoTab(webamp, api, () => widgetMode)).catch((e) => api.log('info tab failed: ' + e.message));
   import('./download-bar.js').then((m) => m.initDownloadBar(webamp, api)).catch((e) => api.log('download bar failed: ' + e.message));
   setInterval(() => { const b = document.getElementById('eject'); if (b) b.title = document.documentElement.classList.contains('src-youtube') ? 'Record: download this YouTube link (personal use)' : (document.documentElement.dataset.source || 'spotify') === 'spotify' ? (document.documentElement.classList.contains('liked') ? 'Liked: click to remove from Liked Songs' : 'Like: add this song to Liked Songs') : ''; }, 1500);
@@ -504,11 +503,10 @@
     if (!(e.target.closest && e.target.closest('#option'))) return;
     swallow(e); api.showMenu();
   }, true);
-  document.addEventListener('contextmenu', (e) => { if (e.target.closest && e.target.closest('#info-tab .it-body')) return; swallow(e); api.showMenu(); }, true);
+  document.addEventListener('contextmenu', (e) => { if (e.target.closest && e.target.closest('#info-tab .it-body, #playlist-view')) return; swallow(e); api.showMenu(); }, true);
 
   // show/hide the playlist and equalizer windows (the menu uses the skin's own PL / EQ buttons)
   api.onWindowToggle((id) => {
-    if (id === 'playlist' && widgetMode === 'off') { if (window.__infoTab) window.__infoTab.setKind('queue'); return; } // the queue lives in the INFO panel now
     const btn = { playlist: '#playlist-button', equalizer: '#equalizer-button' }[id];
     const el = btn && document.querySelector(btn);
     if (el) { el.click(); return; }
@@ -536,8 +534,6 @@
   let rowDown = -1, lastQueue = [], lastHist = [];
   // the QUEUE tab of the INFO panel jumps the same way (off: songs ahead, negative: back)
   window.__queueJump = (off) => { api.cmd('jump', off); kickPoll(1200); holdUntil = Date.now() + 2500; };
-  // the old playlist window is retired (its place is the QUEUE tab); only the large widget still shows it
-  setInterval(() => { if (widgetMode === 'off' && windowOpen('playlist')) webamp.store.dispatch({ type: 'TOGGLE_WINDOW', windowId: 'playlist' }); }, 700);
   const rowIndex = (cell) => { const m = /^\s*(\d+)\./.exec((cell.textContent || '').replace(/\u00a0/g, ' ')); return m ? Number(m[1]) - 1 : -1; };
   const blockPlaylist = (e) => {
     const t = e.target;
@@ -617,7 +613,7 @@
       if (window.__infoTab) window.__infoTab.setSong(s.status === 'closed' || s.status === 'stopped' ? null : s);
       const status = webamp.getMediaStatus();
       if (s.status === 'closed' || s.status === 'stopped') {
-        if (window.__infoTab && window.__infoTab.setQueue) window.__infoTab.setQueue([], null, []);
+        if (window.__playlistView) window.__playlistView.setQueue([], null, []);
         if (status === 'PLAYING') webamp.pause();
         return;
       }
@@ -651,7 +647,7 @@
       lastQueue = q;
       const hist = Array.isArray(s.history) ? s.history.slice(-30) : [];
       lastHist = hist;
-      if (window.__infoTab && window.__infoTab.setQueue) window.__infoTab.setQueue(hist, s, q);
+      if (window.__playlistView) window.__playlistView.setQueue(hist, s, q);
       const qSig = hist.map((x) => x.id + '~' + x.title).join('|') + '||' + q.map((x) => x.id + '~' + x.title).join('|');
       // the song's name counts too: some sources keep the same id (or give none) from one song to the next
       const songKey = `${s.id}|${s.artist}|${s.title}`;

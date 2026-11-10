@@ -1,0 +1,359 @@
+// The playlist window, reworked: your libraries on the left (Spotify, YouTube and local playlists in folders) and on the
+// right the songs of what is picked there; NOW PLAYING (the queue) is picked by default. It is drawn over the skin's own
+// playlist window with the skin's playlist font and colours, so every skin keeps its look. The five buttons at the
+// bottom are the skin's own buttons with new words: FIND, LIKE, COPY, SORT and INFO (it was LIST OPTS).
+import { skinImage, paintWord } from './download-bar.js';
+
+const ROW = 13;
+const BUTTONS = [ // the skin's button, where it sits inside the bottom pieces of the window, and its new job
+  { sel: '#playlist-add-menu', piece: 'left', x: 14, word: 'FIND', tip: 'Find a song in the list on the right (Enter searches a whole library)' },
+  { sel: '#playlist-remove-menu', piece: 'left', x: 43, word: 'LIKE', tip: 'Spotify: like the song. YouTube: save it to Minapp likes. Local: copy it to Liked' },
+  { sel: '#playlist-selection-menu', piece: 'left', x: 72, word: 'COPY', tip: 'Copy the picked playlist: Spotify to YouTube / YT Music, or YouTube / YT Music to Spotify' },
+  { sel: '#playlist-misc-menu', piece: 'left', x: 101, word: 'SORT', tip: 'Shuffle, or sort the list' },
+  { sel: '#playlist-list-menu', piece: 'right', x: -44, word: 'INFO', tip: 'Lyrics, the artist and the album' },
+];
+const SORTS = [['shuffle', 'SHUF'], ['az', 'A-Z'], ['artist', 'ARTST'], ['reverse', 'REV']];
+
+export function initPlaylistView(webamp, api) {
+  let root = null, left = null, right = null, line = null, data = null, loadedAt = 0, skinKey = '';
+  let pick = { kind: 'queue' }, songs = null, results = null, busy = false, find = null, sort = 'order', sortOpen = false;
+  let lTop = 0, rTop = 0, lHover = -1, rHover = -1, lRows = [], rRows = [], flash = '', flashUntil = 0;
+  let queue = { hist: [], cur: null, q: [] }, qSig = '', rMax = 0, barSet = -1;
+  const open = { spotify: true, youtube: false, ytmusic: false, local: false };
+  try { Object.assign(open, JSON.parse(localStorage.getItem('minapp.pvOpen') || '{}')); } catch {}
+  const skin = () => { try { return webamp.store.getState().display.skinPlaylistStyle || {}; } catch { return {}; } };
+  const colours = () => { const s = skin(); return { bg: s.normalbg || '#000', fg: s.normal || '#00ff00', cur: s.current || '#fff', sel: s.selectedbg || '#0000c6', font: s.font || 'Arial' }; };
+  const win = () => document.querySelector('#playlist-window');
+  const n = (x) => String(x || '').toLowerCase();
+
+  // ---------- the left side: libraries ----------
+  function buildLeft() {
+    lRows = [{ t: 'NOW PLAYING', kind: 'queue' }];
+    const folder = (key, label, list, empty) => {
+      lRows.push({ t: `${open[key] ? '-' : '+'} ${label}`, folder: key });
+      if (!open[key]) return;
+      if (!data) lRows.push({ t: '   Loading...', dim: true });
+      else if (!list.length) lRows.push({ t: '   ' + empty, dim: true });
+      for (const r of list) lRows.push({ ...r, t: '   ' + r.t });
+    };
+    const sp = data && data.spotify;
+    let spl = [];
+    if (sp && sp.status === 'ok') spl = [{ t: 'Liked songs', kind: 'spotify', id: `spotify:user:${sp.userId}:collection` }, ...sp.items.map((p) => ({ t: p.name, kind: 'spotify', id: 'spotify:playlist:' + p.id })),
+      { t: '[ Add a Spotify-made playlist ]', kind: 'spotaddlink', act: true }]; // Daily Mix and the like: Spotify does not list them for apps
+    else if (sp && (sp.status === 'login' || sp.status === 'rescope')) spl = [{ t: '[ Connect ]', kind: 'spotconnect', act: true }];
+    folder('spotify', 'SPOTIFY', spl, 'Could not load');
+    const yt = data && data.youtube, ytl = [];
+    if (yt) {
+      if (yt.link) ytl.push({ t: yt.link, kind: 'ytlink' });
+      for (const p of yt.items) ytl.push({ t: p.name, kind: 'youtube', id: p.id });
+      for (const p of yt.saved || []) ytl.push({ t: p.name, kind: 'ytsaved', id: p.name });
+      if (!yt.signedIn) ytl.push({ t: '[ Sign in ]', kind: 'ytsignin', act: true });
+    }
+    folder('youtube', 'YOUTUBE', ytl, yt && yt.loading ? 'Loading...' : 'No playlists');
+    const ym = data && data.ytmusic, yml = [];
+    if (ym) { for (const p of ym.items) yml.push({ t: p.name, kind: 'ytmusic', id: p.id }); if (!ym.signedIn) yml.push({ t: '[ Sign in ]', kind: 'ytsignin', act: true }); }
+    folder('ytmusic', 'YT MUSIC', yml, ym && ym.loading ? 'Loading...' : 'No playlists');
+    folder('local', 'LOCAL', ((data && data.local) || []).map((p) => ({ t: p.name, kind: 'local', id: p.name })), 'No playlists');
+  }
+  const same = (r) => r.kind === pick.kind && (r.kind === 'queue' || (r.folder ? r.folder === pick.key : (r.id || '') === (pick.id || '')));
+
+  // ---------- the right side: the queue, a playlist's songs or search results ----------
+  function buildRight() {
+    rRows = [];
+    if (find !== null) rRows.push({ t: 'Find: ' + find + (Date.now() % 1000 < 550 ? '_' : ' '), input: true });
+    let list = [];
+    if (pick.kind === 'queue') {
+      queue.hist.forEach((x, i) => list.push({ x, off: i - queue.hist.length }));
+      if (queue.cur) list.push({ x: queue.cur, off: 0 });
+      queue.q.forEach((x, i) => list.push({ x, off: i + 1 }));
+      list = list.map((e) => ({ t: (e.x.artist ? e.x.artist + ' - ' : '') + e.x.title, d: e.x.duration, off: e.off, now: e.off === 0, dim: e.off < 0, hint: e.x.hint }));
+      if (!list.length) { rRows.push({ t: 'Nothing is playing.', dim: true }); return; }
+    } else if (pick.kind === 'search') {
+      if (busy) { rRows.push({ t: 'Searching...', dim: true }); return; }
+      if (!results) { rRows.push({ t: find === null ? 'Press FIND to search ' + pick.name + '.' : 'Type, then Enter to search ' + pick.name + '.', dim: true }); return; }
+      list = results.map((r) => ({ t: r.t, found: r }));
+      if (!list.length) { rRows.push({ t: 'Nothing found.', dim: true }); return; }
+    } else {
+      if (!songs) { rRows.push({ t: 'Loading songs...', dim: true }); return; }
+      list = songs.map((s) => ({ t: s.t, found: s }));
+      if (!list.length) { rRows.push({ t: 'No songs.', dim: true }); return; }
+    }
+    if (find && pick.kind !== 'search') list = list.filter((r) => n(r.t).includes(n(find)));
+    const title = (r) => n(r.t.includes(' - ') && pick.kind === 'queue' ? r.t.split(' - ').slice(1).join(' - ') : r.t);
+    const artist = (r) => n(r.t.split(' - ')[pick.kind === 'queue' ? 0 : 1] || '');
+    if (sort === 'az') list.sort((a, b) => title(a).localeCompare(title(b)));
+    if (sort === 'artist') list.sort((a, b) => artist(a).localeCompare(artist(b)) || title(a).localeCompare(title(b)));
+    if (sort === 'reverse') list.reverse();
+    if (!list.length) rRows.push({ t: 'Nothing found.', dim: true });
+    rRows.push(...list);
+  }
+
+  // ---------- drawing ----------
+  const mmss = (s) => (s > 0 ? `${Math.floor(s / 60)}:${String(Math.round(s) % 60).padStart(2, '0')}` : '');
+  function paint(box, rows, top, hover, side) {
+    const { fg, cur, sel } = colours();
+    const vis = Math.max(1, Math.floor(box.clientHeight / ROW));
+    const maxTop = Math.max(0, rows.length - vis);
+    top = Math.max(0, Math.min(top, maxTop));
+    box.textContent = '';
+    rows.slice(top, top + vis).forEach((r, i) => {
+      const d = document.createElement('div');
+      const picked = side === 'L' && !r.dim && (r.kind || r.folder) && same(r.folder ? { kind: 'search', folder: r.folder } : r);
+      const live = side === 'L' ? !r.dim : !!(r.found || (r.off && !r.hint));
+      const on = picked || r.now || (live && top + i === hover);
+      d.dataset.i = String(top + i);
+      d.style.cssText = `position:absolute;left:0;right:0;top:${i * ROW}px;height:${ROW}px;line-height:${ROW}px;white-space:nowrap;overflow:hidden;padding:0 3px;box-sizing:border-box;` +
+        (on ? `background:${sel};` : '') + `color:${r.now || picked || r.folder || r.input || r.kind === 'queue' ? cur : fg};` + (r.dim ? 'opacity:.55;' : '') + (live ? 'cursor:pointer;' : '');
+      if (r.d) { const t = document.createElement('span'); t.style.cssText = 'float:right;padding-left:4px;'; t.textContent = mmss(r.d); d.appendChild(t); }
+      d.appendChild(document.createTextNode(r.t));
+      box.appendChild(d);
+    });
+    return top;
+  }
+  function draw() {
+    if (!root) return;
+    buildLeft(); buildRight();
+    lTop = paint(left, lRows, lTop, lHover, 'L');
+    rTop = paint(right, rRows, rTop, rHover, 'R');
+    // the skin's scrollbar follows the right side, and dragging it scrolls the right side
+    rMax = Math.max(0, rRows.length - Math.max(1, Math.floor(right.clientHeight / ROW)));
+    const pct = rMax ? (rTop / rMax) * 100 : 0;
+    if (Math.abs(pct - barSet) > 0.01) { barSet = pct; try { webamp.store.dispatch({ type: 'SET_PLAYLIST_SCROLL_POSITION', position: pct }); } catch {} }
+    if (sortOpen) sortMenu(); else { const m = document.getElementById('pv-sort'); if (m) m.remove(); }
+    buttons(true);
+  }
+
+  // ---------- placing it over the skin's playlist window ----------
+  let style = null;
+  function place() {
+    const w = win(), tracks = w && w.querySelector('.playlist-tracks');
+    const show = !!(tracks && w.offsetParent !== null);
+    document.documentElement.classList.toggle('pv-on', show);
+    if (!show) { if (root) root.style.display = 'none'; hideButtons(); return; }
+    if (!root) build();
+    // the first time: make the window wider so the libraries fit beside the songs (it can still be resized)
+    try {
+      if (!localStorage.getItem('minapp.pvWide')) {
+        localStorage.setItem('minapp.pvWide', '1');
+        const g = webamp.store.getState().windows.genWindows.playlist, sz = (g && g.size) || [0, 0];
+        if (sz[0] < 4 || sz[1] < 4) webamp.store.dispatch({ type: 'WINDOW_SIZE_CHANGED', windowId: 'playlist', size: [Math.max(4, sz[0]), Math.max(4, sz[1])] }); // 12 songs in view
+      }
+    } catch {}
+    const r = tracks.getBoundingClientRect(), { bg, fg, font } = colours();
+    const lw = Math.max(90, Math.round(r.width * 0.36));
+    const key = [r.left, r.top, r.width, r.height, bg, fg, font, lw].join();
+    root.style.display = '';
+    if (key !== skinKey) {
+      skinKey = key;
+      root.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;z-index:30;background:${bg};font:9px/${ROW}px ${font},Arial,sans-serif;user-select:none;overflow:hidden;`;
+      left.style.cssText = `position:absolute;left:0;top:0;bottom:0;width:${lw}px;overflow:hidden;`;
+      line.style.cssText = `position:absolute;left:${lw}px;top:0;bottom:0;width:1px;background:${fg};opacity:.5;`;
+      right.style.cssText = `position:absolute;left:${lw + 1}px;top:0;bottom:0;right:0;overflow:hidden;`;
+      draw();
+    }
+    buttons(false);
+    try { // the scrollbar was dragged
+      const pos = webamp.store.getState().display.playlistScrollPosition;
+      if (barSet >= 0 && Math.abs(pos - barSet) > 0.5) { barSet = pos; rTop = Math.round((pos / 100) * rMax); draw(); }
+    } catch {}
+    if (Date.now() - loadedAt > 5 * 60000) load(false);
+  }
+  function build() {
+    style = document.createElement('style');
+    // the skin's own rows (Webamp's copy of the queue) stay underneath, out of sight
+    style.textContent = 'html.pv-on #playlist-window .playlist-track-titles, html.pv-on #playlist-window .playlist-track-durations { visibility: hidden; }';
+    document.head.appendChild(style);
+    root = document.createElement('div'); root.id = 'playlist-view';
+    left = document.createElement('div'); line = document.createElement('div'); right = document.createElement('div');
+    root.append(left, line, right);
+    (document.getElementById('webamp') || document.body).appendChild(root);
+    const rowOf = (e) => { const d = e.target.closest && e.target.closest('[data-i]'); return d ? Number(d.dataset.i) : -1; };
+    left.addEventListener('mousemove', (e) => { const i = rowOf(e); if (i !== lHover) { lHover = i; draw(); } });
+    right.addEventListener('mousemove', (e) => { const i = rowOf(e); if (i !== rHover) { rHover = i; draw(); } });
+    root.addEventListener('mouseleave', () => { lHover = rHover = -1; draw(); });
+    left.addEventListener('click', (e) => clickLeft(lRows[rowOf(e)], false));
+    left.addEventListener('dblclick', (e) => clickLeft(lRows[rowOf(e)], true));
+    right.addEventListener('click', (e) => clickRight(rRows[rowOf(e)]));
+    left.addEventListener('wheel', (e) => { e.preventDefault(); lTop += e.deltaY > 0 ? 2 : -2; draw(); }, { passive: false });
+    right.addEventListener('wheel', (e) => { e.preventDefault(); rTop += e.deltaY > 0 ? 3 : -3; draw(); }, { passive: false });
+    root.addEventListener('mousedown', (e) => e.stopPropagation());
+    root.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); });
+  }
+
+  // ---------- clicks ----------
+  function clickLeft(r, twice) {
+    if (!r || r.dim) return;
+    if (r.folder) {
+      if (!twice) { open[r.folder] = !open[r.folder]; try { localStorage.setItem('minapp.pvOpen', JSON.stringify(open)); } catch {} }
+      pick = { kind: 'search', key: r.folder, folder: r.folder, name: { spotify: 'Spotify', youtube: 'YouTube', ytmusic: 'YouTube Music', local: 'your files' }[r.folder] };
+      results = null; rTop = 0; draw(); return;
+    }
+    if (r.kind === 'spotaddlink') { api.spotAddLink().then((ok) => { if (ok) load(true); }).catch(() => {}); return; }
+    if (r.act) { api.listsPlay(r.kind, r.id || '', r.t.trim()).then(() => load(true)).catch(() => {}); return; }
+    if (r.kind === 'queue') { pick = { kind: 'queue' }; rTop = 0; draw(); return; }
+    if (twice) { say('PLAYING'); api.listsPlay(r.kind, r.id || '', r.t.trim()).catch(() => {}); return; } // double-click: play the whole playlist
+    if (same(r)) return;
+    const mine = pick = { kind: r.kind, id: r.id || '', name: r.t.trim() };
+    songs = null; rTop = 0; draw();
+    api.listsSongs(r.kind, r.id || '').then((x) => { if (pick === mine) { songs = x || []; draw(); } }).catch(() => { if (pick === mine) { songs = []; draw(); } });
+  }
+  function clickRight(r) {
+    if (!r) return;
+    if (r.off && !r.hint && window.__queueJump) { window.__queueJump(r.off); say(r.off > 0 ? 'JUMPING' : 'GOING BACK'); return; }
+    if (r.found) { say('PLAYING'); api.listsFound(r.found).catch((e) => api.log('play failed: ' + (e && e.message))); }
+  }
+
+  // ---------- the five buttons: the skin's own pictures with new words ----------
+  const btnEls = {};
+  function hideButtons() { for (const k in btnEls) btnEls[k].style.display = 'none'; }
+  function buttons(redraw) {
+    const w = win(); if (!w) return;
+    for (const b of BUTTONS) {
+      const el = w.querySelector(b.sel); if (!el) continue;
+      const r = el.getBoundingClientRect();
+      let c = btnEls[b.word];
+      if (!c) {
+        c = btnEls[b.word] = document.createElement('canvas');
+        c.title = b.tip; c.width = 22; c.height = 18;
+        c.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });
+        c.addEventListener('click', (e) => { e.stopPropagation(); press(b.word); });
+        (document.getElementById('webamp') || document.body).appendChild(c);
+      }
+      c.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;z-index:31;cursor:pointer;image-rendering:pixelated;`;
+      const pressed = (b.word === 'FIND' && find !== null) || (b.word === 'SORT' && sortOpen) || (b.word === 'INFO' && infoOpen());
+      const src = skinImage(`#webamp .playlist-bottom-${b.piece}`), key = src + pressed + r.width;
+      if (c._key === key && !redraw) continue;
+      c._key = key;
+      paintButton(c, src, b, pressed, w);
+    }
+  }
+  const infoOpen = () => { const p = document.getElementById('info-tab'); return !!(p && p.style.display !== 'none'); };
+  const images = new Map();
+  function img(src, then) {
+    const m = /url\("?(.*?)"?\)$/.exec(src || ''); if (!m) return;
+    let im = images.get(m[1]);
+    if (im && im.complete) { then(im); return; }
+    if (!im) { im = new Image(); im.src = m[1]; images.set(m[1], im); }
+    im.addEventListener('load', () => then(im), { once: true });
+  }
+  function paintButton(c, src, b, pressed, w) {
+    img(src, (im) => {
+      const g = c.getContext('2d', { willReadFrequently: true });
+      const x = b.piece === 'right' ? im.width + b.x : b.x; // LIST OPTS sits a fixed distance from the right edge
+      g.clearRect(0, 0, 22, 18);
+      g.drawImage(im, x, 8, 22, 18, 0, 0, 22, 18);
+      paintWord(g, 22, 18, 2, b.word, true);
+      if (pressed) { g.globalCompositeOperation = 'difference'; g.fillStyle = 'rgba(255,255,255,.25)'; g.fillRect(2, 2, 18, 14); g.globalCompositeOperation = 'source-over'; }
+    });
+  }
+  function sortMenu() {
+    let m = document.getElementById('pv-sort');
+    const anchor = btnEls.SORT; if (!anchor) return;
+    const a = anchor.getBoundingClientRect();
+    if (!m) {
+      m = document.createElement('div'); m.id = 'pv-sort';
+      SORTS.forEach(([k, word]) => {
+        const c = document.createElement('canvas'); c.width = 30; c.height = 18; c.dataset.k = k; c.title = word;
+        c.style.cssText = 'display:block;cursor:pointer;image-rendering:pixelated;';
+        c.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });
+        c.addEventListener('click', (e) => { e.stopPropagation(); chooseSort(k); });
+        m.appendChild(c);
+        img(skinImage('#webamp .playlist-bottom-left'), (im) => {
+          const g = c.getContext('2d', { willReadFrequently: true });
+          g.drawImage(im, 101, 8, 22, 18, 0, 0, 22, 18); g.drawImage(im, 108, 8, 15, 18, 15, 0, 15, 18); // the SORT button's face, a little wider
+          paintWord(g, 30, 18, 2, word, true);
+          if (k === sort || (k === 'shuffle' && shuffleOn())) { g.globalCompositeOperation = 'difference'; g.fillStyle = 'rgba(255,255,255,.25)'; g.fillRect(2, 2, 26, 14); g.globalCompositeOperation = 'source-over'; }
+        });
+      });
+      (document.getElementById('webamp') || document.body).appendChild(m);
+    }
+    m.style.cssText = `position:fixed;left:${a.left}px;top:${a.top - SORTS.length * 18}px;z-index:32;`;
+  }
+  const shuffleOn = () => { try { return !!webamp.store.getState().media.shuffle; } catch { return false; } };
+  function chooseSort(k) {
+    if (k === 'shuffle') { const sh = document.querySelector('#webamp #shuffle'); if (sh) sh.click(); say(shuffleOn() ? 'SHUFFLE OFF' : 'SHUFFLE ON'); }
+    else sort = sort === k ? 'order' : k;
+    sortOpen = false; rTop = 0; draw();
+  }
+  function press(word) {
+    if (word === 'FIND') { find = find === null ? '' : null; sortOpen = false; if (find === null && pick.kind === 'search') results = null; rTop = 0; }
+    else if (word === 'SORT') sortOpen = !sortOpen;
+    else if (word === 'LIKE') { api.queueLike().then(say, () => say('COULD NOT SAVE')); return; }
+    else if (word === 'INFO') { if (window.__infoTab) window.__infoTab.set(!infoOpen()); setTimeout(() => buttons(true), 50); return; }
+    else if (word === 'COPY') { copy(); return; }
+    draw();
+  }
+  function copy() {
+    const ok = ['spotify', 'youtube', 'ytmusic', 'ytsaved', 'ytlink'].includes(pick.kind);
+    if (!ok) { say('PICK A PLAYLIST'); return; }
+    say(pick.kind === 'spotify' ? 'COPYING TO YOUTUBE + YT MUSIC' : 'COPYING TO SPOTIFY');
+    api.listsPlay('copy-' + pick.kind, pick.id, pick.name).then(() => load(true)).catch(() => {});
+  }
+  // a short note in the title bar's place for a few seconds (LIKED, COPYING...)
+  function say(t) {
+    flash = String(t || ''); flashUntil = Date.now() + 3000;
+    let f = document.getElementById('pv-flash');
+    const w = win(); if (!w) return;
+    if (!f) { f = document.createElement('div'); f.id = 'pv-flash'; (document.getElementById('webamp') || document.body).appendChild(f); }
+    const r = right.getBoundingClientRect(), { sel, cur, font } = colours();
+    f.textContent = flash;
+    f.style.cssText = `position:fixed;left:${r.left}px;top:${r.bottom - ROW}px;width:${r.width}px;height:${ROW}px;line-height:${ROW}px;z-index:31;background:${sel};color:${cur};font:9px ${font},Arial,sans-serif;text-align:center;pointer-events:none;`;
+    setTimeout(() => { if (Date.now() >= flashUntil && f) f.remove(); }, 3100);
+  }
+
+  // ---------- typing while FIND is on ----------
+  document.addEventListener('keydown', (e) => {
+    if (!root || root.style.display === 'none' || (find === null && !sortOpen) || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'Escape') { find = null; sortOpen = false; if (pick.kind === 'search') results = null; }
+    else if (find === null) return;
+    else if (e.key === 'Enter') {
+      if (pick.kind === 'search' && find.trim()) { search(); }
+      else { const r = rRows.find((x) => x.found || (x.off && !x.hint)); if (r) clickRight(r); }
+    } else if (e.key === 'Backspace') find = find.slice(0, -1);
+    else if (e.key.length === 1 && find.length < 40) find += e.key;
+    else return;
+    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+    rTop = 0; draw();
+  }, true);
+  async function search() {
+    const p = pick; busy = true; results = null; draw();
+    let res = [];
+    try { res = await api.listsSearch(p.key, find.trim(), ''); } catch (err) { api.log('search failed: ' + (err && err.message)); }
+    if (pick !== p) return;
+    busy = false; results = res || []; draw();
+  }
+
+  async function load(force) {
+    loadedAt = Date.now();
+    try { data = await api.listsAll(!!force); } catch (e) { api.log('playlists failed: ' + (e && e.message)); }
+    draw();
+  }
+
+  // called with every poll: played songs, the playing one and the ones up next
+  function setQueue(hist, cur, q) {
+    const pickQ = (x) => ({ artist: x.artist || '', title: x.title || '', duration: x.duration || 0, hint: !!x.hint });
+    queue = { hist: (hist || []).map(pickQ), cur: cur && cur.title ? pickQ(cur) : null, q: (q || []).map(pickQ) };
+    const sig = JSON.stringify(queue);
+    if (sig === qSig) return;
+    const first = !qSig; qSig = sig;
+    if (root && pick.kind === 'queue') {
+      buildRight();
+      const i = rRows.findIndex((r) => r.now), vis = Math.floor(right.clientHeight / ROW) || 4;
+      if (i >= 0 && (first || i < rTop || i >= rTop + vis)) rTop = Math.max(0, i - 1);
+      draw();
+    }
+  }
+
+  // the first time after this update: show the playlist window (it was hidden while the queue lived elsewhere)
+  setTimeout(() => {
+    try {
+      if (localStorage.getItem('minapp.pvShown')) return;
+      localStorage.setItem('minapp.pvShown', '1');
+      const g = webamp.store.getState().windows.genWindows.playlist;
+      if (g && !g.open) webamp.store.dispatch({ type: 'TOGGLE_WINDOW', windowId: 'playlist' });
+    } catch {}
+  }, 2500);
+  setInterval(() => { if (!document.hidden) place(); }, 250);
+  setInterval(() => { if (root && find !== null && !document.hidden) draw(); }, 500); // the blinking cursor
+  window.__playlistView = { setQueue, load, draw };
+}

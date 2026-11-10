@@ -1,5 +1,13 @@
 # What's new in Minapp
 
+## 1.9.25
+- The playlist window is back, now with your libraries inside: Spotify, YouTube, YT Music and local playlists on the left, their songs (or what's playing now) on the right. Double-click a playlist to play it all.
+- Its buttons are now FIND, LIKE, COPY (copy a playlist between Spotify and YouTube / YT Music), SORT and INFO, drawn from your skin's own buttons.
+- YT Music: your playlists and Liked music, played in YouTube Music.
+- Spotify-made playlists (Daily Mix, Discover Weekly...): add them with "Add a Spotify-made playlist" by pasting their link.
+- More songs in view, and the skin's scrollbar now scrolls the list.
+- The INFO panel wears your skin's playlist frame.
+
 ## 1.9.24
 - The PL button is now LIB: it opens and closes your Libraries (Spotify, YouTube and local playlists).
 - INFO has a new QUEUE tab instead of the old playlist window, with FIND (type to filter, Enter plays, Esc closes), LIKE, SKIP, SORT (shuffle, A-Z, by artist, reverse) and LISTS.

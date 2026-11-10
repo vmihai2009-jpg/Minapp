@@ -834,6 +834,9 @@ async function getSpotifyPlaylists(force) {
       }
       path = j.next ? j.next.replace('https://api.spotify.com/v1', '') : null;
     }
+    // playlists Spotify made (Daily Mix, Discover Weekly...) are left out of this list by Spotify for apps like this one:
+    // the ones pasted as a link are added (see spotify:addlink)
+    for (const l of readCfg().spotLinks || []) if (!items.some((p) => p.id === l.id)) items.push({ id: l.id, name: l.name, tracks: null, mine: false, link: true });
     const data = { status: 'ok', userId: me.id, items };
     spotLists = { at: Date.now(), data };
     log('playlists: ' + items.length);
@@ -995,7 +998,10 @@ ipcMain.handle('lists:all', async (_e, force) => {
     // copied from Spotify; a copy that is also on the YouTube account is listed once, as the account's playlist
     saved: (readCfg().ytLists || []).filter((x) => !(ytApi.signedIn() && ytApi.playlists().some((p) => p.title === x.name))).map((x) => ({ name: x.name, n: x.ids.length })),
   };
-  return { spotify, youtube, local: library.playlists().filter((p) => p.count > 0).map((p) => ({ name: p.name, n: p.count })) };
+  // YouTube Music keeps its playlists on the same Google account as YouTube: the same lists, played in YouTube Music,
+  // plus Liked music (the songs liked in either app)
+  const ytmusic = { signedIn: youtube.signedIn, loading: youtube.loading, items: youtube.signedIn ? [{ id: 'LM', name: 'Liked music' }, ...youtube.items] : [] };
+  return { spotify, youtube, ytmusic, local: library.playlists().filter((p) => p.count > 0).map((p) => ({ name: p.name, n: p.count })) };
 });
 // search one library: [{ t (the line shown), kind, ... }] for the panel, played with lists:found
 ipcMain.handle('lists:search', async (_e, key, q, only) => {
@@ -1016,9 +1022,9 @@ ipcMain.handle('lists:search', async (_e, key, q, only) => {
       ...items('playlists').map((x) => ({ t: 'LIST ' + x.name, kind: 'spotify', uri: x.uri })),
     ];
   }
-  if (key === 'youtube') {
+  if (key === 'youtube' || key === 'ytmusic') {
     const list = await library.ytEntries('ytsearch12:' + q).catch(() => []);
-    return list.map((v) => ({ t: v.title, kind: 'youtube', id: v.id, all: list.map((x) => x.id) }));
+    return list.map((v) => ({ t: v.title, kind: key, id: v.id, all: list.map((x) => x.id) }));
   }
   const n = (x) => x.toLowerCase();
   const out = [];
@@ -1026,6 +1032,29 @@ ipcMain.handle('lists:search', async (_e, key, q, only) => {
   return out;
 });
 // the songs of one playlist, for searching inside it: [{ t, ...how to play it }]
+// a playlist's songs from Spotify's public embed page (works for playlists Spotify made, which its Web API refuses)
+async function spotEmbedSongs(pid) {
+  try {
+    const r = await fetch('https://open.spotify.com/embed/playlist/' + encodeURIComponent(pid), { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(12000) });
+    const html = await r.text();
+    const m = /<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/.exec(html);
+    const j = m ? JSON.parse(m[1]) : null;
+    const ent = j && j.props && j.props.pageProps && j.props.pageProps.state && j.props.pageProps.state.data && j.props.pageProps.state.data.entity;
+    return { name: (ent && (ent.name || ent.title)) || '', songs: ((ent && ent.trackList) || []).filter((t) => t && t.uri).map((t) => ({ title: t.title || '', artist: t.subtitle || '', uri: t.uri })) };
+  } catch (e) { log('embed songs: ' + e.message); return { name: '', songs: [] }; }
+}
+// paste a Spotify playlist link (for the playlists Spotify made, which it does not list for apps)
+ipcMain.handle('spotify:addlink', async () => {
+  const link = await askText({ title: 'Add a Spotify playlist', label: 'Paste the playlist link (Share > Copy link to playlist in Spotify):', placeholder: 'https://open.spotify.com/playlist/...', button: 'Add' });
+  const m = /playlist[/:]([A-Za-z0-9]{22})/.exec(String(link || ''));
+  if (!m) return false;
+  const e = await spotEmbedSongs(m[1]);
+  const list = (readCfg().spotLinks || []).filter((x) => x.id !== m[1]);
+  list.push({ id: m[1], name: e.name || 'Spotify playlist' });
+  writeCfg({ spotLinks: list });
+  spotLists = null;
+  return true;
+});
 ipcMain.handle('lists:songs', async (_e, kind, id) => {
   const by = (t) => (t.artist ? t.title + ' - ' + t.artist : t.title);
   if (kind === 'spotify') {
@@ -1040,17 +1069,18 @@ ipcMain.handle('lists:songs', async (_e, kind, id) => {
       for (const x of (j && j.items) || []) { const t = x.item || x.track; if (t && t.uri) out.push({ t: by({ title: t.name, artist: t.artists && t.artists[0] ? t.artists[0].name : '' }), kind: 'spotify', uri: t.uri, ctx: liked ? '' : id }); }
       p = j && j.next ? j.next.replace('https://api.spotify.com/v1', '') : null;
     }
+    if (!out.length && !liked) for (const t of (await spotEmbedSongs(pid)).songs) out.push({ t: by(t), kind: 'spotify', uri: t.uri, ctx: id });
     return out;
   }
   if (kind === 'local') return library.tracks(String(id || '')).map((t, i) => ({ t: t.title, kind: 'local', list: id, i }));
   let vids = [];
   try {
-    if (kind === 'youtube') vids = await ytApi.titles(await ytApi.videoIds(id));
+    if (kind === 'youtube' || kind === 'ytmusic') vids = await ytApi.titles(await ytApi.videoIds(kind === 'ytmusic' && id === 'LM' ? 'LL' : id));
     else if (kind === 'ytlink') { const t = readCfg().yt || {}; vids = await library.ytEntries(t.list ? 'https://www.youtube.com/playlist?list=' + t.list : 'https://www.youtube.com/watch?v=' + t.v); }
     else if (kind === 'ytsaved') { const l = (readCfg().ytLists || []).find((x) => x.name === id); if (l) vids = ytApi.signedIn() ? await ytApi.titles(l.ids) : []; }
   } catch (e) { log('playlist songs: ' + e.message); }
   const all = vids.map((v) => v.id);
-  return vids.map((v) => ({ t: v.title, kind: 'youtube', id: v.id, all }));
+  return vids.map((v) => ({ t: v.title, kind: kind === 'ytmusic' ? 'ytmusic' : 'youtube', id: v.id, all, list: kind === 'ytmusic' ? id : '' }));
 });
 ipcMain.handle('lists:found', async (_e, r) => {
   if (!r || typeof r !== 'object') return;
@@ -1061,16 +1091,24 @@ ipcMain.handle('lists:found', async (_e, r) => {
     return setSource('youtube');
   }
   if (r.kind === 'local') return playLocal(String(r.list || ''), Number(r.i) || 0);
+  if (r.kind === 'ytmusic' && /^[\w-]{11}$/.test(String(r.id))) return playYtMusic('watch?v=' + r.id + (r.list ? '&list=' + encodeURIComponent(r.list) : ''));
 });
+// YouTube Music: switch to it and open a playlist or song in its window (it starts playing there)
+async function playYtMusic(what) {
+  await setSource('ytmusic');
+  if (ytmWin) ytmWin.loadURL('https://music.youtube.com/' + what);
+}
 ipcMain.handle('lists:play', async (_e, kind, id, name) => {
   if (kind.startsWith('copy-')) {
     if (copying || downloading) return;
     const what = kind.slice(5), nm = String(name || 'Playlist').slice(0, 100);
+    if (what === 'ytmusic') return copyToSpotify('youtube', id === 'LM' ? 'LL' : id, nm);
     return what === 'spotify' ? copyToYouTube(/^spotify:user:/.test(id) ? 'liked' : String(id).split(':').pop(), nm) : copyToSpotify(what, id, nm);
   }
   if (kind === 'ytsaved') { const l = (readCfg().ytLists || []).find((x) => x.name === id); if (l) { writeCfg({ yt: { ids: l.ids, list: null, v: null, name: l.name } }); await setSource('youtube'); } return; }
   if (kind === 'spotify') return playSpotifyContext(String(id || ''));
   if (kind === 'youtube') { const p = ytApi.playlists().find((x) => x.id === id); if (p) await playMyPlaylist(p); return; }
+  if (kind === 'ytmusic') return playYtMusic('watch?list=' + encodeURIComponent(String(id || '')));
   if (kind === 'ytlink') return setSource('youtube');
   if (kind === 'local') return playLocal(String(id || ''));
   if (kind === 'ytsignin') return ytApi.signIn();

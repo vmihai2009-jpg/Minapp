@@ -3,8 +3,8 @@
 // The two choices are skin-style push buttons in the panel's top bar; X (or the Player menu) hides the panel.
 import { setText, skinImage, textBg, selBg, blendFor, paintWord } from './download-bar.js';
 
-const W = 275, H = 116, PAD = 7, ROW = 9, HEAD = 20, VIS = 10, CW = 50;
-const KINDS = [['queue', 'QUEUE'], ['lyrics', 'LYRICS'], ['artist', 'ARTIST'], ['album', 'ALBUM']];
+const W = 275, H = 116, PAD = 15, ROW = 9, HEAD = 22, VIS = 9, CW = 46, FL = 12, FR = 20, FB = 9; // FL/FR/FB: the skin frame's left, right and bottom edges
+const KINDS = [['lyrics', 'LYRICS'], ['artist', 'ARTIST'], ['album', 'ALBUM']];
 const SAY = {
   queue: ['Nothing is playing.', '', '', 'Nothing found.'], // what each tab says while it waits, fails or finds nothing
   lyrics: ['Play a song to see its lyrics.', 'Looking for the lyrics...', 'Could not reach the lyrics service.', 'No lyrics found for this song.'],
@@ -37,7 +37,7 @@ function wrap(t, width) {
 export function initInfoTab(webamp, api, getWidgetMode) {
   let open = false, kind = 'lyrics', panel = null, skinKey = '';
   let song = null, songKey = '', data = {}, rows = [], top = 0, cur = -1, handsOff = 0, ticket = 0, hover = -1, hasComma = true;
-  try { open = localStorage.getItem('minapp.infoTab') === '1'; const k = localStorage.getItem('minapp.infoKind'); if (k === 'artist' || k === 'album' || k === 'queue') kind = k; } catch {}
+  try { open = localStorage.getItem('minapp.infoTab') === '1'; const k = localStorage.getItem('minapp.infoKind'); if (k === 'artist' || k === 'album') kind = k; } catch {}
   const skin = () => { try { return webamp.store.getState().display.skinPlaylistStyle || {}; } catch { return {}; } };
   const colours = () => { const st = skin(); return { bg: textBg(st.normalbg || '#000'), hi: st.current || '#fff', sel: selBg(st.selectedbg || '#0000c6') }; };
   let queue = { hist: [], cur: null, q: [] }, qSig = '', qFind = null, qSort = 'order', sortOpen = false, flash = '', flashUntil = 0;
@@ -162,7 +162,7 @@ export function initInfoTab(webamp, api, getWidgetMode) {
         (now ? `background:${sel};` : '') + (r.act && top + i === hover ? `background:${sel};` : '') +
         (r.dim ? 'opacity:.6;' : timed && r.li !== undefined && !now ? 'opacity:.55;' : '') + (r.bright || now ? 'filter:brightness(1.35);' : '');
       const t = document.createElement('div');
-      const x = (r.mid ? Math.round((W - 2 - r.t.length * 5) / 2) : PAD) - 2;
+      const x = (r.mid ? Math.round((W - FL - FR - r.t.length * 5) / 2) : PAD - FL) - 2;
       t.style.cssText = `position:absolute;left:${x}px;top:1px;height:6px;white-space:nowrap;${now || r.act ? blend : ''}`;
       setText(t, r.t); d.appendChild(t);
       body.appendChild(d);
@@ -177,7 +177,7 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     // the two push buttons: the chosen one is pressed in
     for (const b of panel.querySelectorAll('.it-tab')) {
       const on = b.dataset.kind === kind;
-      b.style.background = on ? sel : 'rgba(255,255,255,.06)';
+      b.style.background = on ? sel : bg; // solid, so the tabs read clearly on the skin's title bar
       b.style.borderColor = on ? 'rgba(0,0,0,.7) rgba(255,255,255,.35) rgba(255,255,255,.35) rgba(0,0,0,.7)' : 'rgba(255,255,255,.4) rgba(0,0,0,.7) rgba(0,0,0,.7) rgba(255,255,255,.4)';
       b.firstChild.style.opacity = on ? '1' : '.6';
       b.firstChild.style.top = on ? '2px' : '1px';
@@ -212,22 +212,38 @@ export function initInfoTab(webamp, api, getWidgetMode) {
   }
 
   // ---------- the panel itself ----------
+  const frameKey = () => JSON.stringify(colours()) + skinImage('#webamp .playlist-top-left-fill').slice(-60) + skinImage('#webamp .playlist-middle-left').slice(-60);
   function frame() {
     const { bg, hi } = colours();
-    skinKey = JSON.stringify(colours());
-    panel.style.cssText = `position:fixed;left:0;top:0;width:${W}px;height:${H}px;box-sizing:border-box;z-index:45;background:${bg};user-select:none;` +
-      'border:1px solid;border-color:rgba(255,255,255,.35) rgba(0,0,0,.6) rgba(0,0,0,.6) rgba(255,255,255,.35);' +
-      `box-shadow:inset 0 0 0 1px ${bg},inset 0 0 0 2px rgba(0,0,0,.45);` + (visible() ? '' : 'display:none;');
-    panel.querySelector('.it-line').style.background = hi;
+    skinKey = frameKey();
+    panel.style.cssText = `position:fixed;left:0;top:0;width:${W}px;height:${H}px;box-sizing:border-box;z-index:45;background:${bg};user-select:none;` + (visible() ? '' : 'display:none;');
+    panel.querySelector('.it-line').style.display = 'none';
+    // the frame is the skin's own playlist window: its title bar, sides and bottom edge (any skin dresses it)
+    const pic = (k) => skinImage('#webamp .playlist-' + k);
+    const parts = {
+      tl: [`left:0;top:0;width:25px;height:20px;`, pic('top-left'), 'no-repeat'],
+      tf: [`left:25px;top:0;right:25px;height:20px;`, pic('top-left-fill'), 'repeat-x'],
+      tr: [`right:0;top:0;width:25px;height:20px;`, pic('top-right'), 'no-repeat'],
+      ml: [`left:0;top:20px;width:${FL}px;bottom:${FB}px;`, pic('middle-left'), 'repeat-y'],
+      mr: [`right:0;top:20px;width:${FR}px;bottom:${FB}px;`, pic('middle-right'), 'repeat-y'],
+      bf: [`left:0;right:0;bottom:0;height:${FB}px;`, pic('bottom'), 'repeat-x', 'left bottom'],
+      bl: [`left:0;bottom:0;width:25px;height:${FB}px;`, pic('bottom-left'), 'no-repeat', 'left bottom'],
+      br: [`right:0;bottom:0;width:25px;height:${FB}px;`, pic('bottom-right'), 'no-repeat', 'right bottom'],
+    };
+    for (const [k, [pos, img, rep, at]] of Object.entries(parts)) {
+      let d = panel.querySelector('.it-f-' + k);
+      if (!d) { d = document.createElement('div'); d.className = 'it-f-' + k; panel.insertBefore(d, panel.firstChild); }
+      d.style.cssText = `position:absolute;${pos}pointer-events:none;background-image:${img === 'none' ? 'none' : img};background-repeat:${rep};background-position:${at || (k === 'mr' || k === 'tr' ? 'right top' : 'left top')};`;
+    }
   }
   function ensure() {
     if (panel) return;
     panel = document.createElement('div');
     panel.id = 'info-tab';
-    panel.innerHTML = '<div class="it-head" style="position:absolute;left:0;top:0;right:0;height:16px"></div>' +
+    panel.innerHTML = '<div class="it-head" style="position:absolute;left:0;top:0;right:0;height:20px"></div>' +
       `<div class="it-line" style="position:absolute;left:${PAD}px;right:${PAD}px;top:15px;height:1px;opacity:.45"></div>` +
-      `<div class="it-body" style="position:absolute;left:0;right:0;top:${HEAD}px;height:${VIS * ROW}px;overflow:hidden"></div>` +
-      `<div class="it-bar" style="position:absolute;right:3px;top:${HEAD}px;width:3px;height:${VIS * ROW}px"><div></div></div>`;
+      `<div class="it-body" style="position:absolute;left:${FL}px;right:${FR}px;top:${HEAD}px;height:${VIS * ROW}px;overflow:hidden"></div>` +
+      `<div class="it-bar" style="position:absolute;right:9px;top:${HEAD}px;width:3px;height:${VIS * ROW}px"><div></div></div>`;
     const tb = document.createElement('div');
     tb.className = 'it-tools'; tb.style.cssText = `position:absolute;left:0;right:0;top:${HEAD}px;height:${TOOLS_H - 2}px;`;
     TOOLS.forEach(([k, label, tip], i) => {
@@ -245,12 +261,12 @@ export function initInfoTab(webamp, api, getWidgetMode) {
       const b = document.createElement('div');
       b.className = 'it-tab'; b.dataset.kind = k;
       b.title = { queue: 'The songs up next (and the ones played)', lyrics: 'Show the lyrics of this song', artist: 'Show a short text about the artist', album: 'The album: its songs and a short text' }[k];
-      b.style.cssText = `position:absolute;left:${PAD + i * 42}px;top:3px;width:40px;height:11px;box-sizing:border-box;border:1px solid;cursor:pointer;`;
+      b.style.cssText = `position:absolute;left:${PAD + i * 42}px;top:5px;width:40px;height:11px;box-sizing:border-box;border:1px solid;cursor:pointer;`;
       const t = document.createElement('div'); t.style.cssText = 'position:absolute;left:4px;top:2px;height:6px;white-space:nowrap;'; setText(t, label); b.appendChild(t);
       b.addEventListener('click', (e) => { e.stopPropagation(); setKind(k); });
       head.appendChild(b);
     });
-    const x = document.createElement('div'); x.style.cssText = `position:absolute;right:${PAD}px;top:5px;height:6px;cursor:pointer`; x.title = 'Hide this panel'; setText(x, 'X'); head.appendChild(x);
+    const x = document.createElement('div'); x.style.cssText = 'position:absolute;right:0;top:0;width:12px;height:12px;cursor:pointer'; x.title = 'Hide this panel'; head.appendChild(x); // over the skin's own close button
     x.addEventListener('click', (e) => { e.stopPropagation(); set(false); });
     const body = panel.querySelector('.it-body');
     const rowOf = (e) => { const d = e.target.closest && e.target.closest('.it-row'); return d ? Number(d.dataset.i) : -1; };
@@ -284,7 +300,7 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     }
     panel.style.left = Math.round(left) + 'px';
     panel.style.top = Math.round(bottom) + 'px';
-    if (JSON.stringify(colours()) !== skinKey) { frame(); draw(); }
+    if (frameKey() !== skinKey) { frame(); draw(); }
   }
 
   function set(v) {
