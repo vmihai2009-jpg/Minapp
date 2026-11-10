@@ -10,17 +10,24 @@
 const W = 96, H = 116;          // the panel: as tall as the player
 const ART_H = 90;               // the drawing; the name goes underneath
 const COVER = 32, COLOURS = 32; // the cover grid used for colour sampling; colours in the dithered cover
-const LOOK_ORDER = ['case', 'tape', 'cd'];
+const LOOK_ORDER = ['case', 'tape', 'cd', 'vinyl'];
+const FILTERS = ['dots32', 'dots16', 'pattern', 'gameboy']; // how the cover is reduced: scattered dots (32 or 16 colours), a regular pattern, four greens
+const GAMEBOY = [[15, 56, 15], [48, 98, 48], [139, 172, 15], [155, 188, 15]];
+const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]; // the 4 x 4 pattern, row by row
 
 export function initAlbumTab(webamp, api, getWidgetMode) {
   let open = false, tab = null, canvas = null, url = null, token = 0, img = null, look = 'case';
   let spin = false, spinStep = 0, loading = false, dots = 0, dotTimer = null, stripe = 0, noCover = false, giveUp = null, stopped = true, backdrop = null;
+  let filter = 'dots32', big = false, progress = 0, side = 0, lastSong = null;
   let playing = false, frame = 0, lastSrc = '', timer = null, albumName = '', grid = null, skinKey = '';
   try {
     open = localStorage.getItem('minapp.albumTab') === '1';
     const l = localStorage.getItem('minapp.albumStyle'); if (LOOK_ORDER.includes(l)) look = l;
     spin = localStorage.getItem('minapp.albumSpin') === '1';
+    const f = localStorage.getItem('minapp.albumFilter'); if (FILTERS.includes(f)) filter = f;
+    big = localStorage.getItem('minapp.albumBig') === '1';
   } catch {}
+  const report = () => api.albumState({ look, spin, open, filter, big });
   const source = () => document.documentElement.dataset.source || 'spotify';
   const skin = () => { try { return webamp.store.getState().display.skinPlaylistStyle || {}; } catch { return {}; } };
 
@@ -28,7 +35,8 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     const st = skin(), bg = st.normalbg || '#000';
     tab.style.cssText = `position:fixed;left:0;top:0;width:${W}px;height:${H}px;box-sizing:border-box;z-index:40;background:${bg};` +
       'border:1px solid;border-color:rgba(255,255,255,.35) rgba(0,0,0,.6) rgba(0,0,0,.6) rgba(255,255,255,.35);' +
-      `box-shadow:inset 0 0 0 1px ${bg},inset 0 0 0 2px rgba(0,0,0,.45);user-select:none;cursor:pointer;` + (open ? '' : 'display:none;');
+      `box-shadow:inset 0 0 0 1px ${bg},inset 0 0 0 2px rgba(0,0,0,.45);user-select:none;cursor:pointer;` + (open ? '' : 'display:none;') +
+      (big ? 'transform:scale(2);transform-origin:0 0;' : ''); // the big size doubles every pixel
     skinKey = bg;
   }
   function ensure() {
@@ -39,13 +47,13 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     canvas.width = W - 2; canvas.height = H - 2;
     canvas.style.cssText = `position:absolute;left:0;top:0;width:${W - 2}px;height:${H - 2}px;image-rendering:pixelated;`;
     tab.append(canvas);
-    tab.title = 'Click to change the look: case, cassette, CD (click the song title to hide it)';
+    tab.title = 'Click to change the look: case, cassette, CD, record (click the song title to hide it)';
     tab.addEventListener('mousedown', (e) => e.stopPropagation());
     tab.addEventListener('click', () => {
       look = LOOK_ORDER[(LOOK_ORDER.indexOf(look) + 1) % LOOK_ORDER.length];
       try { localStorage.setItem('minapp.albumStyle', look); } catch {}
       if (timer) { clearInterval(timer); timer = null; }
-      draw(); animate(); api.albumState({ look, spin, open });
+      draw(); animate(); report();
     });
     (document.getElementById('webamp') || document.body).appendChild(tab);
     frameStyle(); draw();
@@ -64,7 +72,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
       for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { cg.fillStyle = ((((x >> 1) - stripe + (y >> 1)) % 6) + 6) % 6 < 1 ? '#2a2a3a' : (y < h / 2 ? '#1f1f2c' : '#1a1a25'); cg.fillRect(x, y, 1, 1); }
       return c;
     }
-    if (!grid || grid.img !== img) grid = { img, pal: palette(img), sizes: new Map() };
+    if (!grid || grid.img !== img || grid.filter !== filter) grid = { img, filter, pal: filter === 'gameboy' ? GAMEBOY : palette(img, filter === 'dots16' ? 16 : COLOURS), sizes: new Map() };
     if (grid.sizes.has(key)) return grid.sizes.get(key);
     const c = document.createElement('canvas'); c.width = w; c.height = h;
     const cg = c.getContext('2d', { willReadFrequently: true });
@@ -72,20 +80,21 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     cg.imageSmoothingEnabled = true; cg.imageSmoothingQuality = 'high';
     cg.drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - sh) / 2, s, sh, 0, 0, w, h);
     const d = cg.getImageData(0, 0, w, h);
-    dither(d, w, h, grid.pal);
+    if (filter === 'gameboy') { const p = d.data; for (let i = 0; i < p.length; i += 4) { const l = p[i] * 0.3 + p[i + 1] * 0.59 + p[i + 2] * 0.11, v = Math.max(0, Math.min(255, (l - 128) * 1.15 + 128)); p[i] = 15 + v * 0.55; p[i + 1] = 56 + v * 0.52; p[i + 2] = 15; } } // shades of green first
+    dither(d, w, h, grid.pal, filter === 'pattern');
     cg.putImageData(d, 0, 0);
     grid.sizes.set(key, c);
     return c;
   }
   // the album's own palette: COLOURS colours chosen from the cover by median cut (the GIF-export method)
-  function palette(im) {
+  function palette(im, count) {
     const N = 48, c = document.createElement('canvas'); c.width = c.height = N;
     const cg = c.getContext('2d', { willReadFrequently: true }); cg.imageSmoothingQuality = 'high';
     cg.drawImage(im, 0, 0, N, N);
     const p = cg.getImageData(0, 0, N, N).data, px = [];
     for (let i = 0; i < p.length; i += 4) px.push([p[i], p[i + 1], p[i + 2]]);
     let boxes = [px];
-    while (boxes.length < COLOURS) {
+    while (boxes.length < count) {
       let bi = -1, bk = 0, br = -1;                                   // split the box with the widest colour range
       boxes.forEach((b, i) => { if (b.length < 2) return; for (let k = 0; k < 3; k++) { let lo = 255, hi = 0; for (const q of b) { if (q[k] < lo) lo = q[k]; if (q[k] > hi) hi = q[k]; } if (hi - lo > br) { br = hi - lo; bi = i; bk = k; } } });
       if (bi < 0 || br <= 0) break;
@@ -96,10 +105,11 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
   }
   // Floyd-Steinberg dithering: each pixel takes the nearest palette colour and passes its error on to its neighbours,
   // which turns smooth shading into a scatter of dots
-  function dither(d, w, h, pal) {
+  // (ordered: a fixed 4 x 4 pattern decides instead, which gives the regular cross-hatch of old computer graphics)
+  function dither(d, w, h, pal, ordered) {
     const p = d.data, e = new Float32Array(w * h * 3);
-    for (let i = 0; i < w * h; i++) for (let k = 0; k < 3; k++) e[i * 3 + k] = p[i * 4 + k];
-    const spread = (x, y, err, f) => { if (x < 0 || x >= w || y >= h) return; const o = (y * w + x) * 3; for (let k = 0; k < 3; k++) e[o + k] += err[k] * f; };
+    for (let i = 0; i < w * h; i++) for (let k = 0; k < 3; k++) e[i * 3 + k] = p[i * 4 + k] + (ordered ? (BAYER4[((i / w | 0) & 3) * 4 + ((i % w) & 3)] / 16 - 0.47) * 56 : 0);
+    const spread = (x, y, err, f) => { if (ordered || x < 0 || x >= w || y >= h) return; const o = (y * w + x) * 3; for (let k = 0; k < 3; k++) e[o + k] += err[k] * f; };
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const o = (y * w + x) * 3, v = [e[o], e[o + 1], e[o + 2]];
       let best = pal[0], bd = Infinity;
@@ -300,7 +310,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     const lx = x + 6, ly = y + 5, lw = 80, lh = 30;
     cover(lx, ly, lw, lh);
     logo(lx + 2, ly + 2);
-    bitmap(['.###.', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'], lx + lw - 8, ly + 2, { '#': '#f4efe6' }); // side A
+    bitmap(side ? ['####.', '#...#', '#...#', '####.', '#...#', '#...#', '####.'] : ['.###.', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'], lx + lw - 8, ly + 2, { '#': '#f4efe6' }); // side A / B: it flips with every song
     // the window band: two reels and the tape window between them
     const bx = x + 18, by = ly + 6, bw = 56, bh = 18;
     round(bx, by, bw, bh, T_BAND, T_LINE);
@@ -308,9 +318,10 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     reel(bx + 8, by + 9); reel(bx + bw - 9, by + 9);
     const wx = bx + 19, wy = by + 3, ww = bw - 38, wh = bh - 6;     // tape window
     P(wx, wy, '#56535c', ww, wh); P(wx + 1, wy + 1, '#2c2a31', ww - 2, wh - 2);
-    const sx = wx + Math.floor(ww / 2) - 1;                          // the brown tape spool in it
-    P(sx - 1, wy + 2, '#7d5640', 6, 1); P(sx, wy + 3, '#9a6c50', 4, wh - 6); P(sx - 1, wy + wh - 3, '#7d5640', 6, 1);
-    P(sx + 1, wy + 3, '#b9876a', 1, wh - 6);
+    // the tape itself: it winds from the left reel to the right one as the song goes on
+    const gap = ww - 4, lw2 = 1 + Math.round((1 - progress) * (gap * 0.5 + 1)), rw2 = 1 + Math.round(progress * (gap * 0.5 + 1));
+    const pack = (px0, pw) => { P(px0, wy + 2, '#7d5640', pw, wh - 4); if (pw > 1) P(px0 + (px0 === wx + 2 ? pw - 1 : 0), wy + 2, '#b9876a', 1, wh - 4); P(px0, wy + 2, '#9a6c50', pw, 1); };
+    pack(wx + 2, lw2); pack(wx + ww - 2 - rw2, rw2);
     // the title strip: paper, a red line, the album name in black. The size adapts to the length: big letters for a
     // normal letters on up to two lines, then three tighter lines (big letters were too big); only past that is it shortened with ".."
     const px = lx, py = ly + lh, ph = 19;
@@ -376,19 +387,19 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     g.clearRect(0, 0, canvas.width, canvas.height);
     // backdrop: the player's colour with a hint of the cover. It only changes with the picture or the skin, so it is
     // painted once and reused on every animation frame (it was most of the work of a frame)
-    const t = skinTone(), bkey = t.join(',');
+    const t = skinTone(), bkey = t.join(',') + filter;
     if (!backdrop || backdrop.key !== bkey || backdrop.img !== img) {
       const [ct, cb] = coverColours(), c = document.createElement('canvas'); c.width = canvas.width; c.height = canvas.height;
       const keep = g; g = c.getContext('2d'); gradient(0, 0, c.width, c.height, mixc(shade(t, 1.1), ct, 0.15), mixc(shade(t, 0.8), cb, 0.1)); g = keep;
       backdrop = { key: bkey, img, c };
     }
     g.drawImage(backdrop.c, 0, 0);
-    if (look === 'tape') drawTape(); else if (look === 'cd') drawCd(); else drawCase();
+    if (look === 'tape') drawTape(); else if (look === 'cd') drawCd(); else if (look === 'vinyl') drawVinyl(); else drawCase();
   }
   // the reels and the disc move while something plays (nothing runs when paused, hidden, or showing the case)
   function animate() {
-    const want = open && (look === 'tape' || (look === 'cd' && spin)) && playing && !document.hidden;
-    if (want && !timer) timer = setInterval(() => { frame++; spinStep = (spinStep + 1) % 16; draw(); }, look === 'cd' ? 450 : 180);
+    const want = open && (look === 'tape' || look === 'vinyl' || (look === 'cd' && spin)) && playing && !document.hidden;
+    if (want && !timer) timer = setInterval(() => { frame++; spinStep = (spinStep + 1) % 16; draw(); }, look === 'tape' ? 180 : 450);
     if (!want && timer) { clearInterval(timer); timer = null; }
   }
 
@@ -397,6 +408,37 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     if (on && !dotTimer) dotTimer = setInterval(() => { stripe = (stripe + 1) % 6; if (stripe % 3 === 0) dots = (dots + 1) % 4; if (open) draw(); }, 120); // stripes slide right, dots count
     if (!on && dotTimer) { clearInterval(dotTimer); dotTimer = null; dots = 0; stripe = 0; }
   }
+  // ---------- vinyl: the sleeve with the record half out of it ----------
+  function drawVinyl() {
+    const S = 60, sx = 2, sy = 15, cx = sx + S + 1, cy = sy + S / 2, R = 28;
+    P(sx + 3, sy + S, 'rgba(0,0,0,.35)', S + R - 6, 1);
+    // the record: black with fine grooves, a sheen that turns while it plays, the cover's colours on its label
+    const [ct, cb] = coverColours();
+    const turn = playing ? frame * Math.PI / 8 : 0.6;
+    for (let j = -R; j <= R; j++) for (let i = -R; i <= R; i++) {
+      const r = Math.hypot(i, j);
+      if (r > R + 0.3) continue;
+      let c;
+      if (r < 1.5) c = '#0b0b0e';
+      else if (r < 9.5) { const a = Math.atan2(j, i) - turn, half = Math.sin(a) > 0; c = r > 8.5 ? '#17171c' : `rgb(${(half ? ct : cb).map((v) => Math.round(v)).join(',')})`; if (r < 8.5 && Math.abs(Math.sin(a)) < 0.16 && r > 3) c = '#f4f0e6'; }
+      else if (r > R - 1) c = '#2a2a32';
+      else {
+        const a = Math.atan2(j, i) - turn * 0.25, sheen = Math.max(0, Math.cos(2 * (a - 0.9))) ** 6;
+        const groove = Math.round(r) % 3 === 0 ? 10 : 0, v = 16 + groove + Math.round(sheen * 70);
+        c = `rgb(${v},${v},${v + 4})`;
+      }
+      P(cx + i, cy + j, c);
+    }
+    // the sleeve in front, with the whole cover on it
+    P(sx - 1, sy - 1, '#101014', S + 2, S + 2);
+    cover(sx, sy, S, S);
+    P(sx, sy, 'rgba(255,255,255,.25)', S, 1); P(sx, sy, 'rgba(255,255,255,.18)', 1, S);
+    P(sx + S - 1, sy, 'rgba(0,0,0,.45)', 1, S); P(sx, sy + S - 1, 'rgba(0,0,0,.35)', S, 1);
+    logo(sx + 2, sy + 2);
+    loadingText(sx + S / 2, sy + S / 2 - 2, '#e8e6f2', 'rgba(0,0,0,.6)');
+    writeName(W / 2 - 1, ART_H + 4, W - 10, 2, '#ffffff', 'rgba(0,0,0,.6)');
+  }
+
   function paint(dataUrl) {
     const im = new Image();
     const mine = ++token;
@@ -411,7 +453,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     if (on) { ensure(); tab.style.display = ''; load(url); }
     else if (tab) tab.style.display = 'none';
     animate();
-    api.albumState({ look, spin, open });
+    report();
   }
 
   async function load(u) {
@@ -437,6 +479,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     const next = u === null ? '' : u;
     const wasStopped = stopped; stopped = u === null;
     if (isPlaying !== undefined && !!isPlaying !== playing) { playing = !!isPlaying; animate(); }
+    if (song && song !== lastSong) { if (lastSong !== null) side = 1 - side; lastSong = song; progress = 0; }
     const name = album || song || ''; // YouTube and local files have no album: the song title instead
     const src = source();
     const changed = name !== albumName || src !== lastSrc;
@@ -460,18 +503,23 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
   function setOptions(o) {
     if (o.look && LOOK_ORDER.includes(o.look)) look = o.look;
     if (o.spin !== undefined) { spin = !!o.spin; if (!spin) spinStep = 0; }
+    if (o.filter && FILTERS.includes(o.filter)) filter = o.filter;
+    if (o.big !== undefined) { big = !!o.big; if (tab) frameStyle(); }
+    try { localStorage.setItem('minapp.albumFilter', filter); localStorage.setItem('minapp.albumBig', big ? '1' : '0'); } catch {}
     try { localStorage.setItem('minapp.albumStyle', look); localStorage.setItem('minapp.albumSpin', spin ? '1' : '0'); } catch {}
     if (timer) { clearInterval(timer); timer = null; }
     if (!open) set(true); else { draw(); animate(); }
-    api.albumState({ look, spin, open });
+    report();
   }
   window.__albumTab = {
     setArt, setOptions,
+    // how far into the song we are (0..1): the cassette's tape winds across with it
+    setProgress(f) { const v = Math.max(0, Math.min(1, Number(f) || 0)); if (Math.abs(v - progress) >= 0.04 || (v === 0) !== (progress === 0)) { progress = v; if (open && look === 'tape' && !timer) draw(); } },
     // how far the player is pushed right to make room for the panel
-    offset: () => (open && tab && getWidgetMode() === 'off' ? W : 0),
+    offset: () => (open && tab && getWidgetMode() === 'off' ? W * (big ? 2 : 1) : 0),
   };
   document.addEventListener('visibilitychange', animate);
   api.onAlbumOptions((o) => setOptions(o || {}));
-  api.albumState({ look, spin, open });
+  report();
   if (open) ensure();
 }

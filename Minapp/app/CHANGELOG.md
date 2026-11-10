@@ -1,5 +1,15 @@
 # What's new in Minapp
 
+## 1.9.18
+- Lyrics and About the artist: the repeat button is now INFO. It opens a panel under the player with the song's lyrics (the sung line lights up when the lyrics are timed) or a short text about the artist.
+- Playlists under the album picture: Spotify, YouTube and local playlists in folders that open and close. Click one to play it.
+- Shuffle now sticks on Windows: Minapp also sets it through your Spotify connection.
+- New Record look, a double-size option and a choice of cover filters (Player > Album picture).
+- The cassette's tape winds across as the song plays, and the label flips between side A and B.
+- Sleep timer (Player > Sleep timer): pauses after 15 to 90 minutes or after this song. The clock counts down in the last minute.
+- Local library > Get missing covers: finds the covers of songs downloaded before 1.9.16.
+- New hotkeys: Ctrl+Alt+L likes the song, Ctrl+Alt+I opens lyrics.
+
 ## 1.9.17
 - Tune-up. With no internet, Minapp no longer asks Spotify for the cover and the heart on every tick; it waits 30 seconds between tries.
 - A web request that hangs (sleeping laptop, hotel Wi-Fi) now gives up after 15 seconds instead of freezing the queue or covers.

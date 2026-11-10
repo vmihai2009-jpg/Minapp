@@ -171,7 +171,7 @@
     if (document.hidden) return;
     restack();
     // only the few top-level boxes are measured (cheap); a full-tree scan every tick made the playlist feel laggy
-    const els = [...document.querySelectorAll('#main-window, #equalizer-window, #playlist-window, #milkdrop-window, #dl-panel, #whatsnew-panel, #album-tab')];
+    const els = [...document.querySelectorAll('#main-window, #equalizer-window, #playlist-window, #milkdrop-window, #dl-panel, #whatsnew-panel, #album-tab, #info-tab, #lists-tab')];
     for (const c of document.body.children) {
       if (c.id !== 'app' && !['SCRIPT', 'STYLE'].includes(c.tagName)) els.push(c);
     }
@@ -214,7 +214,7 @@
     const b = e.target.closest('#play, #pause, #stop, #next, #previous');
     if (b && MAP[b.id]) { api.cmd(MAP[b.id]); kickPoll(300); }
     // shuffle / repeat: Webamp flips its own switch, then the source is told the new value
-    const sr = e.target.closest('#shuffle, #repeat');
+    const sr = e.target.closest('#shuffle'); // (the repeat button is the INFO button now: see info-tab.js)
     if (sr) setTimeout(() => {
       try {
         const m = webamp.store.getState().media;
@@ -243,6 +243,9 @@
   import('./playlist-picker.js').then((m) => m.initPlaylistPicker(webamp, api)).catch((e) => api.log('playlist picker failed: ' + e.message));
   import('./album-tab.js').then((m) => m.initAlbumTab(webamp, api, () => widgetMode)).catch((e) => api.log('album tab failed: ' + e.message));
   import('./update-bulb.js').then((m) => m.initUpdateBulb(api)).catch((e) => api.log('update bulb failed: ' + e.message));
+  import('./sleep-clock.js').then((m) => m.initSleepClock(api)).catch((e) => api.log('sleep clock failed: ' + e.message));
+  import('./lists-tab.js').then((m) => m.initListsTab(webamp, api, () => widgetMode)).catch((e) => api.log('playlist panel failed: ' + e.message));
+  import('./info-tab.js').then((m) => m.initInfoTab(webamp, api, () => widgetMode)).catch((e) => api.log('info tab failed: ' + e.message));
   import('./download-bar.js').then((m) => m.initDownloadBar(webamp, api)).catch((e) => api.log('download bar failed: ' + e.message));
   setInterval(() => { const b = document.getElementById('eject'); if (b) b.title = document.documentElement.classList.contains('src-youtube') ? 'Record: download this YouTube link (personal use)' : (document.documentElement.dataset.source || 'spotify') === 'spotify' ? (document.documentElement.classList.contains('liked') ? 'Liked: click to remove from Liked Songs' : 'Like: add this song to Liked Songs') : ''; }, 1500);
   let modeHoldUntil = 0, holdUntil = 0;
@@ -251,7 +254,6 @@
     try {
       const m = webamp.store.getState().media;
       if (typeof s.shuffle === 'boolean' && s.shuffle !== !!m.shuffle) webamp.store.dispatch({ type: 'TOGGLE_SHUFFLE' });
-      if (typeof s.repeat === 'boolean' && s.repeat !== !!m.repeat) webamp.store.dispatch({ type: 'TOGGLE_REPEAT' });
     } catch {}
   };
 
@@ -604,6 +606,9 @@
       document.documentElement.dataset.source = s.source || 'spotify';
       document.documentElement.classList.toggle('liked', !!s.liked);
       if (window.__albumTab) window.__albumTab.setArt(s.status === 'closed' || s.status === 'stopped' ? null : s.art || '', s.title || '', s.status === 'playing', s.album || '');
+      if (window.__albumTab && s.duration > 0) window.__albumTab.setProgress(s.position / s.duration);
+      if (window.__sleep && s.status === 'playing') window.__sleep.song(s.id || `${s.artist}|${s.title}`);
+      if (window.__infoTab) window.__infoTab.setSong(s.status === 'closed' || s.status === 'stopped' ? null : s);
       const status = webamp.getMediaStatus();
       if (s.status === 'closed' || s.status === 'stopped') {
         if (status === 'PLAYING') webamp.pause();
