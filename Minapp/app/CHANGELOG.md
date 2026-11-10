@@ -1,5 +1,12 @@
 # What's new in Minapp
 
+## 1.9.23
+- Clicking a song in a Spotify search now plays it.
+- Search: a long text scrolls so you always see what you type, and a SHOW drop-down filters Spotify results to songs, albums or artists.
+- ALBUM tab: click any song in the list to play it.
+- The title and clock no longer get stuck on an earlier song.
+- The INFO button's word sits on the button's own surface, with no box behind it.
+
 ## 1.9.22
 - LIBRARIES: the playlist panel now sits tucked under the album picture, level with the player, and opens into Spotify, YouTube and Local.
 - Search: the magnifier next to each library searches it. Type, press Enter, click a result to play it (Spotify songs, albums and playlists; YouTube videos; your local songs).

@@ -844,35 +844,38 @@ async function getSpotifyPlaylists(force) {
     return { status: 'error', message: String((e && e.message) || e) };
   }
 }
-async function playSpotifyContext(uri) {
-  if (!/^spotify:((playlist|album|track):[A-Za-z0-9]+|user:[^:\s]+:collection)$/.test(uri)) return { ok: false, message: 'Unknown playlist' };
+// uri: a playlist, album, artist or single song. ctx (songs only): the album or playlist it is played from, so the
+// music carries on with the next song afterwards (and because Spotify is more willing to start a song that way)
+async function playSpotifyContext(uri, ctx) {
+  if (!/^spotify:((playlist|album|track|artist):[A-Za-z0-9]+|user:[^:\s]+:collection)$/.test(uri)) return { ok: false, message: 'Unknown playlist' };
+  const isTrack = uri.includes(':track:');
+  if (!isTrack || !/^spotify:(playlist|album|artist):[A-Za-z0-9]+$/.test(String(ctx || ''))) ctx = '';
+  const bodies = isTrack ? [...(ctx ? [{ context_uri: ctx, offset: { uri } }] : []), { uris: [uri] }] : [{ context_uri: uri }];
   if (source !== 'spotify') await setSource('spotify');
   if (isMac && !process.env.SKIN_FAKE) {
     // the desktop app plays a playlist straight from its address (it is started first if it is closed)
     // "launch" starts Spotify without bringing it to the front ("activate" did, and covered the player)
     await osa('if application "Spotify" is not running then tell application "Spotify" to launch');
     for (let i = 0; i < 20 && (await osa('if application "Spotify" is running then return "yes"')) !== 'yes'; i++) await new Promise((r) => setTimeout(r, 500));
-    if ((await osa(`tell application "Spotify" to play track "${uri}"`)) !== null) { holdQueue(); keepFront(); return { ok: true }; }
+    if ((await osa(`tell application "Spotify" to play track "${uri}"` + (ctx ? ` in context "${ctx}"` : ''))) !== null) { holdQueue(); keepFront(); return { ok: true }; }
   }
   try { // Windows (and a Mac where the script failed): Spotify's Web API starts it on the device that is open
     const tok = await spotAccessToken();
     if (tok) {
-      const r = await fetch('https://api.spotify.com/v1/me/player/play', {
-        method: 'PUT', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: JSON.stringify(uri.includes(':track:') ? { uris: [uri] } : { context_uri: uri }),
+      const put = (body, dev) => fetch('https://api.spotify.com/v1/me/player/play' + (dev ? '?device_id=' + encodeURIComponent(dev) : ''), {
+        method: 'PUT', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
-      if (r.status === 204 || r.status === 200) { holdQueue(); return { ok: true }; }
-      // 404 = Spotify has no "active" device: name this computer's Spotify app as the one to play on
-      if (r.status === 404) {
-        const d = await spotApi('/me/player/devices', tok).catch(() => null);
-        const dev = d && (d.devices || []).find((x) => x.type === 'Computer') || (d && d.devices && d.devices[0]);
-        if (dev) {
-          const r2 = await fetch('https://api.spotify.com/v1/me/player/play?device_id=' + encodeURIComponent(dev.id), {
-            method: 'PUT', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: JSON.stringify(uri.includes(':track:') ? { uris: [uri] } : { context_uri: uri }),
-          });
-          if (r2.status === 204 || r2.status === 200) { holdQueue(); return { ok: true }; }
+      let dev = '';
+      for (const body of bodies) {
+        let r = await put(body, dev);
+        if (r.status === 404 && !dev) { // Spotify has no "active" device: name this computer's Spotify app as the one to play on
+          const d = await spotApi('/me/player/devices', tok).catch(() => null);
+          const found = d && ((d.devices || []).find((x) => x.type === 'Computer') || (d.devices || [])[0]);
+          if (found) { dev = found.id; r = await put(body, dev); }
         }
+        if (r.status === 204 || r.status === 200) { holdQueue(); return { ok: true }; }
+        log('play ' + uri + ': HTTP ' + r.status);
       }
-      log('play playlist: HTTP ' + r.status);
     }
   } catch (e) { log('play playlist error: ' + ((e && e.message) || e)); }
   shell.openExternal(uri); // last resort: Spotify opens the playlist, one press of its play button starts it
@@ -995,19 +998,22 @@ ipcMain.handle('lists:all', async (_e, force) => {
   return { spotify, youtube, local: library.playlists().filter((p) => p.count > 0).map((p) => ({ name: p.name, n: p.count })) };
 });
 // search one library: [{ t (the line shown), kind, ... }] for the panel, played with lists:found
-ipcMain.handle('lists:search', async (_e, key, q) => {
+ipcMain.handle('lists:search', async (_e, key, q, only) => {
   q = String(q || '').trim().slice(0, 80);
   if (!q) return [];
   if (key === 'spotify') {
     const tok = readCfg().spotRefresh ? await spotAccessToken().catch(() => null) : null;
     if (!tok) return [{ t: 'Connect Spotify first', kind: 'none' }];
-    const j = await spotApi('/search?type=track,album,playlist&limit=6&q=' + encodeURIComponent(q), tok).catch(() => null);
+    const types = { track: 'track', album: 'album', artist: 'artist' }[only] || 'track,album,artist,playlist';
+    const j = await spotApi(`/search?type=${types}&limit=${types.includes(',') ? 5 : 10}&q=` + encodeURIComponent(q), tok).catch(() => null);
     if (!j) return [];
     const by = (x) => (x.artists && x.artists[0] ? ' - ' + x.artists[0].name : '');
+    const items = (k) => ((j[k] && j[k].items) || []).filter(Boolean);
     return [
-      ...((j.tracks && j.tracks.items) || []).filter(Boolean).map((x) => ({ t: x.name + by(x), kind: 'spotify', uri: x.uri })),
-      ...((j.albums && j.albums.items) || []).filter(Boolean).map((x) => ({ t: 'ALBUM ' + x.name + by(x), kind: 'spotify', uri: x.uri })),
-      ...((j.playlists && j.playlists.items) || []).filter(Boolean).map((x) => ({ t: 'LIST ' + x.name, kind: 'spotify', uri: x.uri })),
+      ...items('tracks').map((x) => ({ t: x.name + by(x), kind: 'spotify', uri: x.uri, ctx: (x.album && x.album.uri) || '' })),
+      ...items('albums').map((x) => ({ t: (only ? '' : 'ALBUM ') + x.name + by(x), kind: 'spotify', uri: x.uri })),
+      ...items('artists').map((x) => ({ t: (only ? '' : 'ARTIST ') + x.name, kind: 'spotify', uri: x.uri })),
+      ...items('playlists').map((x) => ({ t: 'LIST ' + x.name, kind: 'spotify', uri: x.uri })),
     ];
   }
   if (key === 'youtube') {
@@ -1021,7 +1027,7 @@ ipcMain.handle('lists:search', async (_e, key, q) => {
 });
 ipcMain.handle('lists:found', async (_e, r) => {
   if (!r || typeof r !== 'object') return;
-  if (r.kind === 'spotify') return playSpotifyContext(String(r.uri || ''));
+  if (r.kind === 'spotify') return playSpotifyContext(String(r.uri || ''), String(r.ctx || ''));
   if (r.kind === 'youtube' && Array.isArray(r.all)) { // the chosen video first, then the other results
     const ids = r.all.filter((x) => /^[\w-]{11}$/.test(x)), k = ids.indexOf(r.id);
     writeCfg({ yt: { ids: k > 0 ? [...ids.slice(k), ...ids.slice(0, k)] : ids, list: null, v: null, name: 'Search results' } });
@@ -1717,7 +1723,7 @@ ipcMain.handle('info:get', async (_e, kind, song) => {
   const trackId = source === 'spotify' ? trackIdOf(song.id) || (spotCur && song.title && spotCur.title === norm(song.title) ? spotCur.id : null) : null;
   return albumInfo({ artist: song.artist, title: song.title, album: song.album, trackId }, spot);
 });
-ipcMain.handle('info:play', (_e, uri) => playSpotifyContext(String(uri || '')));
+ipcMain.handle('info:play', (_e, uri, ctx) => playSpotifyContext(String(uri || ''), String(ctx || '')));
 ipcMain.on('album:state', (_e, st) => { if (st && typeof st === 'object') { albumUi = { look: String(st.look || 'case'), spin: !!st.spin, open: !!st.open, filter: String(st.filter || 'dots32'), big: !!st.big }; buildMenu(); } });
 ipcMain.on('app:quit', () => app.quit());
 ipcMain.handle('app:version', () => app.getVersion());

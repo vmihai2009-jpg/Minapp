@@ -131,7 +131,7 @@ async function albumInfo(song, spot) {
     if (alb) {
       res.name = alb.name; res.uri = alb.uri || ''; res.year = String(alb.release_date || '').slice(0, 4);
       const t = await spot(`/albums/${alb.id}/tracks?limit=50`);
-      res.tracks = ((t && t.items) || []).map((x) => ({ name: x.name, ms: x.duration_ms || 0 }));
+      res.tracks = ((t && t.items) || []).map((x) => ({ name: x.name, ms: x.duration_ms || 0, uri: x.uri || '' }));
     }
     if (!res.tracks.length && res.name) { const b = await brainzTracks(artist, res.name).catch(() => null); if (b) { res.tracks = b.tracks; res.year = res.year || b.year; } }
     if (res.name) { const w = await albumAbout(artist, res.name).catch(() => null); if (w) { res.about = w.about; res.text = w.text; } }
