@@ -312,8 +312,16 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
       const shown = tp < 0.5 ? 1 - side : side, keep = g, c = document.createElement('canvas'); c.width = canvas.width; c.height = canvas.height;
       g = c.getContext('2d'); g.imageSmoothingEnabled = false;
       const real = side; side = shown; drawTapeFlat(); side = real; g = keep;
-      const k = Math.max(0.02, Math.abs(Math.cos(Math.PI * tp))), w = Math.round(94 * k);
-      g.drawImage(c, 0, 0, 94, c.height, Math.round(47 - w / 2), 0, w, c.height);
+      // the face narrows while the cassette's edge (it is about 12 mm thick) widens beside it, as when it turns in the hand
+      const k = Math.abs(Math.cos(Math.PI * tp)), w = Math.round(94 * k), T = Math.round(10 * Math.sin(Math.PI * tp));
+      const left = Math.round(47 - (w + T) / 2), edgeFirst = tp >= 0.5, fx = edgeFirst ? left + T : left, ex = edgeFirst ? left : left + w;
+      if (w > 0) g.drawImage(c, 0, 0, 94, c.height, fx, 0, w, c.height);
+      if (T > 0) {
+        const h = 64, y = Math.round((H - 2 - h) / 2);
+        P(ex, y + 1, T_LO, T, h - 2); P(ex, y, T_LINE, T, 1); P(ex, y + h - 1, T_LINE, T, 1);
+        P(edgeFirst ? ex : ex + T - 1, y, T_LINE, 1, h);
+        if (T > 3) { P(ex + 1, y + 3, T_HI, T - 2, 1); P(ex + Math.floor(T / 2) - 1, y + 24, '#2b2622', 2, 16); } // the slot where the tape shows
+      }
       return;
     }
     drawTapeFlat();

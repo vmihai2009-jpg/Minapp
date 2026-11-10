@@ -1,11 +1,12 @@
 // YouTube account through Google's official sign-in: the login happens in the user's normal browser (Google refuses
-// logins inside embedded browsers), Minapp gets a read-only token and uses it to list the user's own playlists and
+// logins inside embedded browsers), Minapp gets a token and uses it to list the user's own playlists and
 // the videos in them. The videos are then played by the usual YouTube player, so private playlists work too.
 const http = require('http');
 const crypto = require('crypto');
 
 const b64 = (b) => Buffer.from(b).toString('base64url');
-const SCOPE = 'https://www.googleapis.com/auth/youtube.readonly';
+// full YouTube access (read + make playlists): copying a Spotify playlist to the account needs to create one
+const SCOPE = 'https://www.googleapis.com/auth/youtube';
 
 const netFetch = globalThis.fetch;
 const fetch = (url, opts = {}) => netFetch(url, { signal: AbortSignal.timeout(15000), ...opts }); // never wait forever on a hung connection
@@ -23,6 +24,7 @@ function create({ shell, dialog, readCfg, writeCfg, askText, getWin, log, onChan
     if (!r.ok) throw new Error(j.error_description || j.error || ('HTTP ' + r.status));
     access = j.access_token; exp = Date.now() + ((j.expires_in || 3600) - 60) * 1000;
     if (j.refresh_token) writeCfg({ ytRefresh: j.refresh_token });
+    if (j.scope) writeCfg({ ytScope: j.scope });
   }
 
   async function bearer() {
@@ -32,8 +34,10 @@ function create({ shell, dialog, readCfg, writeCfg, askText, getWin, log, onChan
     return access;
   }
 
-  async function api(path, qs) {
-    const r = await fetch('https://www.googleapis.com/youtube/v3/' + path + '?' + new URLSearchParams(qs), { headers: { Authorization: 'Bearer ' + await bearer() } });
+  async function api(path, qs, body) {
+    const r = await fetch('https://www.googleapis.com/youtube/v3/' + path + '?' + new URLSearchParams(qs), body
+      ? { method: 'POST', headers: { Authorization: 'Bearer ' + await bearer(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+      : { headers: { Authorization: 'Bearer ' + await bearer() } });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + r.status));
     return j;
@@ -69,6 +73,30 @@ function create({ shell, dialog, readCfg, writeCfg, askText, getWin, log, onChan
       page = j.nextPageToken; if (!page) break;
     }
     return ids;
+  }
+
+  // names of videos (50 per request, 1 unit of the daily allowance each)
+  async function titles(ids) {
+    const out = [];
+    for (let i = 0; i < ids.length; i += 50) {
+      const j = await api('videos', { part: 'snippet', id: ids.slice(i, i + 50).join(',') });
+      for (const v of j.items || []) out.push({ id: v.id, title: v.snippet.title, channel: v.snippet.channelTitle });
+    }
+    return out;
+  }
+  // a private playlist on the account with these videos. Google allows about 10,000 "units" a day per key and each
+  // added video costs 50, so roughly 190 songs a day: onProgress(i, n) after each; stops cleanly at the limit
+  const canWrite = () => signedIn() && /auth\/youtube( |$)/.test(readCfg().ytScope || '');
+  async function makePlaylist(title, ids, onProgress) {
+    const p = await api('playlists', { part: 'snippet,status' }, { snippet: { title, description: 'Made by Minapp' }, status: { privacyStatus: 'private' } });
+    let added = 0;
+    for (const id of ids) {
+      try { await api('playlistItems', { part: 'snippet' }, { snippet: { playlistId: p.id, resourceId: { kind: 'youtube#video', videoId: id } } }); added++; }
+      catch (e) { if (/quota/i.test(e.message)) return { id: p.id, added, quota: true }; log('[youtube] add failed: ' + e.message); }
+      onProgress(added, ids.length);
+    }
+    refreshPlaylists();
+    return { id: p.id, added };
   }
 
   async function ensureClient() {
@@ -143,7 +171,7 @@ function create({ shell, dialog, readCfg, writeCfg, askText, getWin, log, onChan
     onChange();
   }
 
-  return { signedIn, signIn, signOut, refreshPlaylists, videoIds, playlists: () => playlists, error: () => err, loading: () => loading };
+  return { signedIn, signIn, signOut, refreshPlaylists, videoIds, titles, canWrite, makePlaylist, playlists: () => playlists, error: () => err, loading: () => loading };
 }
 
 module.exports = { create };

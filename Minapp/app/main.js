@@ -651,7 +651,7 @@ function ytQueue() {
 // Spotify: the desktop app exposes no queue, so this uses Spotify's Web API (one-time login, PKCE, no secret).
 const SPOT_PORT = 8898;
 const SPOT_REDIRECT = `http://127.0.0.1:${SPOT_PORT}/callback`;
-const SPOT_SCOPE = 'user-read-playback-state user-read-currently-playing user-modify-playback-state playlist-read-private playlist-read-collaborative user-library-read user-library-modify';
+const SPOT_SCOPE = 'user-read-playback-state user-read-currently-playing user-modify-playback-state playlist-read-private playlist-read-collaborative playlist-modify-private playlist-modify-public user-library-read user-library-modify';
 let spotAccess = null, spotExpires = 0, spotBackoffUntil = 0, spotQueueBusy = false, spotLastId = null;
 let spotifyQueue = { items: [], err: '' };
 let spotCur = null; // { title, id } of the song the Web API reports (Windows media controls give no Spotify id)
@@ -849,9 +849,10 @@ async function playSpotifyContext(uri) {
   if (source !== 'spotify') await setSource('spotify');
   if (isMac && !process.env.SKIN_FAKE) {
     // the desktop app plays a playlist straight from its address (it is started first if it is closed)
-    await osa('if application "Spotify" is not running then tell application "Spotify" to activate');
+    // "launch" starts Spotify without bringing it to the front ("activate" did, and covered the player)
+    await osa('if application "Spotify" is not running then tell application "Spotify" to launch');
     for (let i = 0; i < 20 && (await osa('if application "Spotify" is running then return "yes"')) !== 'yes'; i++) await new Promise((r) => setTimeout(r, 500));
-    if ((await osa(`tell application "Spotify" to play track "${uri}"`)) !== null) { holdQueue(); return { ok: true }; }
+    if ((await osa(`tell application "Spotify" to play track "${uri}"`)) !== null) { holdQueue(); keepFront(); return { ok: true }; }
   }
   try { // Windows (and a Mac where the script failed): Spotify's Web API starts it on the device that is open
     const tok = await spotAccessToken();
@@ -860,13 +861,125 @@ async function playSpotifyContext(uri) {
         method: 'PUT', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ context_uri: uri }),
       });
       if (r.status === 204 || r.status === 200) { holdQueue(); return { ok: true }; }
+      // 404 = Spotify has no "active" device: name this computer's Spotify app as the one to play on
+      if (r.status === 404) {
+        const d = await spotApi('/me/player/devices', tok).catch(() => null);
+        const dev = d && (d.devices || []).find((x) => x.type === 'Computer') || (d && d.devices && d.devices[0]);
+        if (dev) {
+          const r2 = await fetch('https://api.spotify.com/v1/me/player/play?device_id=' + encodeURIComponent(dev.id), {
+            method: 'PUT', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ context_uri: uri }),
+          });
+          if (r2.status === 204 || r2.status === 200) { holdQueue(); return { ok: true }; }
+        }
+      }
       log('play playlist: HTTP ' + r.status);
     }
   } catch (e) { log('play playlist error: ' + ((e && e.message) || e)); }
   shell.openExternal(uri); // last resort: Spotify opens the playlist, one press of its play button starts it
+  keepFront();
   return { ok: true, opened: true };
 }
+// Spotify tends to jump in front when it is told to play something: put Minapp back on top once it has
+function keepFront() {
+  for (const ms of [400, 1200, 2500]) setTimeout(() => { try { if (win && !win.isDestroyed() && win.isVisible()) { if (isMac) app.focus({ steal: true }); win.moveTop(); } } catch {} }, ms);
+}
 ipcMain.handle('spotlists:get', (_e, force) => getSpotifyPlaylists(!!force));
+// ---------- copy a playlist between Spotify and YouTube ----------
+let copying = false, copyStop = false;
+async function spotSend(method, p, tok, body) {
+  const r = await fetch('https://api.spotify.com/v1' + p, { method, headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (r.status === 401 || r.status === 403) { const e = new Error('Spotify did not allow it (HTTP ' + r.status + ')'); e.auth = true; throw e; }
+  if (!r.ok) throw new Error('Spotify answered HTTP ' + r.status);
+  return r.status === 204 ? {} : r.json().catch(() => ({}));
+}
+async function copyBar(on) {
+  copying = on; downloading = on; copyStop = false; buildMenu();
+  if (win && !win.isDestroyed()) { win.webContents.send('download:state', on); if (!on) win.webContents.send('download:progress', null); }
+}
+const copyNote = (i, n, title) => { if (win && !win.isDestroyed()) win.webContents.send('download:progress', { phase: 'downloading', i, n, title, pct: 100 }); };
+async function spotPlaylistTracks(id, tok) { // [{ title, artist }] of a playlist, or of Liked songs (up to 500)
+  const out = [];
+  let p = id === 'liked' ? '/me/tracks?limit=50' : `/playlists/${id}/items?limit=50`;
+  for (let k = 0; p && k < 10; k++) {
+    let j = await spotApi(p, tok).catch((e) => { if (k || id === 'liked' || e.auth) throw e; return null; });
+    if (!j && !k) j = await spotApi(`/playlists/${id}/tracks?limit=50`, tok); // the older address
+    for (const x of (j && j.items) || []) { const t = x.item || x.track; if (t && t.name) out.push({ title: t.name, artist: (t.artists && t.artists[0] && t.artists[0].name) || '' }); }
+    p = j && j.next ? j.next.replace('https://api.spotify.com/v1', '') : null;
+  }
+  return out;
+}
+async function copyToYouTube(id, name) {
+  const tok = readCfg().spotRefresh ? await spotAccessToken() : null;
+  if (!tok) return dialog.showMessageBox(win, { message: 'Connect Spotify first', detail: 'Open the SPOTIFY folder in the playlist panel and click Connect.' });
+  await copyBar(true);
+  try {
+    copyNote(0, 0, 'Reading ' + name + '...');
+    const tracks = await spotPlaylistTracks(id, tok);
+    const ids = [];
+    for (let i = 0; i < tracks.length && !copyStop; i++) {
+      const t = tracks[i];
+      copyNote(i + 1, tracks.length, 'Finding on YouTube: ' + t.title);
+      const v = await library.ytFind(`${t.artist} - ${t.title}`).catch(() => '');
+      if (v && !ids.includes(v)) ids.push(v);
+    }
+    if (!ids.length) return dialog.showMessageBox(win, { message: copyStop ? 'Stopped.' : 'Nothing found on YouTube' });
+    const lists = (readCfg().ytLists || []).filter((x) => x.name !== name);
+    writeCfg({ ytLists: [{ name, ids }, ...lists].slice(0, 30) });
+    let extra = 'It is under YOUTUBE in the playlist panel.';
+    if (ytApi.canWrite() && !copyStop) {
+      copyNote(0, ids.length, 'Saving to your YouTube account...');
+      const r = await ytApi.makePlaylist(name, ids, (i, n) => copyNote(i, n, 'Saving to your YouTube account'));
+      extra = r.quota ? `YouTube's daily limit was reached after ${r.added} songs; the playlist on your account has those, the one in Minapp has all of them.` : 'It is also on your YouTube account, as a private playlist.';
+    } else if (ytApi.signedIn()) extra += ' To also save copies on your YouTube account, sign out and in again once (YouTube account menu) so Minapp may create playlists there.';
+    const r = await dialog.showMessageBox(win, { message: `Made "${name}" on YouTube with ${ids.length} of ${tracks.length} songs`, detail: extra, buttons: ['Play it', 'OK'], defaultId: 1 });
+    if (r.response === 0) { writeCfg({ yt: { ids, list: null, v: null, name } }); await setSource('youtube'); }
+  } catch (e) {
+    dialog.showMessageBox(win, { type: 'error', message: 'Could not copy the playlist', detail: String((e && e.message) || e) });
+  } finally { await copyBar(false); }
+}
+async function copyToSpotify(kind, id, name) {
+  const cfg = readCfg();
+  if (!cfg.spotRefresh || !String(cfg.spotScope || '').includes('playlist-modify')) {
+    const r = await dialog.showMessageBox(win, { message: 'Spotify needs to be connected again', detail: 'Once, so Minapp may create playlists on your account. A browser page asks you to approve it.', buttons: ['Connect Spotify', 'Cancel'], defaultId: 0, cancelId: 1 });
+    if (r.response === 0) await connectSpotifyQueue();
+    return;
+  }
+  await copyBar(true);
+  try {
+    copyNote(0, 0, 'Reading ' + name + '...');
+    let vids;
+    if (kind === 'youtube') { const ids = await ytApi.videoIds(id); vids = await ytApi.titles(ids); }
+    else if (kind === 'ytlink') { const t = cfg.yt || {}; vids = await library.ytEntries(t.list ? 'https://www.youtube.com/playlist?list=' + t.list : 'https://www.youtube.com/watch?v=' + t.v); }
+    else if (kind === 'ytsaved') { const l = (cfg.ytLists || []).find((x) => x.name === id); vids = l && ytApi.signedIn() ? await ytApi.titles(l.ids) : []; }
+    vids = vids || [];
+    const tok = await spotAccessToken();
+    const uris = [];
+    for (let i = 0; i < vids.length && !copyStop; i++) {
+      const c = clean(vids[i].channel, vids[i].title);
+      copyNote(i + 1, vids.length, 'Finding on Spotify: ' + c.title);
+      const q = c.artist ? `track:${c.title} artist:${c.first || c.artist}` : c.title;
+      let j = await spotApi('/search?type=track&limit=1&q=' + encodeURIComponent(q), tok).catch(() => null);
+      if (!(j && j.tracks && j.tracks.items.length)) j = await spotApi('/search?type=track&limit=1&q=' + encodeURIComponent(`${c.artist} ${c.title}`), tok).catch(() => null);
+      const u = j && j.tracks && j.tracks.items[0] && j.tracks.items[0].uri;
+      if (u && !uris.includes(u)) uris.push(u);
+    }
+    if (!uris.length) return dialog.showMessageBox(win, { message: copyStop ? 'Stopped.' : 'Nothing found on Spotify' });
+    let pl;
+    try { pl = await spotSend('POST', '/me/playlists', tok, { name, public: false, description: 'Made by Minapp' }); }
+    catch { const me = await spotApi('/me', tok); pl = await spotSend('POST', `/users/${encodeURIComponent(me.id)}/playlists`, tok, { name, public: false, description: 'Made by Minapp' }); }
+    for (let i = 0; i < uris.length; i += 100) {
+      const chunk = uris.slice(i, i + 100);
+      try { await spotSend('POST', `/playlists/${pl.id}/items`, tok, { uris: chunk }); } catch { await spotSend('POST', `/playlists/${pl.id}/tracks`, tok, { uris: chunk }); }
+    }
+    spotLists = null;
+    const r = await dialog.showMessageBox(win, { message: `Made "${name}" on Spotify with ${uris.length} of ${vids.length} songs`, detail: 'It is a private playlist on your account, and under SPOTIFY in the playlist panel.', buttons: ['Play it', 'OK'], defaultId: 1 });
+    if (r.response === 0) await playSpotifyContext('spotify:playlist:' + pl.id);
+  } catch (e) {
+    if (e && e.auth) writeCfg({ spotScope: null });
+    dialog.showMessageBox(win, { type: 'error', message: 'Could not copy the playlist', detail: String((e && e.message) || e) });
+  } finally { await copyBar(false); }
+}
+
 // the playlist panel under the album picture: everything that can be played, by source
 ipcMain.handle('lists:all', async (_e, force) => {
   let spotify;
@@ -876,10 +989,17 @@ ipcMain.handle('lists:all', async (_e, force) => {
     signedIn: ytApi.signedIn(), loading: ytApi.loading(),
     items: ytApi.signedIn() ? ytApi.playlists().map((p) => ({ id: p.id, name: p.title, n: p.count })) : [],
     link: yt && !yt.ids && (yt.list || yt.v) ? (yt.name || (yt.list ? 'Pasted playlist' : 'Pasted video')) : '',
+    saved: (readCfg().ytLists || []).map((x) => ({ name: x.name, n: x.ids.length })), // copied from Spotify
   };
   return { spotify, youtube, local: library.playlists().filter((p) => p.count > 0).map((p) => ({ name: p.name, n: p.count })) };
 });
-ipcMain.handle('lists:play', async (_e, kind, id) => {
+ipcMain.handle('lists:play', async (_e, kind, id, name) => {
+  if (kind.startsWith('copy-')) {
+    if (copying || downloading) return;
+    const what = kind.slice(5), nm = String(name || 'Playlist').slice(0, 100);
+    return what === 'spotify' ? copyToYouTube(/^spotify:user:/.test(id) ? 'liked' : String(id).split(':').pop(), nm) : copyToSpotify(what, id, nm);
+  }
+  if (kind === 'ytsaved') { const l = (readCfg().ytLists || []).find((x) => x.name === id); if (l) { writeCfg({ yt: { ids: l.ids, list: null, v: null, name: l.name } }); await setSource('youtube'); } return; }
   if (kind === 'spotify') return playSpotifyContext(String(id || ''));
   if (kind === 'youtube') { const p = ytApi.playlists().find((x) => x.id === id); if (p) await playMyPlaylist(p); return; }
   if (kind === 'ytlink') return setSource('youtube');
@@ -1156,7 +1276,7 @@ ipcMain.on('ytm:state', (_e, s) => { ytmState = s || { status: 'closed' }; });
 
 // ---------- Local playlists + YouTube download (personal use) ----------
 const library = require('./library').create({ dir: path.join(app.getPath('userData'), 'library'), binDir: path.join(app.getPath('userData'), 'bin'), log });
-const { songInfo, albumInfo } = require('./songinfo');
+const { songInfo, albumInfo, clean } = require('./songinfo');
 
 async function playLocal(name, start = 0) {
   const tracks = library.tracks(name);
@@ -1789,6 +1909,7 @@ function menuItems() {
 // the progress bar's own pause / resume / stop buttons
 ipcMain.on('download:ctl', (_e, a) => {
   if (!downloading) return;
+  if (copying) { if (a === 'cancel') copyStop = true; return; }
   if (a === 'cancel') library.cancel(); else library.pause(a === 'pause');
   buildMenu();
 });

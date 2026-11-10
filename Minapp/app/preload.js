@@ -50,6 +50,6 @@ contextBridge.exposeInMainWorld('bridge', {
   sleepGet: () => ipcRenderer.invoke('sleep:get'),
   sleepNow: () => ipcRenderer.send('sleep:now'),
   listsAll: (force) => ipcRenderer.invoke('lists:all', force),
-  listsPlay: (kind, id) => ipcRenderer.invoke('lists:play', kind, id),
+  listsPlay: (kind, id, name) => ipcRenderer.invoke('lists:play', kind, id, name),
   onMilkdrop: (cb) => ipcRenderer.on('milkdrop:toggle', cb),
 });

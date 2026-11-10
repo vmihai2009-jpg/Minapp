@@ -6,7 +6,7 @@ import { setText } from './download-bar.js';
 const W = 96, ROW = 9, PAD = 4, CW = 16; // CW: letters per line
 
 export function initListsTab(webamp, api, getWidgetMode) {
-  let panel = null, data = null, rows = [], top = 0, hover = -1, vis = 0, skinKey = '', loadedAt = 0;
+  let copyFrom = '', panel = null, data = null, rows = [], top = 0, hover = -1, vis = 0, skinKey = '', loadedAt = 0;
   const open = { spotify: true, youtube: false, local: false };
   try { Object.assign(open, JSON.parse(localStorage.getItem('minapp.listsOpen') || '{}')); } catch {}
   const skin = () => { try { return webamp.store.getState().display.skinPlaylistStyle || {}; } catch { return {}; } };
@@ -25,16 +25,22 @@ export function initListsTab(webamp, api, getWidgetMode) {
     let spl = [];
     if (sp && sp.status === 'ok') spl = [{ t: 'Liked songs', kind: 'spotify', id: `spotify:user:${sp.userId}:collection` }, ...sp.items.map((p) => ({ t: p.name, kind: 'spotify', id: 'spotify:playlist:' + p.id }))];
     else if (sp && (sp.status === 'login' || sp.status === 'rescope')) spl = [{ t: '[ Connect ]', kind: 'spotconnect' }];
-    folder('spotify', 'SPOTIFY', spl, 'Could not load');
+    if (copyFrom) { rows.push({ t: 'PICK ONE TO COPY', bright: true }); rows.push({ t: '[ Cancel ]', act: 'cancel' }); }
+    // copying: only the playlists of the chosen side can be picked
+    const pick = (list, side) => (copyFrom ? list.filter((r) => r.kind && (side === copyFrom ? r.kind !== 'spotconnect' && r.kind !== 'ytsignin' : false)).map((r) => ({ ...r, copy: true })) : list);
+    if (sp && sp.status === 'ok' && !copyFrom) spl.push({ t: '[ Copy to YouTube ]', act: 'spotify' });
+    folder('spotify', 'SPOTIFY', pick(spl, 'spotify'), copyFrom ? '' : 'Could not load');
     const yt = data && data.youtube;
     const ytl = [];
     if (yt) {
       if (yt.link) ytl.push({ t: yt.link, kind: 'ytlink' });
       for (const p of yt.items) ytl.push({ t: p.name, kind: 'youtube', id: p.id });
+      for (const p of yt.saved || []) ytl.push({ t: p.name, kind: 'ytsaved', id: p.name });
       if (!yt.signedIn) ytl.push({ t: '[ Sign in ]', kind: 'ytsignin' });
+      if (!copyFrom && ytl.some((r) => r.kind === 'youtube' || r.kind === 'ytlink' || r.kind === 'ytsaved')) ytl.push({ t: '[ Copy to Spotify ]', act: 'youtube' });
     }
-    folder('youtube', 'YOUTUBE', ytl, yt && yt.loading ? 'Loading...' : 'No playlists');
-    if (data && data.local.length) folder('local', 'LOCAL', data.local.map((p) => ({ t: p.name, kind: 'local', id: p.name })), '');
+    folder('youtube', 'YOUTUBE', pick(ytl, 'youtube'), yt && yt.loading ? 'Loading...' : 'No playlists');
+    if (data && data.local.length && !copyFrom) folder('local', 'LOCAL', data.local.map((p) => ({ t: p.name, kind: 'local', id: p.name })), '');
   }
 
   function draw() {
@@ -47,9 +53,9 @@ export function initListsTab(webamp, api, getWidgetMode) {
     rows.slice(top, top + vis).forEach((r, i) => {
       const d = document.createElement('div');
       d.dataset.i = String(top + i);
-      const live = r.kind || r.folder;
+      const live = r.kind || r.folder || r.act;
       d.style.cssText = `position:absolute;left:0;right:0;top:${i * ROW}px;height:${ROW}px;` + (live ? 'cursor:pointer;' : '') +
-        (live && top + i === hover ? `background:${sel};` : '') + (r.dim ? 'opacity:.6;' : '') + (r.folder ? 'filter:brightness(1.35);' : '');
+        (live && top + i === hover ? `background:${sel};` : '') + (r.dim ? 'opacity:.6;' : '') + (r.folder || r.bright ? 'filter:brightness(1.35);' : '');
       const t = document.createElement('div');
       t.style.cssText = `position:absolute;left:${PAD + (r.indent ? 5 : 0)}px;top:1px;height:6px;white-space:nowrap;`;
       setText(t, cut(r.t, CW - (r.indent ? 1 : 0)));
@@ -79,6 +85,9 @@ export function initListsTab(webamp, api, getWidgetMode) {
       e.stopPropagation();
       const r = rows[rowOf(e)]; if (!r) return;
       if (r.folder) { open[r.folder] = !open[r.folder]; try { localStorage.setItem('minapp.listsOpen', JSON.stringify(open)); } catch {} build(); draw(); return; }
+      if (r.act === 'cancel') { copyFrom = ''; build(); draw(); return; }
+      if (r.act) { copyFrom = r.act; open[r.act] = true; build(); draw(); return; }
+      if (r.copy) { copyFrom = ''; build(); draw(); api.listsPlay('copy-' + r.kind, r.id || '', r.t).then(() => load(true)).catch((err) => api.log('copy failed: ' + (err && err.message))); return; }
       if (r.kind) api.listsPlay(r.kind, r.id || '').catch((err) => api.log('play from panel failed: ' + (err && err.message)));
     });
     panel.addEventListener('wheel', (e) => { e.preventDefault(); top += e.deltaY > 0 ? 2 : -2; draw(); }, { passive: false });

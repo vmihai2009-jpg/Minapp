@@ -233,10 +233,30 @@ function create({ dir, binDir, log }) {
     if (cancelled) out.cancelled = true;
     return out;
   }
+  // ----- YouTube lookups through yt-dlp (no account, no daily allowance) -----
+  const ensureBin = async () => { if (!haveBin()) await fetchBin(); };
+  function ytRun(args, ms = 60000) {
+    return new Promise((resolve) => {
+      const p = spawn(bin(), ['--no-colors', '--no-warnings', ...args], { windowsHide: true });
+      let out = ''; const t = setTimeout(() => { try { p.kill(); } catch {} }, ms);
+      p.stdout.on('data', (d) => { out += d; });
+      p.stderr.on('data', () => {});
+      p.on('error', () => { clearTimeout(t); resolve(''); });
+      p.on('close', () => { clearTimeout(t); resolve(out); });
+    });
+  }
+  // the first video YouTube finds for a search
+  async function ytFind(q) { await ensureBin(); const out = await ytRun(['--flat-playlist', '--print', 'id', '--', 'ytsearch1:' + q], 30000); return (/^[\w-]{11}$/m.exec(out) || [''])[0]; }
+  // the videos of a playlist link: [{ id, title, channel }]
+  async function ytEntries(url) {
+    await ensureBin();
+    const out = await ytRun(['--flat-playlist', '--print', '%(id)s\t%(title)s\t%(channel,uploader)s', '--', url], 180000);
+    return out.split(/\r?\n/).map((l) => l.split('\t')).filter((x) => /^[\w-]{11}$/.test(x[0])).map(([id, title, channel]) => ({ id, title: title || '', channel: channel === 'NA' ? '' : channel || '' }));
+  }
   const cancel = () => { cancelled = true; paused = false; try { child && killTree(child); } catch {} if (wake) wake(); };
   // pause(true) stops yt-dlp until pause(false); a pause during a rate-limit wait is just shown, the wait keeps counting
   const pause = (on) => { paused = !!on; if (paused) { try { child && killTree(child); } catch {} } else if (wake) wake(); };
   const isPaused = () => paused;
-  return { dir, playlists, tracks, importFiles, audioIn, download, cancel, pause, isPaused, haveBin, haveFf, safeName, artFor, detailsFor, withoutCover, fillCovers };
+  return { dir, playlists, tracks, importFiles, audioIn, download, cancel, pause, isPaused, haveBin, haveFf, safeName, artFor, detailsFor, withoutCover, fillCovers, ytFind, ytEntries };
 }
 module.exports = { create, AUDIO };
