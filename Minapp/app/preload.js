@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('bridge', {
   widgetSet: (m) => ipcRenderer.send('widget:set', m),
   onWidget: (cb) => ipcRenderer.on('widget:mode', (_e, m) => cb(m)),
   like: () => ipcRenderer.invoke('spotify:like'),
+  queueLike: () => ipcRenderer.invoke('queue:like'),
   spotLists: (force) => ipcRenderer.invoke('spotlists:get', force),
   spotPlayList: (uri) => ipcRenderer.invoke('spotlists:play', uri),
   spotConnect: () => ipcRenderer.send('spotlists:connect'),
@@ -52,6 +53,7 @@ contextBridge.exposeInMainWorld('bridge', {
   listsAll: (force) => ipcRenderer.invoke('lists:all', force),
   listsPlay: (kind, id, name) => ipcRenderer.invoke('lists:play', kind, id, name),
   listsSearch: (key, q, only) => ipcRenderer.invoke('lists:search', key, q, only),
+  listsSongs: (kind, id) => ipcRenderer.invoke('lists:songs', kind, id),
   listsFound: (r) => ipcRenderer.invoke('lists:found', r),
   onMilkdrop: (cb) => ipcRenderer.on('milkdrop:toggle', cb),
 });

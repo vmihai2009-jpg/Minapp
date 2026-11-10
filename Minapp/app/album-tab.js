@@ -14,6 +14,7 @@ const LOOK_ORDER = ['case', 'tape', 'cd', 'vinyl'];
 const FILTERS = ['dots32', 'dots16', 'pattern', 'gameboy']; // how the cover is reduced: scattered dots (32 or 16 colours), a regular pattern, four greens
 const GAMEBOY = [[15, 56, 15], [48, 98, 48], [139, 172, 15], [155, 188, 15]];
 const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5]; // the 4 x 4 pattern, row by row
+import { textBg } from './download-bar.js';
 
 export function initAlbumTab(webamp, api, getWidgetMode) {
   let open = false, tab = null, canvas = null, url = null, token = 0, img = null, look = 'case';
@@ -32,7 +33,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
   const skin = () => { try { return webamp.store.getState().display.skinPlaylistStyle || {}; } catch { return {}; } };
 
   function frameStyle() {
-    const st = skin(), bg = st.normalbg || '#000';
+    const st = skin(), bg = textBg(st.normalbg || '#000');
     tab.style.cssText = `position:fixed;left:0;top:0;width:${W}px;height:${H}px;box-sizing:border-box;z-index:40;background:${bg};` +
       'border:1px solid;border-color:rgba(255,255,255,.35) rgba(0,0,0,.6) rgba(0,0,0,.6) rgba(255,255,255,.35);' +
       `box-shadow:inset 0 0 0 1px ${bg},inset 0 0 0 2px rgba(0,0,0,.45);user-select:none;cursor:pointer;` + (open ? '' : 'display:none;') +
@@ -57,7 +58,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     });
     (document.getElementById('webamp') || document.body).appendChild(tab);
     frameStyle(); draw();
-    setInterval(() => { if (open && skin().normalbg && skin().normalbg !== skinKey) { frameStyle(); draw(); } }, 2000); // skin changed
+    setInterval(() => { if (open && textBg(skin().normalbg || '#000') !== skinKey) { frameStyle(); draw(); } }, 2000); // skin changed
   }
 
   // ---------- drawing helpers ----------

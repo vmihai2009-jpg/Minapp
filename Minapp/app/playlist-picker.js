@@ -1,7 +1,7 @@
 // Spotify playlist picker. Pressing LIST in the playlist window opens a folder-style list of your Spotify playlists,
 // drawn like the rest of the player: the skin's song-title font (TEXT.BMP) and the playlist colours. Click a playlist
 // to play it, click a folder line to open or close it, scroll with the mouse wheel, close with X, Esc or a click outside.
-import { setText } from './download-bar.js';
+import { setText, textBg, selBg } from './download-bar.js';
 
 const PAD = 7, ROW = 9, HEAD = 20, MIN_ROWS = 8;
 
@@ -10,7 +10,7 @@ export function initPlaylistPicker(webamp, api) {
 
   const skinColours = () => {
     const st = (() => { try { return webamp.store.getState().display.skinPlaylistStyle || {}; } catch { return {}; } })();
-    return { bg: st.normalbg || '#000', hi: st.current || '#fff', sel: st.selectedbg || '#0000c6' };
+    return { bg: textBg(st.normalbg || '#000'), hi: st.current || '#fff', sel: selBg(st.selectedbg || '#0000c6') };
   };
   const isSpotify = () => (document.documentElement.dataset.source || 'spotify') === 'spotify';
   const cut = (t, n) => (t.length > n ? t.slice(0, Math.max(0, n - 1)) + '.' : t);

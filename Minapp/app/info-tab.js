@@ -1,15 +1,20 @@
 // Info panel: an optional strip under the player that shows either the LYRICS of the playing song or a short text
 // ABOUT THE ARTIST. It is drawn like the rest of the player: the skin's song-title font and the playlist colours.
 // The two choices are skin-style push buttons in the panel's top bar; X (or the Player menu) hides the panel.
-import { setText, skinImage } from './download-bar.js';
+import { setText, skinImage, textBg, selBg, blendFor, paintWord } from './download-bar.js';
 
 const W = 275, H = 116, PAD = 7, ROW = 9, HEAD = 20, VIS = 10, CW = 50;
-const KINDS = [['lyrics', 'LYRICS'], ['artist', 'ARTIST'], ['album', 'ALBUM']];
-const SAY = { // what each tab says while it waits, fails or finds nothing
+const KINDS = [['queue', 'QUEUE'], ['lyrics', 'LYRICS'], ['artist', 'ARTIST'], ['album', 'ALBUM']];
+const SAY = {
+  queue: ['Nothing is playing.', '', '', 'Nothing found.'], // what each tab says while it waits, fails or finds nothing
   lyrics: ['Play a song to see its lyrics.', 'Looking for the lyrics...', 'Could not reach the lyrics service.', 'No lyrics found for this song.'],
   artist: ['Play a song to read about the artist.', 'Looking up the artist...', 'Could not reach Wikipedia.', 'Nothing found about this artist.'],
   album: ['Play a song to see its album.', 'Looking up the album...', 'Could not reach the album services.', 'Nothing found about this album.'],
 };
+const TOOLS = [['find', 'FIND', 'Find a song in the queue (type, Esc closes)'], ['like', 'LIKE', 'Spotify: like the song. YouTube: save it to Minapp likes. Local: copy it to Liked'],
+  ['skip', 'SKIP', 'Skip this song (right-click a song below to hide it)'], ['sort', 'SORT', 'Shuffle, or sort the list'], ['lists', 'LISTS', 'Open your libraries']];
+const SORTS = [['order', 'PLAY ORDER'], ['az', 'A-Z BY TITLE'], ['artist', 'BY ARTIST'], ['reverse', 'REVERSE']];
+const QVIS = 9, TOOLS_H = 13; // the queue shows 9 rows under its button row
 const mmss = (ms) => { const t = Math.round(ms / 1000); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
 const same = (a, b) => { const n = (x) => String(x || '').toLowerCase().replace(/\s*[-(\[].*$/, '').replace(/[^\p{L}\p{N}]/gu, ''); return !!n(a) && n(a) === n(b); };
 
@@ -32,9 +37,12 @@ function wrap(t, width) {
 export function initInfoTab(webamp, api, getWidgetMode) {
   let open = false, kind = 'lyrics', panel = null, skinKey = '';
   let song = null, songKey = '', data = {}, rows = [], top = 0, cur = -1, handsOff = 0, ticket = 0, hover = -1, hasComma = true;
-  try { open = localStorage.getItem('minapp.infoTab') === '1'; const k = localStorage.getItem('minapp.infoKind'); if (k === 'artist' || k === 'album') kind = k; } catch {}
+  try { open = localStorage.getItem('minapp.infoTab') === '1'; const k = localStorage.getItem('minapp.infoKind'); if (k === 'artist' || k === 'album' || k === 'queue') kind = k; } catch {}
   const skin = () => { try { return webamp.store.getState().display.skinPlaylistStyle || {}; } catch { return {}; } };
-  const colours = () => { const st = skin(); return { bg: st.normalbg || '#000', hi: st.current || '#fff', sel: st.selectedbg || '#0000c6' }; };
+  const colours = () => { const st = skin(); return { bg: textBg(st.normalbg || '#000'), hi: st.current || '#fff', sel: selBg(st.selectedbg || '#0000c6') }; };
+  let queue = { hist: [], cur: null, q: [] }, qSig = '', qFind = null, qSort = 'order', sortOpen = false, flash = '', flashUntil = 0;
+  const hidden = new Set();
+  const vis = () => (kind === 'queue' ? QVIS : VIS);
   const visible = () => open && getWidgetMode() === 'off';
   const report = () => { try { api.infoState({ open, kind }); } catch {} };
 
@@ -44,7 +52,8 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     const d = data[kind];
     const note = (...lines) => { rows.push({ t: '' }); for (const t of lines) rows.push({ t, dim: true, mid: true }); };
     const say = SAY[kind];
-    if (!song || !song.title) note(say[0]);
+    if (kind === 'queue') buildQueue(note);
+    else if (!song || !song.title) note(say[0]);
     else if (!d) note(say[1]);
     else if (d.status === 'error') { note(say[2]); rows.push({ t: '' }); rows.push({ t: '[ Try again ]', act: 'retry', mid: true }); }
     else if (d.status !== 'ok') note(say[3]);
@@ -72,6 +81,57 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     if (!hasComma) for (const r of rows) r.t = r.t.replace(/,/g, '.');
   }
 
+  function buildQueue(note) {
+    const n = (x) => plain(x).toLowerCase();
+    if (sortOpen) {
+      const shuffle = (() => { try { return !!webamp.store.getState().media.shuffle; } catch { return false; } })();
+      rows.push({ t: `SHUFFLE: ${shuffle ? 'ON' : 'OFF'}`, act: 'shuffle', bright: true });
+      for (const [k, label] of SORTS) rows.push({ t: (qSort === k ? '* ' : '  ') + label, act: 'sort', val: k });
+      rows.push({ t: '' });
+    }
+    if (qFind !== null) rows.push({ t: '?' + plain(qFind).slice(-(CW - 3)) + (Date.now() % 1000 < 550 ? '_' : ' '), input: true });
+    let list = [];
+    queue.hist.forEach((x, i) => list.push({ x, off: i - queue.hist.length }));
+    if (queue.cur) list.push({ x: queue.cur, off: 0 });
+    queue.q.forEach((x, i) => list.push({ x, off: i + 1 }));
+    const label = (x) => plain((x.artist ? x.artist + ' - ' : '') + (x.title || ''));
+    list = list.filter((e) => !hidden.has(label(e.x)) && (!qFind || n(label(e.x)).includes(n(qFind))));
+    if (qSort === 'az') list.sort((a, b) => n(a.x.title || '').localeCompare(n(b.x.title || '')));
+    if (qSort === 'artist') list.sort((a, b) => n(a.x.artist || '').localeCompare(n(b.x.artist || '')) || n(a.x.title || '').localeCompare(n(b.x.title || '')));
+    if (qSort === 'reverse') list.reverse();
+    if (!list.length) { note(queue.cur ? SAY.queue[3] : SAY.queue[0]); return; }
+    for (const e of list) {
+      const t = label(e.x);
+      rows.push({ t: t.length > CW ? t.slice(0, CW - 1) + '.' : t, now: e.off === 0, dim: e.off < 0, act: e.off && !e.x.hint ? 'jump' : '', off: e.off, key: t });
+    }
+  }
+  function tools() {
+    const box = panel && panel.querySelector('.it-tools');
+    if (!box) return;
+    box.style.display = kind === 'queue' ? '' : 'none';
+    if (kind !== 'queue') return;
+    const { sel } = colours();
+    for (const b of box.querySelectorAll('.it-tool')) {
+      const on = (b.dataset.tool === 'find' && qFind !== null) || (b.dataset.tool === 'sort' && sortOpen) || (b.dataset.tool === 'lists' && window.__listsTab && window.__listsTab.isOpen());
+      b.style.background = on ? sel : 'rgba(255,255,255,.06)';
+      b.style.borderColor = on ? 'rgba(0,0,0,.7) rgba(255,255,255,.35) rgba(255,255,255,.35) rgba(0,0,0,.7)' : 'rgba(255,255,255,.4) rgba(0,0,0,.7) rgba(0,0,0,.7) rgba(255,255,255,.4)';
+      b.firstChild.style.top = on ? '2px' : '1px';
+      b.firstChild.style.mixBlendMode = blendFor(colours().bg);
+    }
+    const f = box.querySelector('.it-flash');
+    const say = Date.now() < flashUntil ? flash : qSort !== 'order' ? SORTS.find((x) => x[0] === qSort)[1] : '';
+    if (f.dataset.t !== say) { f.dataset.t = say; setText(f, say.slice(0, 15)); }
+  }
+  function say(t) { flash = String(t || ''); flashUntil = Date.now() + 3000; tools(); setTimeout(tools, 3100); }
+  function tool(name) {
+    if (name === 'find') { qFind = qFind === null ? '' : null; sortOpen = false; }
+    else if (name === 'sort') { sortOpen = !sortOpen; }
+    else if (name === 'skip') { if (window.__queueJump) window.__queueJump(1); say('SKIPPED'); return; }
+    else if (name === 'like') { say('...'); api.queueLike().then(say, () => say('COULD NOT SAVE')); return; }
+    else if (name === 'lists') { if (window.__listsTab) window.__listsTab.toggle(); setTimeout(tools, 50); return; }
+    top = 0; build(); draw();
+  }
+
   // the timed line that is being sung now (-1: none, or the words are not timed)
   function current() {
     const d = data[kind];
@@ -86,14 +146,15 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     if (!panel) return;
     const { hi, sel, bg } = colours();
     // the font's letters sit on little blocks of the skin's background colour: blend those away over a highlight
-    const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(bg);
-    const blend = `mix-blend-mode:${!m || parseInt(m[1], 16) * 3 + parseInt(m[2], 16) * 6 + parseInt(m[3], 16) < 1280 ? 'lighten' : 'darken'};`;
-    const body = panel.querySelector('.it-body');
+    const blend = `mix-blend-mode:${blendFor(bg)};`;
+    const body = panel.querySelector('.it-body'), V = vis(), y0 = HEAD + (kind === 'queue' ? TOOLS_H : 0);
     body.textContent = '';
-    const maxTop = Math.max(0, rows.length - VIS);
+    body.style.top = y0 + 'px'; body.style.height = V * ROW + 'px';
+    tools();
+    const maxTop = Math.max(0, rows.length - V);
     top = Math.max(0, Math.min(top, maxTop));
     const timed = cur >= 0 || (kind === 'lyrics' && data.lyrics && data.lyrics.synced);
-    rows.slice(top, top + VIS).forEach((r, i) => {
+    rows.slice(top, top + V).forEach((r, i) => {
       const d = document.createElement('div');
       d.className = 'it-row'; d.dataset.i = String(top + i);
       const now = r.now || (timed && r.li === cur && r.li !== undefined);
@@ -108,8 +169,9 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     });
     const bar = panel.querySelector('.it-bar');
     bar.style.display = maxTop ? 'block' : 'none';
+    bar.style.top = y0 + 'px'; bar.style.height = V * ROW + 'px';
     if (maxTop) {
-      const h = VIS * ROW, th = Math.max(12, Math.round(h * VIS / rows.length));
+      const h = V * ROW, th = Math.max(12, Math.round(h * V / rows.length));
       bar.firstChild.style.cssText = `position:absolute;left:0;width:3px;height:${th}px;top:${Math.round((h - th) * top / maxTop)}px;background:${hi};opacity:.5;`;
     }
     // the two push buttons: the chosen one is pressed in
@@ -130,12 +192,13 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     cur = c;
     if (c >= 0 && Date.now() > handsOff) {
       const first = rows.findIndex((r) => r.li === c);
-      if (first >= 0) top = first - Math.floor((VIS - 1) / 2);
+      if (first >= 0) top = first - Math.floor((vis() - 1) / 2);
     }
     draw();
   }
 
   async function load(force) {
+    if (kind === 'queue') { build(); if (!force) { const i = rows.findIndex((r) => r.now); top = i > 1 ? i - 1 : 0; } draw(); return; }
     if (!song || !song.title) { build(); draw(); return; }
     const k = kind, key = songKey, mine = ++ticket;
     if (data[k] && !force) { build(); follow(true); return; }
@@ -151,7 +214,7 @@ export function initInfoTab(webamp, api, getWidgetMode) {
   // ---------- the panel itself ----------
   function frame() {
     const { bg, hi } = colours();
-    skinKey = bg;
+    skinKey = JSON.stringify(colours());
     panel.style.cssText = `position:fixed;left:0;top:0;width:${W}px;height:${H}px;box-sizing:border-box;z-index:45;background:${bg};user-select:none;` +
       'border:1px solid;border-color:rgba(255,255,255,.35) rgba(0,0,0,.6) rgba(0,0,0,.6) rgba(255,255,255,.35);' +
       `box-shadow:inset 0 0 0 1px ${bg},inset 0 0 0 2px rgba(0,0,0,.45);` + (visible() ? '' : 'display:none;');
@@ -165,11 +228,23 @@ export function initInfoTab(webamp, api, getWidgetMode) {
       `<div class="it-line" style="position:absolute;left:${PAD}px;right:${PAD}px;top:15px;height:1px;opacity:.45"></div>` +
       `<div class="it-body" style="position:absolute;left:0;right:0;top:${HEAD}px;height:${VIS * ROW}px;overflow:hidden"></div>` +
       `<div class="it-bar" style="position:absolute;right:3px;top:${HEAD}px;width:3px;height:${VIS * ROW}px"><div></div></div>`;
+    const tb = document.createElement('div');
+    tb.className = 'it-tools'; tb.style.cssText = `position:absolute;left:0;right:0;top:${HEAD}px;height:${TOOLS_H - 2}px;`;
+    TOOLS.forEach(([k, label, tip], i) => {
+      const b = document.createElement('div');
+      b.className = 'it-tool'; b.dataset.tool = k; b.title = tip;
+      b.style.cssText = `position:absolute;left:${PAD + i * 34}px;top:0;width:32px;height:11px;box-sizing:border-box;border:1px solid;cursor:pointer;`;
+      const t = document.createElement('div'); t.style.cssText = `position:absolute;left:${Math.round((30 - label.length * 5) / 2)}px;top:1px;height:6px;white-space:nowrap;`; setText(t, label); b.appendChild(t);
+      b.addEventListener('click', (e) => { e.stopPropagation(); tool(k); });
+      tb.appendChild(b);
+    });
+    const fl = document.createElement('div'); fl.className = 'it-flash'; fl.style.cssText = `position:absolute;left:${PAD + 5 * 34 + 3}px;top:3px;height:6px;white-space:nowrap;opacity:.75;`; tb.appendChild(fl);
+    panel.appendChild(tb);
     const head = panel.querySelector('.it-head');
     KINDS.forEach(([k, label], i) => {
       const b = document.createElement('div');
       b.className = 'it-tab'; b.dataset.kind = k;
-      b.title = k === 'lyrics' ? 'Show the lyrics of this song' : 'Show a short text about the artist';
+      b.title = { queue: 'The songs up next (and the ones played)', lyrics: 'Show the lyrics of this song', artist: 'Show a short text about the artist', album: 'The album: its songs and a short text' }[k];
       b.style.cssText = `position:absolute;left:${PAD + i * 42}px;top:3px;width:40px;height:11px;box-sizing:border-box;border:1px solid;cursor:pointer;`;
       const t = document.createElement('div'); t.style.cssText = 'position:absolute;left:4px;top:2px;height:6px;white-space:nowrap;'; setText(t, label); b.appendChild(t);
       b.addEventListener('click', (e) => { e.stopPropagation(); setKind(k); });
@@ -182,7 +257,11 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     body.addEventListener('mousemove', (e) => { const i = rowOf(e); if (i !== hover) { hover = i; if (rows.some((r) => r.act)) draw(); } });
     body.addEventListener('mouseleave', () => { hover = -1; if (rows.some((r) => r.act)) draw(); });
     body.addEventListener('click', (e) => { const r = rows[rowOf(e)]; if (r && r.act === 'retry') load(true); if (r && r.act === 'song' && data.album) api.infoPlay(r.uri, data.album.uri).catch(() => {});
+      if (r && r.act === 'jump' && window.__queueJump) { window.__queueJump(r.off); say(r.off > 0 ? 'JUMPING AHEAD' : 'GOING BACK'); }
+      if (r && r.act === 'sort') { qSort = r.val; sortOpen = false; top = 0; build(); draw(); }
+      if (r && r.act === 'shuffle') { const sh = document.querySelector('#webamp #shuffle'); if (sh) sh.click(); setTimeout(() => { build(); draw(); }, 100); }
       if (r && r.act === 'play' && data.album && data.album.uri) api.infoPlay(data.album.uri).catch(() => {}); });
+    body.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); const r = rows[rowOf(e)]; if (kind === 'queue' && r && r.key && !r.now) { hidden.add(r.key); say('HIDDEN'); build(); draw(); } });
     panel.addEventListener('wheel', (e) => { e.preventDefault(); top += e.deltaY > 0 ? 3 : -3; handsOff = Date.now() + 6000; draw(); }, { passive: false });
     panel.addEventListener('mousedown', (e) => e.stopPropagation());
     (document.getElementById('webamp') || document.body).appendChild(panel);
@@ -205,7 +284,7 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     }
     panel.style.left = Math.round(left) + 'px';
     panel.style.top = Math.round(bottom) + 'px';
-    if (skin().normalbg && skin().normalbg !== skinKey) { frame(); draw(); }
+    if (JSON.stringify(colours()) !== skinKey) { frame(); draw(); }
   }
 
   function set(v) {
@@ -231,8 +310,30 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     if (open) load(false);
   }
 
+  // called with every poll: the played songs, the playing one and the ones up next
+  function setQueue(hist, cur, q) {
+    const pick = (x) => ({ artist: x.artist || '', title: x.title || '', hint: !!x.hint });
+    queue = { hist: (hist || []).map(pick), cur: cur && cur.title ? pick(cur) : null, q: (q || []).map(pick) };
+    const sig = JSON.stringify(queue);
+    if (sig === qSig) return;
+    const first = !qSig; qSig = sig;
+    if (open && kind === 'queue' && panel) { build(); if (first || qSort === 'order') { const i = rows.findIndex((r) => r.now); if (i >= 0 && (i < top || i >= top + QVIS)) top = Math.max(0, i - 1); } draw(); }
+  }
+  // typing while FIND is on: letters go into the search line; Enter plays the first match; Esc closes FIND (and SORT)
+  document.addEventListener('keydown', (e) => {
+    if (!visible() || kind !== 'queue' || (qFind === null && !sortOpen) || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'Escape') { qFind = null; sortOpen = false; }
+    else if (qFind === null) return;
+    else if (e.key === 'Enter') { const r = rows.find((x) => x.act === 'jump'); if (r && window.__queueJump) { window.__queueJump(r.off); qFind = null; } }
+    else if (e.key === 'Backspace') qFind = qFind.slice(0, -1);
+    else if (e.key.length === 1 && qFind.length < 40) qFind += e.key;
+    else return;
+    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+    top = 0; build(); draw();
+  }, true);
+  setInterval(() => { if (qFind !== null && visible() && kind === 'queue' && !document.hidden) { build(); draw(); } }, 500); // the blinking cursor
+
   // ---------- the repeat button becomes INFO: it opens and closes this panel, its light shows when it is open ----------
-  const TINY = { I: ['#', '#', '#', '#', '#'], N: ['#..#', '##.#', '#.##', '#..#', '#..#'], F: ['###', '#..', '##.', '#..', '#..'], O: ['###', '#.#', '#.#', '#.#', '###'] };
   let btnKey = '';
   function infoButton() {
     const b = document.getElementById('repeat');
@@ -251,16 +352,7 @@ export function initInfoTab(webamp, api, getWidgetMode) {
       c.width = w; c.height = h; c.style.width = w + 'px'; c.style.height = h + 'px';
       const cg = c.getContext('2d', { willReadFrequently: true });
       cg.drawImage(im, 0, 0);
-      // the icon sits right of the light: paint over it with the button face, then the word in the icon's darkest colour
-      const d = cg.getImageData(0, 0, w, h).data, at = (x, y) => { const o = (y * w + x) * 4; return [d[o], d[o + 1], d[o + 2]]; };
-      // the darkest colour of the icon is the ink; then the icon is wiped row by row with the button's own surface
-      // (taken from the clean strip between the light and the icon), so its shading stays and no box shows behind the word
-      let ink = at(11, 3), dark = 999;
-      for (let y = 3; y < h - 3; y++) for (let x = 11; x < w - 3; x++) { const p = at(x, y), l = p[0] + p[1] + p[2]; if (l < dark) { dark = l; ink = p; } }
-      for (let y = 2; y < h - 2; y++) { cg.fillStyle = `rgb(${at(10, y)})`; cg.fillRect(10, y, w - 13, 1); }
-      cg.fillStyle = `rgb(${ink})`;
-      let x = 10, y = Math.round((h - 5) / 2);
-      for (const ch of 'INFO') { TINY[ch].forEach((r, j) => [...r].forEach((q, i) => { if (q === '#') cg.fillRect(x + i, y + j, 1, 1); })); x += TINY[ch][0].length + 1; }
+      paintWord(cg, w, h, 10, 'INFO', false); // the light on the left of the button stays
     };
     im.src = m[1];
     b.title = 'Lyrics and about the artist';
@@ -273,6 +365,6 @@ export function initInfoTab(webamp, api, getWidgetMode) {
 
   setInterval(() => { if (!open || document.hidden) return; place(); if (visible()) follow(false); }, 250);
   api.onInfo((o) => { if (!o) return; if (o.kind) setKind(o.kind); else set(o.open === undefined ? !open : o.open); });
-  window.__infoTab = { set, setKind, setSong, show: (k, d) => { data[k] = d; kind = k; build(); follow(true); } };
+  window.__infoTab = { set, setKind, setSong, setQueue, colours, style: () => skin(), show: (k, d) => { data[k] = d; kind = k; build(); follow(true); } };
   if (open) set(true); else report();
 }

@@ -1,5 +1,12 @@
 # What's new in Minapp
 
+## 1.9.24
+- The PL button is now LIB: it opens and closes your Libraries (Spotify, YouTube and local playlists).
+- INFO has a new QUEUE tab instead of the old playlist window, with FIND (type to filter, Enter plays, Esc closes), LIKE, SKIP, SORT (shuffle, A-Z, by artist, reverse) and LISTS.
+- LIKE hearts a Spotify song, saves a YouTube song to a "Minapp likes" playlist, and copies a local song to "Liked". Right-click a queued song to hide it.
+- Libraries: the magnifier on a playlist searches the songs inside it.
+- The panels take the player's colour from each skin, and the letters sit cleanly on it. Switching skins now updates the INFO and LIB buttons too.
+
 ## 1.9.23
 - Clicking a song in a Spotify search now plays it.
 - Search: a long text scrolls so you always see what you type, and a SHOW drop-down filters Spotify results to songs, albums or artists.

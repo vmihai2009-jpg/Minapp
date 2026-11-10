@@ -1025,6 +1025,33 @@ ipcMain.handle('lists:search', async (_e, key, q, only) => {
   for (const p of library.playlists()) library.tracks(p.name).forEach((t, i) => { if (out.length < 40 && n(t.title + ' ' + t.artist).includes(n(q))) out.push({ t: t.title, kind: 'local', list: p.name, i }); });
   return out;
 });
+// the songs of one playlist, for searching inside it: [{ t, ...how to play it }]
+ipcMain.handle('lists:songs', async (_e, kind, id) => {
+  const by = (t) => (t.artist ? t.title + ' - ' + t.artist : t.title);
+  if (kind === 'spotify') {
+    const tok = readCfg().spotRefresh ? await spotAccessToken().catch(() => null) : null;
+    if (!tok) return [];
+    const liked = /^spotify:user:/.test(id), pid = liked ? 'liked' : String(id).split(':').pop();
+    const out = [];
+    let p = liked ? '/me/tracks?limit=50' : `/playlists/${pid}/items?limit=50`;
+    for (let k = 0; p && k < 20; k++) {
+      let j = await spotApi(p, tok).catch(() => null);
+      if (!j && !k && !liked) j = await spotApi(`/playlists/${pid}/tracks?limit=50`, tok).catch(() => null);
+      for (const x of (j && j.items) || []) { const t = x.item || x.track; if (t && t.uri) out.push({ t: by({ title: t.name, artist: t.artists && t.artists[0] ? t.artists[0].name : '' }), kind: 'spotify', uri: t.uri, ctx: liked ? '' : id }); }
+      p = j && j.next ? j.next.replace('https://api.spotify.com/v1', '') : null;
+    }
+    return out;
+  }
+  if (kind === 'local') return library.tracks(String(id || '')).map((t, i) => ({ t: t.title, kind: 'local', list: id, i }));
+  let vids = [];
+  try {
+    if (kind === 'youtube') vids = await ytApi.titles(await ytApi.videoIds(id));
+    else if (kind === 'ytlink') { const t = readCfg().yt || {}; vids = await library.ytEntries(t.list ? 'https://www.youtube.com/playlist?list=' + t.list : 'https://www.youtube.com/watch?v=' + t.v); }
+    else if (kind === 'ytsaved') { const l = (readCfg().ytLists || []).find((x) => x.name === id); if (l) vids = ytApi.signedIn() ? await ytApi.titles(l.ids) : []; }
+  } catch (e) { log('playlist songs: ' + e.message); }
+  const all = vids.map((v) => v.id);
+  return vids.map((v) => ({ t: v.title, kind: 'youtube', id: v.id, all }));
+});
 ipcMain.handle('lists:found', async (_e, r) => {
   if (!r || typeof r !== 'object') return;
   if (r.kind === 'spotify') return playSpotifyContext(String(r.uri || ''), String(r.ctx || ''));
@@ -1136,6 +1163,29 @@ async function toggleLike() {
   } finally { likeBusy = false; }
 }
 ipcMain.handle('spotify:like', () => toggleLike());
+// the LIKE button of the queue: Spotify likes the song, YouTube saves it to "Minapp likes", a local song is copied to "Liked"
+ipcMain.handle('queue:like', async () => {
+  try {
+    if (source === 'spotify') { await toggleLike(); return 'LIKED SONGS UPDATED'; }
+    if (source === 'local') {
+      const p = localMeta.path;
+      if (!p || !fs.existsSync(p)) return 'NOTHING TO SAVE';
+      const d = path.join(app.getPath('userData'), 'library', 'Liked');
+      fs.mkdirSync(d, { recursive: true });
+      const to = path.join(d, path.basename(p));
+      if (path.dirname(p) === d) return 'ALREADY IN LIKED';
+      if (!fs.existsSync(to)) fs.copyFileSync(p, to);
+      return 'SAVED TO LIKED';
+    }
+    if (source === 'youtube') {
+      if (!ytState.id) return 'NOTHING TO SAVE';
+      if (!ytApi.canWrite()) return 'SIGN IN TO YOUTUBE FIRST';
+      await ytApi.addToLikes(ytState.id);
+      return 'SAVED TO MINAPP LIKES';
+    }
+    return 'NOT FOR THIS SOURCE';
+  } catch (e) { log('like failed: ' + ((e && e.message) || e)); return 'COULD NOT SAVE'; }
+});
 
 // Remember what played. When the song changes it also works out whether we moved forward through the queue
 // (the skipped songs go to the history) or back through the history (they return to the front of the queue).
@@ -1898,7 +1948,7 @@ function menuItems() {
     ] },
     { label: 'Open Spotify', click: () => shell.openExternal('spotify:') },
     { type: 'separator' },
-    { label: 'Playlist (queue)', click: send('playlist') },
+    { label: 'Queue', click: send('playlist') },
     { label: 'Equalizer window', click: send('equalizer') },
     { label: 'Milkdrop', accelerator: 'CmdOrCtrl+Shift+K', click: () => win.webContents.send('milkdrop:toggle') },
     { label: 'Album picture', submenu: [
