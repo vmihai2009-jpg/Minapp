@@ -57,7 +57,6 @@ export function initPlaylistView(webamp, api) {
   function buildRight() {
     rRows = [];
     if (find !== null) rRows.push({ t: 'Find: ' + find + (Date.now() % 1000 < 550 ? '_' : ' '), input: true });
-    if (sortOpen) return;
     let list = [];
     if (pick.kind === 'queue') {
       queue.hist.forEach((x, i) => list.push({ x, off: i - queue.hist.length }));
