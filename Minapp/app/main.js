@@ -281,9 +281,35 @@ async function doCmd(cmd, arg) {
     } finally { jumping = false; holdQueue(); }
     return;
   }
+  if (cmd === 'shuffle' || cmd === 'repeat') return setSpotMode(cmd, !!arg);
   const r = await spotifyCmd(cmd, arg);
   if (cmd === 'previous') holdQueue();
   return r;
+}
+// Shuffle / repeat on Spotify. The desktop app is asked first (AppleScript on the Mac, the media controls on Windows),
+// but on Windows Spotify often ignores that and keeps reporting "off". So when Spotify is connected, its Web API is
+// told too, and the button then keeps what the Web API confirmed until the app itself reports a change.
+const spotMode = {}; // shuffle / repeat -> { want, was } while our value overrides the app's report
+async function setSpotMode(cmd, on) {
+  try { await spotifyCmd(cmd, on); } catch (e) { log(cmd + ' via the app failed: ' + e.message); }
+  if (process.env.SKIN_FAKE) { spotMode[cmd] = { want: on, was: false }; return; }
+  try {
+    if (!readCfg().spotRefresh) return;
+    const tok = await spotAccessToken();
+    if (!tok) return;
+    const q = cmd === 'shuffle' ? `shuffle?state=${on}` : `repeat?state=${on ? 'context' : 'off'}`;
+    const r = await fetch('https://api.spotify.com/v1/me/player/' + q, { method: 'PUT', headers: { Authorization: 'Bearer ' + tok } });
+    if (r.ok) spotMode[cmd] = { want: on, was: null };
+    else log(`${cmd} via Spotify's Web API: HTTP ${r.status}`);
+  } catch (e) { log(cmd + ' via the Web API failed: ' + e.message); }
+}
+function applySpotMode(st) {
+  for (const k of ['shuffle', 'repeat']) {
+    const m = spotMode[k]; if (!m) continue;
+    if (m.was === null) m.was = st[k]; // what the app said right after our change
+    if (st[k] === m.want || (typeof st[k] === 'boolean' && st[k] !== m.was)) delete spotMode[k]; // the app caught up, or was changed there
+    else st[k] = m.want;
+  }
 }
 
 
@@ -826,6 +852,26 @@ async function playSpotifyContext(uri) {
   return { ok: true, opened: true };
 }
 ipcMain.handle('spotlists:get', (_e, force) => getSpotifyPlaylists(!!force));
+// the playlist panel under the album picture: everything that can be played, by source
+ipcMain.handle('lists:all', async (_e, force) => {
+  let spotify;
+  try { spotify = readCfg().spotRefresh ? await getSpotifyPlaylists(!!force) : { status: 'login' }; } catch (e) { spotify = { status: 'error', message: e.message }; }
+  const yt = readCfg().yt;
+  const youtube = {
+    signedIn: ytApi.signedIn(), loading: ytApi.loading(),
+    items: ytApi.signedIn() ? ytApi.playlists().map((p) => ({ id: p.id, name: p.title, n: p.count })) : [],
+    link: yt && !yt.ids && (yt.list || yt.v) ? (yt.name || (yt.list ? 'Pasted playlist' : 'Pasted video')) : '',
+  };
+  return { spotify, youtube, local: library.playlists().filter((p) => p.count > 0).map((p) => ({ name: p.name, n: p.count })) };
+});
+ipcMain.handle('lists:play', async (_e, kind, id) => {
+  if (kind === 'spotify') return playSpotifyContext(String(id || ''));
+  if (kind === 'youtube') { const p = ytApi.playlists().find((x) => x.id === id); if (p) await playMyPlaylist(p); return; }
+  if (kind === 'ytlink') return setSource('youtube');
+  if (kind === 'local') return playLocal(String(id || ''));
+  if (kind === 'ytsignin') return ytApi.signIn();
+  if (kind === 'spotconnect') return connectSpotifyQueue().then(() => { spotLists = null; });
+});
 ipcMain.handle('spotlists:play', (_e, uri) => playSpotifyContext(String(uri || '')));
 ipcMain.on('spotlists:connect', () => { connectSpotifyQueue().then(() => { spotLists = null; }); });
 
@@ -1400,6 +1446,7 @@ ipcMain.handle('spotify:state', async () => {
     spotLastId = st.id;
     holdQueue();
   }
+  applySpotMode(st);
   if (st.title) lastSongTitle = st.title;
   st.queue = spotifyQueue.items;
   if (!st.art && spotArt && st.title && spotArt.title === norm(st.title)) st.art = spotArt.url;
@@ -1486,11 +1533,11 @@ ipcMain.on('win:dragstart', () => {
   }, 8);
 });
 ipcMain.on('win:dragend', () => { if (dragTimer) { clearInterval(dragTimer); dragTimer = null; savePos(); } });
-let albumUi = { look: 'case', spin: false, open: false }; // what the album panel shows, for the menu's ticks
+let albumUi = { look: 'case', spin: false, open: false, filter: 'dots32', big: false }; // what the album panel shows, for the menu's ticks
 let infoUi = { open: false, kind: 'lyrics' };
 ipcMain.on('info:state', (_e, st) => { if (st && typeof st === 'object') { infoUi = { open: !!st.open, kind: st.kind === 'artist' ? 'artist' : 'lyrics' }; buildMenu(); } });
 ipcMain.handle('info:get', (_e, kind, song) => songInfo(kind === 'artist' ? 'artist' : 'lyrics', song && typeof song === 'object' ? song : {}));
-ipcMain.on('album:state', (_e, st) => { if (st && typeof st === 'object') { albumUi = { look: String(st.look || 'case'), spin: !!st.spin, open: !!st.open }; buildMenu(); } });
+ipcMain.on('album:state', (_e, st) => { if (st && typeof st === 'object') { albumUi = { look: String(st.look || 'case'), spin: !!st.spin, open: !!st.open, filter: String(st.filter || 'dots32'), big: !!st.big }; buildMenu(); } });
 ipcMain.on('app:quit', () => app.quit());
 ipcMain.handle('app:version', () => app.getVersion());
 // the bulb in the player's corner
@@ -1588,6 +1635,8 @@ function registerHotkeys() {
     'Control+Alt+Left': () => doCmd('previous'),
     'Control+Alt+Down': () => doCmd('playpause'),
     'Control+Alt+Up': () => toggleVisible(),
+    'Control+Alt+L': () => { if (source === 'spotify') toggleLike(); }, // like / unlike the playing song
+    'Control+Alt+I': () => { if (win && !win.isDestroyed()) win.webContents.send('info:options', {}); }, // lyrics / artist panel
     'Control+Alt+PageUp': () => { if (source === 'youtube') setYtHidden(!readCfg().ytHidden); },
   };
   for (const [k, fn] of Object.entries(keys)) {
@@ -1666,8 +1715,11 @@ function menuItems() {
     { label: 'Equalizer window', click: send('equalizer') },
     { label: 'Milkdrop', accelerator: 'CmdOrCtrl+Shift+K', click: () => win.webContents.send('milkdrop:toggle') },
     { label: 'Album picture', submenu: [
-      ...[['case', 'Cassette box'], ['tape', 'Cassette'], ['cd', 'CD']].map(([k, label]) => ({ label, type: 'radio', checked: albumUi.look === k, click: () => win.webContents.send('album:options', { look: k }) })),
+      ...[['case', 'Cassette box'], ['tape', 'Cassette'], ['cd', 'CD'], ['vinyl', 'Record']].map(([k, label]) => ({ label, type: 'radio', checked: albumUi.look === k, click: () => win.webContents.send('album:options', { look: k }) })),
       { type: 'separator' },
+      { label: 'Big (double size)', type: 'checkbox', checked: !!albumUi.big, click: () => win.webContents.send('album:options', { big: !albumUi.big }) },
+      { label: 'Cover filter', submenu: [['dots32', 'Dots, 32 colours'], ['dots16', 'Dots, 16 colours'], ['pattern', 'Pattern'], ['gameboy', 'Game Boy green']]
+        .map(([k, label]) => ({ label, type: 'radio', checked: albumUi.filter === k, click: () => win.webContents.send('album:options', { filter: k }) })) },
       { label: 'Spin the CD (slowly, while playing)', type: 'checkbox', checked: !!albumUi.spin, click: () => win.webContents.send('album:options', { look: 'cd', spin: !albumUi.spin }) },
     ] },
     { label: 'Lyrics / about the artist', type: 'checkbox', checked: infoUi.open, accelerator: 'CmdOrCtrl+Shift+L', click: () => win.webContents.send('info:options', { open: !infoUi.open }) },
@@ -1690,7 +1742,7 @@ function menuItems() {
     { label: readCfg().spotRefresh ? 'Disconnect Spotify queue' : 'Connect Spotify queue…', click: () => (readCfg().spotRefresh ? disconnectSpotifyQueue() : connectSpotifyQueue()) },
     { type: 'separator' },
     { label: 'Settings', submenu: [
-      { label: 'Global hotkeys (Ctrl+Alt+←/→/↓/↑, PgUp)', type: 'checkbox', checked: cfgOn('hotkeys', true), click: () => { toggleCfg('hotkeys', true)(); registerHotkeys(); } },
+      { label: 'Global hotkeys (Ctrl+Alt+←/→/↓/↑, L = like, I = lyrics)', type: 'checkbox', checked: cfgOn('hotkeys', true), click: () => { toggleCfg('hotkeys', true)(); registerHotkeys(); } },
       { label: 'Snap to screen edges', type: 'checkbox', checked: cfgOn('snap', true), click: toggleCfg('snap', true) },
       { label: 'Song-change notifications', type: 'checkbox', checked: cfgOn('toasts', false), click: toggleCfg('toasts', false) },
       ...(isWin ? [{ label: 'Start with Windows', type: 'checkbox', checked: app.getLoginItemSettings({ path: process.execPath }).openAtLogin,

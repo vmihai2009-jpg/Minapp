@@ -1,7 +1,7 @@
 // Info panel: an optional strip under the player that shows either the LYRICS of the playing song or a short text
 // ABOUT THE ARTIST. It is drawn like the rest of the player: the skin's song-title font and the playlist colours.
 // The two choices are skin-style push buttons in the panel's top bar; X (or the Player menu) hides the panel.
-import { setText } from './download-bar.js';
+import { setText, skinImage } from './download-bar.js';
 
 const W = 275, H = 116, PAD = 7, ROW = 9, HEAD = 20, VIS = 10, CW = 50;
 const KINDS = [['lyrics', 'LYRICS'], ['artist', 'ARTIST']];
@@ -193,7 +193,7 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     open = !!v;
     try { localStorage.setItem('minapp.infoTab', open ? '1' : '0'); } catch {}
     if (open) { ensure(); frame(); place(); load(false); } else if (panel) panel.style.display = 'none';
-    report();
+    report(); infoButton();
   }
   function setKind(k) {
     if (k !== 'lyrics' && k !== 'artist') return;
@@ -210,6 +210,45 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     songKey = key; song = next; data = {}; top = 0; cur = -1; handsOff = 0;
     if (open) load(false);
   }
+
+  // ---------- the repeat button becomes INFO: it opens and closes this panel, its light shows when it is open ----------
+  const TINY = { I: ['#', '#', '#', '#', '#'], N: ['#..#', '##.#', '#.##', '#..#', '#..#'], F: ['###', '#..', '##.', '#..', '#..'], O: ['.##.', '#..#', '#..#', '#..#', '.##.'] };
+  let btnKey = '';
+  function infoButton() {
+    const b = document.getElementById('repeat');
+    if (!b) return;
+    const src = skinImage(open ? '#webamp #repeat.selected' : '#webamp #repeat');
+    const key = src + open;
+    if (key === btnKey && b.querySelector('canvas')) return;
+    btnKey = key;
+    const m = /url\("?(.*?)"?\)$/.exec(src);
+    if (!m) return;
+    const im = new Image();
+    im.onload = () => {
+      let c = b.querySelector('canvas');
+      if (!c) { c = document.createElement('canvas'); c.style.cssText = 'position:absolute;left:0;top:0;pointer-events:none;image-rendering:pixelated;'; b.style.position = b.style.position || 'absolute'; b.appendChild(c); }
+      const w = b.offsetWidth || 28, h = b.offsetHeight || 15;
+      c.width = w; c.height = h; c.style.width = w + 'px'; c.style.height = h + 'px';
+      const cg = c.getContext('2d', { willReadFrequently: true });
+      cg.drawImage(im, 0, 0);
+      // the icon sits right of the light: paint over it with the button face, then the word in the icon's darkest colour
+      const d = cg.getImageData(0, 0, w, h).data, at = (x, y) => { const o = (y * w + x) * 4; return [d[o], d[o + 1], d[o + 2]]; };
+      const face = at(Math.round(w * 0.75), 2);
+      let ink = face, dark = 999;
+      for (let y = 3; y < h - 3; y++) for (let x = 11; x < w - 3; x++) { const p = at(x, y), l = p[0] + p[1] + p[2]; if (l < dark) { dark = l; ink = p; } }
+      cg.fillStyle = `rgb(${face})`; cg.fillRect(10, 3, w - 13, h - 6);
+      cg.fillStyle = `rgb(${ink})`;
+      let x = 11, y = Math.round((h - 5) / 2);
+      for (const ch of 'INFO') { TINY[ch].forEach((r, j) => [...r].forEach((q, i) => { if (q === '#') cg.fillRect(x + i, y + j, 1, 1); })); x += TINY[ch][0].length + 1; }
+    };
+    im.src = m[1];
+    b.title = 'Lyrics and about the artist';
+  }
+  const onRepeat = (e) => e.target.closest && e.target.closest('#repeat');
+  const swallow = (e) => { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); };
+  ['mousedown', 'mouseup'].forEach((ev) => document.addEventListener(ev, (e) => { if (onRepeat(e)) swallow(e); }, true));
+  document.addEventListener('click', (e) => { if (onRepeat(e)) { swallow(e); set(!open); } }, true);
+  setInterval(infoButton, 1000);
 
   setInterval(() => { if (!open || document.hidden) return; place(); if (visible()) follow(false); }, 250);
   api.onInfo((o) => { if (!o) return; if (o.kind) setKind(o.kind); else set(o.open === undefined ? !open : o.open); });

@@ -32,7 +32,7 @@
   setInterval(push, 500);
   window.localBridge.onCmd((c, arg) => {
     const run = {
-      load: () => { list = arg.tracks; shuffle = !!arg.shuffle; load(arg.start || 0, true); },
+      load: () => { list = arg.tracks; if (arg.shuffle !== undefined) shuffle = !!arg.shuffle; load(arg.start || 0, true); },
       play: () => a.play().catch(() => {}),
       pause: () => a.pause(),
       playpause: () => (a.paused ? a.play().catch(() => {}) : a.pause()),
