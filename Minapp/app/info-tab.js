@@ -4,7 +4,7 @@
 import { setText, skinImage, textBg, selBg, blendFor, paintWord } from './download-bar.js';
 
 const W = 275, H = 116, PAD = 7, ROW = 9, HEAD = 20, VIS = 10, CW = 50;
-const KINDS = [['queue', 'QUEUE'], ['lyrics', 'LYRICS'], ['artist', 'ARTIST'], ['album', 'ALBUM']];
+const KINDS = [['lyrics', 'LYRICS'], ['artist', 'ARTIST'], ['album', 'ALBUM']];
 const SAY = {
   queue: ['Nothing is playing.', '', '', 'Nothing found.'], // what each tab says while it waits, fails or finds nothing
   lyrics: ['Play a song to see its lyrics.', 'Looking for the lyrics...', 'Could not reach the lyrics service.', 'No lyrics found for this song.'],
@@ -37,7 +37,7 @@ function wrap(t, width) {
 export function initInfoTab(webamp, api, getWidgetMode) {
   let open = false, kind = 'lyrics', panel = null, skinKey = '';
   let song = null, songKey = '', data = {}, rows = [], top = 0, cur = -1, handsOff = 0, ticket = 0, hover = -1, hasComma = true;
-  try { open = localStorage.getItem('minapp.infoTab') === '1'; const k = localStorage.getItem('minapp.infoKind'); if (k === 'artist' || k === 'album' || k === 'queue') kind = k; } catch {}
+  try { open = localStorage.getItem('minapp.infoTab') === '1'; const k = localStorage.getItem('minapp.infoKind'); if (k === 'artist' || k === 'album') kind = k; } catch {}
   const skin = () => { try { return webamp.store.getState().display.skinPlaylistStyle || {}; } catch { return {}; } };
   const colours = () => { const st = skin(); return { bg: textBg(st.normalbg || '#000'), hi: st.current || '#fff', sel: selBg(st.selectedbg || '#0000c6') }; };
   let queue = { hist: [], cur: null, q: [] }, qSig = '', qFind = null, qSort = 'order', sortOpen = false, flash = '', flashUntil = 0;
