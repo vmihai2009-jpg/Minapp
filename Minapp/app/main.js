@@ -852,7 +852,7 @@ async function getSpotifyPlaylists(force) {
 async function playSpotifyContext(uri, ctx) {
   if (!/^spotify:((playlist|album|track|artist):[A-Za-z0-9]+|user:[^:\s]+:collection)$/.test(uri)) return { ok: false, message: 'Unknown playlist' };
   const isTrack = uri.includes(':track:');
-  if (!isTrack || !/^spotify:(playlist|album|artist):[A-Za-z0-9]+$/.test(String(ctx || ''))) ctx = '';
+  if (!isTrack || !/^spotify:((playlist|album|artist):[A-Za-z0-9]+|user:[^:\s"]+:collection)$/.test(String(ctx || ''))) ctx = ''; // collection: Liked songs
   const bodies = isTrack ? [...(ctx ? [{ context_uri: ctx, offset: { uri } }] : []), { uris: [uri] }] : [{ context_uri: uri }];
   if (source !== 'spotify') await setSource('spotify');
   if (isMac && !process.env.SKIN_FAKE) {
@@ -1000,7 +1000,7 @@ ipcMain.handle('lists:all', async (_e, force) => {
   };
   // YouTube Music keeps its playlists on the same Google account as YouTube: the same lists, played in YouTube Music,
   // plus Liked music (the songs liked in either app)
-  const ytmusic = { signedIn: youtube.signedIn, loading: youtube.loading, items: youtube.signedIn ? [{ id: 'LM', name: 'Liked music' }, ...youtube.items] : [] };
+  const ytmusic = await ytmPlaylists(!!force).catch((e) => ({ signedIn: false, items: [], error: e.message }));
   return { spotify, youtube, ytmusic, local: library.playlists().filter((p) => p.count > 0).map((p) => ({ name: p.name, n: p.count })) };
 });
 // search one library: [{ t (the line shown), kind, ... }] for the panel, played with lists:found
@@ -1066,7 +1066,7 @@ ipcMain.handle('lists:songs', async (_e, kind, id) => {
     for (let k = 0; p && k < 20; k++) {
       let j = await spotApi(p, tok).catch(() => null);
       if (!j && !k && !liked) j = await spotApi(`/playlists/${pid}/tracks?limit=50`, tok).catch(() => null);
-      for (const x of (j && j.items) || []) { const t = x.item || x.track; if (t && t.uri) out.push({ t: by({ title: t.name, artist: t.artists && t.artists[0] ? t.artists[0].name : '' }), kind: 'spotify', uri: t.uri, ctx: liked ? '' : id }); }
+      for (const x of (j && j.items) || []) { const t = x.item || x.track; if (t && t.uri) out.push({ t: by({ title: t.name, artist: t.artists && t.artists[0] ? t.artists[0].name : '' }), kind: 'spotify', uri: t.uri, ctx: id }); }
       p = j && j.next ? j.next.replace('https://api.spotify.com/v1', '') : null;
     }
     if (!out.length && !liked) for (const t of (await spotEmbedSongs(pid)).songs) out.push({ t: by(t), kind: 'spotify', uri: t.uri, ctx: id });
@@ -1075,7 +1075,8 @@ ipcMain.handle('lists:songs', async (_e, kind, id) => {
   if (kind === 'local') return library.tracks(String(id || '')).map((t, i) => ({ t: t.title, kind: 'local', list: id, i }));
   let vids = [];
   try {
-    if (kind === 'youtube' || kind === 'ytmusic') vids = await ytApi.titles(await ytApi.videoIds(kind === 'ytmusic' && id === 'LM' ? 'LL' : id));
+    if (kind === 'ytmusic') return await ytmSongs(String(id || ''));
+    if (kind === 'youtube') vids = await ytApi.titles(await ytApi.videoIds(id));
     else if (kind === 'ytlink') { const t = readCfg().yt || {}; vids = await library.ytEntries(t.list ? 'https://www.youtube.com/playlist?list=' + t.list : 'https://www.youtube.com/watch?v=' + t.v); }
     else if (kind === 'ytsaved') { const l = (readCfg().ytLists || []).find((x) => x.name === id); if (l) vids = ytApi.signedIn() ? await ytApi.titles(l.ids) : []; }
   } catch (e) { log('playlist songs: ' + e.message); }
@@ -1093,6 +1094,110 @@ ipcMain.handle('lists:found', async (_e, r) => {
   if (r.kind === 'local') return playLocal(String(r.list || ''), Number(r.i) || 0);
   if (r.kind === 'ytmusic' && /^[\w-]{11}$/.test(String(r.id))) return playYtMusic('watch?v=' + r.id + (r.list ? '&list=' + encodeURIComponent(r.list) : ''));
 });
+// ---------- YouTube Music's own library, read through its window (signed in there) with the page's own API ----------
+let ytmLib = null;
+async function ytmBrowse(body) {
+  await openYouTubeMusic(true);
+  for (let i = 0; i < 40 && ytmWin && ytmWin.webContents.isLoading(); i++) await new Promise((r) => setTimeout(r, 250));
+  for (let i = 0; i < 6; i++) {
+    if (!ytmWin) return { err: 'closed' };
+    const res = await ytmRun(body);
+    if (res.err !== 'loading') return res;
+    await new Promise((r) => setTimeout(r, 1500)); // the page is still starting
+  }
+  return { err: 'loading' };
+}
+function ytmRun(body) {
+  return ytmWin.webContents.executeJavaScript(`(async (body) => {
+    const cfg = window.ytcfg; if (!cfg || !cfg.get) return { err: 'loading' };
+    const sap = (document.cookie.match(/(?:^|; )(?:__Secure-3PAPISID|SAPISID)=([^;]+)/) || [])[1];
+    if (!sap) return { err: 'signin' };
+    const ts = Math.floor(Date.now() / 1000), origin = 'https://music.youtube.com';
+    const buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(ts + ' ' + sap + ' ' + origin));
+    const hash = [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    const r = await fetch('/youtubei/v1/browse?prettyPrint=false', { method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json', Authorization: 'SAPISIDHASH ' + ts + '_' + hash, 'X-Origin': origin, 'X-Goog-AuthUser': '0' },
+      body: JSON.stringify({ context: cfg.get('INNERTUBE_CONTEXT'), ...body }) });
+    if (!r.ok) return { err: 'HTTP ' + r.status };
+    return { json: await r.json() };
+  })(${JSON.stringify(body)})`, true).catch((e) => ({ err: e.message }));
+}
+// every object in a JSON tree that has the given key
+function findAll(o, key, out = []) {
+  if (!o || typeof o !== 'object') return out;
+  if (Array.isArray(o)) { for (const x of o) findAll(x, key, out); return out; }
+  for (const k of Object.keys(o)) { if (k === key) out.push(o[k]); else findAll(o[k], key, out); }
+  return out;
+}
+const runsText = (t) => (t && (t.simpleText || (t.runs || []).map((r) => r.text).join(''))) || '';
+async function ytmPlaylists(force) {
+  if (!force && ytmLib && Date.now() - ytmLib.at < 5 * 60000) return ytmLib.data;
+  const res = await ytmBrowse({ browseId: 'FEmusic_liked_playlists' });
+  let data;
+  if (res.err) data = { signedIn: res.err !== 'signin', items: [], error: res.err };
+  else {
+    const items = [];
+    for (const it of findAll(res.json, 'musicTwoRowItemRenderer')) {
+      const bid = it.navigationEndpoint && it.navigationEndpoint.browseEndpoint && it.navigationEndpoint.browseEndpoint.browseId;
+      if (bid && bid.startsWith('VL') && !items.some((x) => x.id === bid.slice(2))) items.push({ id: bid.slice(2), name: runsText(it.title) || 'Playlist' });
+    }
+    data = { signedIn: true, items };
+  }
+  log('yt music playlists: ' + (data.error || data.items.length));
+  ytmLib = { at: Date.now(), data };
+  return data;
+}
+async function ytmSongs(id) {
+  const out = [];
+  let res = await ytmBrowse({ browseId: 'VL' + id });
+  for (let page = 0; page < 15 && res && res.json; page++) { // about 100 songs per page
+    for (const it of findAll(res.json, 'musicResponsiveListItemRenderer')) {
+      const cols = (it.flexColumns || []).map((c) => runsText(c.musicResponsiveListItemFlexColumnRenderer && c.musicResponsiveListItemFlexColumnRenderer.text));
+      const vid = (it.playlistItemData && it.playlistItemData.videoId) || (findAll(it, 'videoId')[0]);
+      if (vid && cols[0]) out.push({ t: cols[0] + (cols[1] ? ' - ' + cols[1] : ''), kind: 'ytmusic', id: vid, list: id });
+    }
+    const token = findAll(res.json, 'continuationCommand').map((c) => c.token).find(Boolean) || findAll(res.json, 'nextContinuationData').map((c) => c.continuation).find(Boolean);
+    if (!token) break;
+    res = await ytmBrowse({ continuation: token });
+  }
+  return out;
+}
+
+// the ADD button: the playing song goes into the playlist picked in the library
+ipcMain.handle('lists:addcurrent', async (_e, kind, id) => {
+  try {
+    if (kind === 'spotify') {
+      const st = (await spotifyState()) || {};
+      const tid = trackIdOf(st.id) || await apiTrackId(st.title);
+      if (!tid || source !== 'spotify') return 'PLAY A SPOTIFY SONG FIRST';
+      const tok = await spotAccessToken();
+      if (/:collection$/.test(id)) { await spotLibrary('PUT', tid); return 'ADDED TO LIKED SONGS'; }
+      const pid = String(id).split(':').pop(), uris = ['spotify:track:' + tid];
+      try { await spotSend('POST', `/playlists/${pid}/items`, tok, { uris }); } catch { await spotSend('POST', `/playlists/${pid}/tracks`, tok, { uris }); }
+      return 'ADDED';
+    }
+    if (kind === 'youtube' || kind === 'ytmusic') {
+      const vid = source === 'youtube' ? ytState.id : source === 'ytmusic' ? ytmState.id : '';
+      if (!/^[\w-]{11}$/.test(String(vid || ''))) return 'PLAY A YOUTUBE SONG FIRST';
+      if (!ytApi.canWrite()) return 'SIGN IN TO YOUTUBE FIRST';
+      if (id === 'LM') { await ytApi.addToLikes(vid); return 'SAVED TO MINAPP LIKES'; }
+      await ytApi.addTo(id, vid); ytmLib = null;
+      return 'ADDED';
+    }
+    if (kind === 'local') {
+      const p = localMeta.path;
+      if (!p || !fs.existsSync(p) || source !== 'local') return 'PLAY A LOCAL SONG FIRST';
+      const d = path.join(library.dir, library.safeName(id));
+      fs.mkdirSync(d, { recursive: true });
+      const to = path.join(d, path.basename(p));
+      if (path.dirname(p) === d) return 'ALREADY IN IT';
+      if (!fs.existsSync(to)) fs.copyFileSync(p, to);
+      return 'ADDED';
+    }
+    return 'PICK A PLAYLIST';
+  } catch (e) { log('add failed: ' + ((e && e.message) || e)); return 'COULD NOT ADD'; }
+});
+
 // YouTube Music: switch to it and open a playlist or song in its window (it starts playing there)
 async function playYtMusic(what) {
   await setSource('ytmusic');
@@ -1112,6 +1217,7 @@ ipcMain.handle('lists:play', async (_e, kind, id, name) => {
   if (kind === 'ytlink') return setSource('youtube');
   if (kind === 'local') return playLocal(String(id || ''));
   if (kind === 'ytsignin') return ytApi.signIn();
+  if (kind === 'ytmsignin') { await openYouTubeMusic(false); ytmLib = null; return; } // sign in inside YouTube Music's own window
   if (kind === 'spotconnect') return connectSpotifyQueue().then(() => { spotLists = null; });
 });
 ipcMain.handle('spotlists:play', (_e, uri) => playSpotifyContext(String(uri || '')));
@@ -1386,10 +1492,11 @@ function accountMenu() {
   ];
 }
 
-async function openYouTubeMusic() {
+async function openYouTubeMusic(hidden) {
+  if (ytmWin && !hidden && !ytmWin.isVisible()) ytmWin.show(); // it may have been opened out of sight to read the library
   if (!ytmWin) {
     ytmWin = new BrowserWindow({
-      width: 1000, height: 700, minWidth: 400, minHeight: 300, title: 'YouTube Music', icon: path.join(__dirname, isWin ? 'icon.ico' : 'icon.png'),
+      show: !hidden, width: 1000, height: 700, minWidth: 400, minHeight: 300, title: 'YouTube Music', icon: path.join(__dirname, isWin ? 'icon.ico' : 'icon.png'),
       webPreferences: { preload: path.join(__dirname, 'ytm-preload.js'), contextIsolation: true, backgroundThrottling: false },
     });
     ytmWin.setMenuBarVisibility(false);

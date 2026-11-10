@@ -40,6 +40,7 @@ export function initInfoTab(webamp, api, getWidgetMode) {
   try { open = localStorage.getItem('minapp.infoTab') === '1'; const k = localStorage.getItem('minapp.infoKind'); if (k === 'artist' || k === 'album') kind = k; } catch {}
   const skin = () => { try { return webamp.store.getState().display.skinPlaylistStyle || {}; } catch { return {}; } };
   const colours = () => { const st = skin(); return { bg: textBg(st.normalbg || '#000'), hi: st.current || '#fff', sel: selBg(st.selectedbg || '#0000c6') }; };
+  let cw = CW, changed = null, embed = false; // embed: shown inside the playlist window (its LYRICS / ARTIST / ALBUM tabs)
   let queue = { hist: [], cur: null, q: [] }, qSig = '', qFind = null, qSort = 'order', sortOpen = false, flash = '', flashUntil = 0;
   const hidden = new Set();
   const vis = () => (kind === 'queue' ? QVIS : VIS);
@@ -59,8 +60,8 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     else if (d.status !== 'ok') note(say[3]);
     else if (kind === 'lyrics') {
       if (d.instrumental) note('Instrumental', '(this one has no words)');
-      else if (d.synced) d.synced.forEach((l, i) => { if (!l.s) rows.push({ t: '', li: i }); else for (const t of wrap(l.s, CW)) rows.push({ t, li: i }); });
-      else { let blank = true; for (const l of d.text.split(/\r?\n/)) { if (!l.trim()) { if (!blank) rows.push({ t: '' }); blank = true; } else { blank = false; for (const t of wrap(l, CW)) rows.push({ t }); } } }
+      else if (d.synced) d.synced.forEach((l, i) => { if (!l.s) rows.push({ t: '', li: i }); else for (const t of wrap(l.s, cw)) rows.push({ t, li: i }); });
+      else { let blank = true; for (const l of d.text.split(/\r?\n/)) { if (!l.trim()) { if (!blank) rows.push({ t: '' }); blank = true; } else { blank = false; for (const t of wrap(l, cw)) rows.push({ t }); } } }
       if (!d.instrumental) { rows.push({ t: '' }); rows.push({ t: 'Lyrics from LRCLIB', dim: true }); }
     } else if (kind === 'album') {
       rows.push({ t: d.name || song.album || '', bright: true });
@@ -69,13 +70,13 @@ export function initInfoTab(webamp, api, getWidgetMode) {
       if (d.tracks.length) rows.push({ t: '' });
       d.tracks.forEach((t, i) => {
         const time = t.ms ? mmss(t.ms) : '', no = String(i + 1).padStart(2, ' ') + '. ';
-        rows.push({ t: no + t.name.slice(0, CW - no.length - time.length - 1).padEnd(CW - no.length - time.length, ' ') + time, now: same(t.name, song.title), act: t.uri && d.uri ? 'song' : '', uri: t.uri });
+        rows.push({ t: no + t.name.slice(0, cw - no.length - time.length - 1).padEnd(cw - no.length - time.length, ' ') + time, now: same(t.name, song.title), act: t.uri && d.uri ? 'song' : '', uri: t.uri });
       });
-      if (d.text) { for (const para of d.text.split(/\n+/)) { rows.push({ t: '' }); for (const t of wrap(para, CW)) rows.push({ t }); } rows.push({ t: '' }); rows.push({ t: 'From Wikipedia', dim: true }); }
+      if (d.text) { for (const para of d.text.split(/\n+/)) { rows.push({ t: '' }); for (const t of wrap(para, cw)) rows.push({ t }); } rows.push({ t: '' }); rows.push({ t: 'From Wikipedia', dim: true }); }
     } else {
       rows.push({ t: d.name || song.artist || '', bright: true });
-      if (d.about) for (const t of wrap(d.about, CW)) rows.push({ t, dim: true });
-      for (const para of d.text.split(/\n+/)) { rows.push({ t: '' }); for (const t of wrap(para, CW)) rows.push({ t }); }
+      if (d.about) for (const t of wrap(d.about, cw)) rows.push({ t, dim: true });
+      for (const para of d.text.split(/\n+/)) { rows.push({ t: '' }); for (const t of wrap(para, cw)) rows.push({ t }); }
       rows.push({ t: '' }); rows.push({ t: 'From Wikipedia', dim: true });
     }
     if (!hasComma) for (const r of rows) r.t = r.t.replace(/,/g, '.');
@@ -143,6 +144,7 @@ export function initInfoTab(webamp, api, getWidgetMode) {
   }
 
   function draw() {
+    if (changed) changed();
     if (!panel) return;
     const { hi, sel, bg } = colours();
     // the font's letters sit on little blocks of the skin's background colour: blend those away over a highlight
@@ -304,10 +306,11 @@ export function initInfoTab(webamp, api, getWidgetMode) {
   }
 
   function set(v) {
+    if (embed) { if (v && window.__playlistView) window.__playlistView.tab(kind); return; } // the playlist window shows it now
     open = !!v;
     try { localStorage.setItem('minapp.infoTab', open ? '1' : '0'); } catch {}
     if (open) { ensure(); frame(); place(); load(false); } else if (panel) panel.style.display = 'none';
-    report(); infoButton();
+    report();
   }
   function setKind(k) {
     if (!SAY[k]) return;
@@ -323,7 +326,7 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     if (key === songKey) { if (next && song && next.album && !song.album) song.album = next.album; return; } // the album name can arrive a moment later
     const keepAlbum = next && song && data.album && next.album && next.album === song.album && data.album.status === 'ok';
     songKey = key; song = next; data = keepAlbum ? { album: data.album } : {}; top = 0; cur = -1; handsOff = 0;
-    if (open) load(false);
+    if (open || embed) load(false);
   }
 
   // called with every poll: the played songs, the playing one and the ones up next
@@ -375,12 +378,25 @@ export function initInfoTab(webamp, api, getWidgetMode) {
   }
   const onRepeat = (e) => e.target.closest && e.target.closest('#repeat');
   const swallow = (e) => { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); };
-  ['mousedown', 'mouseup'].forEach((ev) => document.addEventListener(ev, (e) => { if (onRepeat(e)) swallow(e); }, true));
-  document.addEventListener('click', (e) => { if (onRepeat(e)) { swallow(e); set(!open); } }, true);
-  setInterval(infoButton, 1000);
+  // (the repeat button is the skin's repeat button again: the info lives in the playlist window's top bar now)
 
   setInterval(() => { if (!open || document.hidden) return; place(); if (visible()) follow(false); }, 250);
   api.onInfo((o) => { if (!o) return; if (o.kind) setKind(o.kind); else set(o.open === undefined ? !open : o.open); });
-  window.__infoTab = { set, setKind, setSong, setQueue, colours, style: () => skin(), show: (k, d) => { data[k] = d; kind = k; build(); follow(true); } };
-  if (open) set(true); else report();
+  // the playlist window asks for what to show: rows for one kind, `width` letters wide; and the line being sung
+  function view(k, width) {
+    embed = true;
+    if (open) { open = false; if (panel) panel.style.display = 'none'; }
+    if (width && width !== cw) { cw = width; if (kind === k) build(); }
+    if (k !== kind) { kind = k; top = 0; cur = -1; load(false); }
+    else if (!song || !data[kind]) { if (!rows.length) build(); if (song && data[kind] === undefined) load(false); }
+    return { rows, cur: current() };
+  }
+  function click(r) {
+    if (!r) return;
+    if (r.act === 'retry') load(true);
+    if (r.act === 'song' && data.album) api.infoPlay(r.uri, data.album.uri).catch(() => {});
+    if (r.act === 'play' && data.album && data.album.uri) api.infoPlay(data.album.uri).catch(() => {});
+  }
+  window.__infoTab = { view, click, onChange: (cb) => { changed = cb; }, set, setKind, setSong, setQueue, colours, style: () => skin(), show: (k, d) => { data[k] = d; kind = k; build(); follow(true); } };
+  open = false; report(); // the separate panel is not shown any more: its tabs live in the playlist window
 }

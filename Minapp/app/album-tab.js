@@ -7,7 +7,7 @@
 //  - cd:   a disc with the cover printed on it; it can turn slowly, in pixel steps, while music plays
 // Click the song title or the timer to show or hide it; click the panel to go to the next look. The menu has the same
 // choices under Album picture, plus "Spin the CD" (off by default: the CD then stays still and upright).
-const W = 96, H = 116;          // the panel: as tall as the player
+const W = 100, H = 116, CW = 94; // the panel: as tall as the player, 100 wide so the playlist below can line up with it (25 px steps); the picture is 94 wide
 const ART_H = 90;               // the drawing; the name goes underneath
 const COVER = 32, COLOURS = 32; // the cover grid used for colour sampling; colours in the dithered cover
 const LOOK_ORDER = ['case', 'tape', 'cd', 'vinyl'];
@@ -45,8 +45,8 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     tab = document.createElement('div');
     tab.id = 'album-tab';
     canvas = document.createElement('canvas');
-    canvas.width = W - 2; canvas.height = H - 2;
-    canvas.style.cssText = `position:absolute;left:0;top:0;width:${W - 2}px;height:${H - 2}px;image-rendering:pixelated;`;
+    canvas.width = CW; canvas.height = H - 2;
+    canvas.style.cssText = `position:absolute;left:${(W - 2 - CW) / 2}px;top:0;width:${CW}px;height:${H - 2}px;image-rendering:pixelated;`;
     tab.append(canvas);
     tab.title = 'Click to change the look: case, cassette, CD, record (click the song title to hide it)';
     tab.addEventListener('mousedown', (e) => e.stopPropagation());
@@ -405,7 +405,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     for (let a = 3.6; a < 4.4; a += 0.04) P(Math.round(cx + Math.cos(a) * (R - 2)), Math.round(cy + Math.sin(a) * (R - 2)), '#ffffff');
     logo(cx - 4, cy - 30);
     loadingText(cx, cy + 17, '#e8e6f2', 'rgba(0,0,0,.6)');
-    writeName(W / 2 - 1, ART_H + 4, W - 10, 2, '#ffffff', 'rgba(0,0,0,.6)');
+    writeName(CW / 2, ART_H + 4, CW - 8, 2, '#ffffff', 'rgba(0,0,0,.6)');
   }
 
   function draw() {
@@ -475,7 +475,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     P(sx + S - 1, sy, 'rgba(0,0,0,.45)', 1, S); P(sx, sy + S - 1, 'rgba(0,0,0,.35)', S, 1);
     logo(sx + 2, sy + 2);
     loadingText(sx + S / 2, sy + S / 2 - 2, '#e8e6f2', 'rgba(0,0,0,.6)');
-    writeName(W / 2 - 1, ART_H + 4, W - 10, 2, '#ffffff', 'rgba(0,0,0,.6)');
+    writeName(CW / 2, ART_H + 4, CW - 8, 2, '#ffffff', 'rgba(0,0,0,.6)');
   }
 
   function paint(dataUrl) {

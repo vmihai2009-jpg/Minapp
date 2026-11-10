@@ -1,5 +1,13 @@
 # What's new in Minapp
 
+## 1.9.26
+- A thin bar on top of the playlist is always there: LIBRARY, LYRICS, ARTIST and ALBUM. Lyrics and artist/album info now show right inside the playlist (no separate INFO panel).
+- With the album picture open, the playlist stretches all the way under it, so your libraries sit under the cassette. Roll the player up into a bar and the playlist goes back to its normal size.
+- Playlist buttons: COPY is now ADD (puts the playing song into the playlist picked on the left). Copying a whole playlist moved to right-click and asks first. INFO is now MENU.
+- The player's repeat button is a repeat button again.
+- Clicking a song in Spotify Liked songs plays it.
+- The YT Music folder now shows your real YT Music playlists and songs.
+
 ## 1.9.25
 - The playlist window is back, now with your libraries inside: Spotify, YouTube, YT Music and local playlists on the left, their songs (or what's playing now) on the right. Double-click a playlist to play it all.
 - Its buttons are now FIND, LIKE, COPY (copy a playlist between Spotify and YouTube / YT Music), SORT and INFO, drawn from your skin's own buttons.

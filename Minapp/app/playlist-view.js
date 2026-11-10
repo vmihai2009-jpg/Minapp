@@ -8,13 +8,16 @@ const ROW = 13;
 const BUTTONS = [ // the skin's button, where it sits inside the bottom pieces of the window, and its new job
   { sel: '#playlist-add-menu', piece: 'left', x: 14, word: 'FIND', tip: 'Find a song in the list on the right (Enter searches a whole library)' },
   { sel: '#playlist-remove-menu', piece: 'left', x: 43, word: 'LIKE', tip: 'Spotify: like the song. YouTube: save it to Minapp likes. Local: copy it to Liked' },
-  { sel: '#playlist-selection-menu', piece: 'left', x: 72, word: 'COPY', tip: 'Copy the picked playlist: Spotify to YouTube / YT Music, or YouTube / YT Music to Spotify' },
+  { sel: '#playlist-selection-menu', piece: 'left', x: 72, word: 'ADD', tip: 'Add the playing song to the playlist picked on the left' },
   { sel: '#playlist-misc-menu', piece: 'left', x: 101, word: 'SORT', tip: 'Shuffle, or sort the list' },
-  { sel: '#playlist-list-menu', piece: 'right', x: -44, word: 'INFO', tip: 'Lyrics, the artist and the album' },
+  { sel: '#playlist-list-menu', piece: 'right', x: -44, word: 'MENU', tip: 'Minapp menu: sources, skins, sleep timer and more' },
 ];
+const TABS = [['library', 'LIBRARY'], ['lyrics', 'LYRICS'], ['artist', 'ARTIST'], ['album', 'ALBUM']];
 const SORTS = [['shuffle', 'SHUF'], ['az', 'A-Z'], ['artist', 'ARTST'], ['reverse', 'REV']];
 
 export function initPlaylistView(webamp, api) {
+  let tab = 'library', bar = null, infoBox = null, infoCur = -1, infoTop = 0, infoHover = -1, infoRows = [];
+  try { const t = localStorage.getItem('minapp.pvTab'); if (TABS.some((x) => x[0] === t)) tab = t; } catch {}
   let root = null, left = null, right = null, line = null, data = null, loadedAt = 0, skinKey = '';
   let pick = { kind: 'queue' }, songs = null, results = null, busy = false, find = null, sort = 'order', sortOpen = false;
   let lTop = 0, rTop = 0, lHover = -1, rHover = -1, lRows = [], rRows = [], flash = '', flashUntil = 0;
@@ -110,8 +113,54 @@ export function initPlaylistView(webamp, api) {
     });
     return top;
   }
+  // the always-on bar at the top: LIBRARY, LYRICS, ARTIST, ALBUM
+  function drawBar() {
+    const { cur, sel, fg } = colours();
+    bar.textContent = '';
+    let x = 3;
+    for (const [k, label] of TABS) {
+      const b = document.createElement('div');
+      b.dataset.tab = k; b.textContent = label;
+      b.style.cssText = `position:absolute;left:${x}px;top:0;height:${ROW}px;padding:0 5px;cursor:pointer;color:${k === tab ? cur : fg};` + (k === tab ? `background:${sel};` : '');
+      bar.appendChild(b);
+      x += Math.ceil(label.length * 6.2) + 14;
+    }
+  }
+  function setTab(k) {
+    if (!TABS.some((x) => x[0] === k)) return;
+    tab = k; infoTop = 0; infoCur = -1;
+    try { localStorage.setItem('minapp.pvTab', tab); } catch {}
+    if (k !== 'library') { find = null; sortOpen = false; }
+    draw();
+  }
+  // the LYRICS / ARTIST / ALBUM pages (their words come from info-tab.js)
+  function drawInfo() {
+    const { fg, cur, sel } = colours();
+    const v = window.__infoTab ? window.__infoTab.view(tab, Math.max(20, Math.floor(infoBox.clientWidth / 5.4))) : { rows: [], cur: -1 };
+    infoRows = v.rows;
+    const vis = Math.max(1, Math.floor(infoBox.clientHeight / ROW));
+    if (tab === 'lyrics' && v.cur >= 0 && v.cur !== infoCur && Date.now() > infoHands) { const i = infoRows.findIndex((r) => r.li === v.cur); if (i >= 0) infoTop = i - Math.floor((vis - 1) / 2); }
+    infoCur = v.cur;
+    infoTop = Math.max(0, Math.min(infoTop, infoRows.length - vis));
+    infoBox.textContent = '';
+    infoRows.slice(infoTop, infoTop + vis).forEach((r, i) => {
+      const d = document.createElement('div');
+      const now = r.now || (r.li !== undefined && r.li === v.cur && tab === 'lyrics'), on = now || (r.act && infoTop + i === infoHover);
+      d.dataset.i = String(infoTop + i);
+      d.style.cssText = `position:absolute;left:0;right:0;top:${i * ROW}px;height:${ROW}px;line-height:${ROW}px;white-space:nowrap;overflow:hidden;padding:0 4px;box-sizing:border-box;` +
+        (r.mid ? 'text-align:center;' : '') + (on ? `background:${sel};` : '') + `color:${now || r.bright || r.act ? cur : fg};` + (r.dim || (tab === 'lyrics' && v.cur >= 0 && r.li !== undefined && !now) ? 'opacity:.55;' : '') + (r.act ? 'cursor:pointer;' : '');
+      d.textContent = r.t;
+      infoBox.appendChild(d);
+    });
+  }
+  let infoHands = 0, drawing = false;
   function draw() {
     if (!root) return;
+    drawBar();
+    const lib = tab === 'library';
+    for (const el of [left, line, right]) el.style.visibility = lib ? '' : 'hidden';
+    infoBox.style.display = lib ? 'none' : '';
+    if (!lib) { drawInfo(); const m = document.getElementById('pv-sort'); if (m) m.remove(); buttons(true); return; }
     buildLeft(); buildRight();
     lTop = paint(left, lRows, lTop, lHover, 'L');
     rTop = paint(right, rRows, rTop, rHover, 'R');
@@ -140,15 +189,22 @@ export function initPlaylistView(webamp, api) {
       }
     } catch {}
     const r = tracks.getBoundingClientRect(), { bg, fg, font } = colours();
-    const lw = Math.max(90, Math.round(r.width * 0.36));
+    // with the cassette above, the library column lines up under it; otherwise about a third of the width
+    let lw = Math.max(90, Math.round(r.width * 0.36));
+    const art = document.getElementById('album-tab'), a = art && art.style.display !== 'none' ? art.getBoundingClientRect() : null;
+    if (a && a.width && a.bottom <= r.top + 2 && a.right > r.left + 60 && a.right < r.right - 100) lw = Math.round(a.right - r.left) - 1;
     const key = [r.left, r.top, r.width, r.height, bg, fg, font, lw].join();
     root.style.display = '';
     if (key !== skinKey) {
       skinKey = key;
       root.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;z-index:30;background:${bg};font:9px/${ROW}px ${font},Arial,sans-serif;user-select:none;overflow:hidden;`;
-      left.style.cssText = `position:absolute;left:0;top:0;bottom:0;width:${lw}px;overflow:hidden;`;
-      line.style.cssText = `position:absolute;left:${lw}px;top:0;bottom:0;width:1px;background:${fg};opacity:.5;`;
-      right.style.cssText = `position:absolute;left:${lw + 1}px;top:0;bottom:0;right:0;overflow:hidden;`;
+      const T = ROW + 2; // under the top bar
+      bar.style.cssText = `position:absolute;left:0;right:0;top:0;height:${ROW}px;border-bottom:1px solid ${fg};box-sizing:content-box;opacity:1;`;
+      bar.style.borderBottomColor = fg; bar.style.borderBottomStyle = 'solid';
+      left.style.cssText = `position:absolute;left:0;top:${T}px;bottom:0;width:${lw}px;overflow:hidden;`;
+      line.style.cssText = `position:absolute;left:${lw}px;top:${T}px;bottom:0;width:1px;background:${fg};opacity:.5;`;
+      right.style.cssText = `position:absolute;left:${lw + 1}px;top:${T}px;bottom:0;right:0;overflow:hidden;`;
+      infoBox.style.cssText = `position:absolute;left:0;right:0;top:${T}px;bottom:0;overflow:hidden;`;
       draw();
     }
     buttons(false);
@@ -157,6 +213,7 @@ export function initPlaylistView(webamp, api) {
       if (barSet >= 0 && Math.abs(pos - barSet) > 0.5) { barSet = pos; rTop = Math.round((pos / 100) * rMax); draw(); }
     } catch {}
     if (Date.now() - loadedAt > 5 * 60000) load(false);
+    if (tab === 'lyrics' && window.__infoTab) { const v = window.__infoTab.view('lyrics'); if (v.cur !== infoCur) draw(); } // the sung line moves on
   }
   function build() {
     style = document.createElement('style');
@@ -165,7 +222,21 @@ export function initPlaylistView(webamp, api) {
     document.head.appendChild(style);
     root = document.createElement('div'); root.id = 'playlist-view';
     left = document.createElement('div'); line = document.createElement('div'); right = document.createElement('div');
-    root.append(left, line, right);
+    bar = document.createElement('div'); infoBox = document.createElement('div');
+    root.append(bar, left, line, right, infoBox);
+    bar.addEventListener('click', (e) => { const t = e.target.closest && e.target.closest('[data-tab]'); if (t) setTab(t.dataset.tab); });
+    infoBox.addEventListener('mousemove', (e) => { const i = rowOf(e); if (i !== infoHover) { infoHover = i; draw(); } });
+    infoBox.addEventListener('click', (e) => { const r = infoRows[rowOf(e)]; if (r && window.__infoTab) window.__infoTab.click(r); });
+    infoBox.addEventListener('wheel', (e) => { e.preventDefault(); infoTop += e.deltaY > 0 ? 3 : -3; infoHands = Date.now() + 6000; draw(); }, { passive: false });
+    if (window.__infoTab) window.__infoTab.onChange(() => { if (tab !== 'library' && !drawing) { drawing = true; try { draw(); } finally { drawing = false; } } });
+    // right-click a Spotify / YouTube / YT Music playlist: copy it to the other side (after asking)
+    left.addEventListener('contextmenu', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const r = lRows[rowOf(e)];
+      if (!r || !['spotify', 'youtube', 'ytmusic', 'ytsaved', 'ytlink'].includes(r.kind)) return;
+      const to = r.kind === 'spotify' ? 'YouTube (and YT Music)' : 'Spotify';
+      if (window.confirm(`Copy "${r.t.trim()}" to ${to}?\n\nThis makes a new playlist there. Nothing is deleted.`)) { pick = { kind: r.kind, id: r.id || '', name: r.t.trim() }; copy(); }
+    });
     (document.getElementById('webamp') || document.body).appendChild(root);
     const rowOf = (e) => { const d = e.target.closest && e.target.closest('[data-i]'); return d ? Number(d.dataset.i) : -1; };
     left.addEventListener('mousemove', (e) => { const i = rowOf(e); if (i !== lHover) { lHover = i; draw(); } });
@@ -220,7 +291,7 @@ export function initPlaylistView(webamp, api) {
         (document.getElementById('webamp') || document.body).appendChild(c);
       }
       c.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;z-index:31;cursor:pointer;image-rendering:pixelated;`;
-      const pressed = (b.word === 'FIND' && find !== null) || (b.word === 'SORT' && sortOpen) || (b.word === 'INFO' && infoOpen());
+      const pressed = (b.word === 'FIND' && find !== null) || (b.word === 'SORT' && sortOpen);
       const src = skinImage(`#webamp .playlist-bottom-${b.piece}`), key = src + pressed + r.width;
       if (c._key === key && !redraw) continue;
       c._key = key;
@@ -276,11 +347,15 @@ export function initPlaylistView(webamp, api) {
     sortOpen = false; rTop = 0; draw();
   }
   function press(word) {
+    if ((word === 'FIND' || word === 'SORT') && tab !== 'library') setTab('library');
     if (word === 'FIND') { find = find === null ? '' : null; sortOpen = false; if (find === null && pick.kind === 'search') results = null; rTop = 0; }
     else if (word === 'SORT') sortOpen = !sortOpen;
     else if (word === 'LIKE') { api.queueLike().then(say, () => say('COULD NOT SAVE')); return; }
-    else if (word === 'INFO') { if (window.__infoTab) window.__infoTab.set(!infoOpen()); setTimeout(() => buttons(true), 50); return; }
-    else if (word === 'COPY') { copy(); return; }
+    else if (word === 'MENU') { api.showMenu(); return; }
+    else if (word === 'ADD') {
+      if (!['spotify', 'youtube', 'ytmusic', 'local'].includes(pick.kind)) { say('PICK A PLAYLIST ON THE LEFT'); return; }
+      say('ADDING...'); api.listsAddCurrent(pick.kind, pick.id).then(say, () => say('COULD NOT ADD')); return;
+    }
     draw();
   }
   function copy() {
@@ -355,5 +430,5 @@ export function initPlaylistView(webamp, api) {
   }, 2500);
   setInterval(() => { if (!document.hidden) place(); }, 250);
   setInterval(() => { if (root && find !== null && !document.hidden) draw(); }, 500); // the blinking cursor
-  window.__playlistView = { setQueue, load, draw };
+  window.__playlistView = { setQueue, load, draw, tab: setTab };
 }
