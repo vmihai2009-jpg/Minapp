@@ -989,7 +989,8 @@ ipcMain.handle('lists:all', async (_e, force) => {
     signedIn: ytApi.signedIn(), loading: ytApi.loading(),
     items: ytApi.signedIn() ? ytApi.playlists().map((p) => ({ id: p.id, name: p.title, n: p.count })) : [],
     link: yt && !yt.ids && (yt.list || yt.v) ? (yt.name || (yt.list ? 'Pasted playlist' : 'Pasted video')) : '',
-    saved: (readCfg().ytLists || []).map((x) => ({ name: x.name, n: x.ids.length })), // copied from Spotify
+    // copied from Spotify; a copy that is also on the YouTube account is listed once, as the account's playlist
+    saved: (readCfg().ytLists || []).filter((x) => !(ytApi.signedIn() && ytApi.playlists().some((p) => p.title === x.name))).map((x) => ({ name: x.name, n: x.ids.length })),
   };
   return { spotify, youtube, local: library.playlists().filter((p) => p.count > 0).map((p) => ({ name: p.name, n: p.count })) };
 });
