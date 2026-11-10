@@ -1,5 +1,9 @@
 # What's new in Minapp
 
+## 1.9.22
+- LIBRARIES: the playlist panel now sits tucked under the album picture, level with the player, and opens into Spotify, YouTube and Local.
+- Search: the magnifier next to each library searches it. Type, press Enter, click a result to play it (Spotify songs, albums and playlists; YouTube videos; your local songs).
+
 ## 1.9.21
 - A playlist copied from Spotify to your YouTube account now shows once in the playlist panel, not twice.
 

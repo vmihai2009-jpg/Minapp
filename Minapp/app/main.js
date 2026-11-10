@@ -845,7 +845,7 @@ async function getSpotifyPlaylists(force) {
   }
 }
 async function playSpotifyContext(uri) {
-  if (!/^spotify:((playlist|album):[A-Za-z0-9]+|user:[^:\s]+:collection)$/.test(uri)) return { ok: false, message: 'Unknown playlist' };
+  if (!/^spotify:((playlist|album|track):[A-Za-z0-9]+|user:[^:\s]+:collection)$/.test(uri)) return { ok: false, message: 'Unknown playlist' };
   if (source !== 'spotify') await setSource('spotify');
   if (isMac && !process.env.SKIN_FAKE) {
     // the desktop app plays a playlist straight from its address (it is started first if it is closed)
@@ -858,7 +858,7 @@ async function playSpotifyContext(uri) {
     const tok = await spotAccessToken();
     if (tok) {
       const r = await fetch('https://api.spotify.com/v1/me/player/play', {
-        method: 'PUT', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ context_uri: uri }),
+        method: 'PUT', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: JSON.stringify(uri.includes(':track:') ? { uris: [uri] } : { context_uri: uri }),
       });
       if (r.status === 204 || r.status === 200) { holdQueue(); return { ok: true }; }
       // 404 = Spotify has no "active" device: name this computer's Spotify app as the one to play on
@@ -867,7 +867,7 @@ async function playSpotifyContext(uri) {
         const dev = d && (d.devices || []).find((x) => x.type === 'Computer') || (d && d.devices && d.devices[0]);
         if (dev) {
           const r2 = await fetch('https://api.spotify.com/v1/me/player/play?device_id=' + encodeURIComponent(dev.id), {
-            method: 'PUT', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ context_uri: uri }),
+            method: 'PUT', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: JSON.stringify(uri.includes(':track:') ? { uris: [uri] } : { context_uri: uri }),
           });
           if (r2.status === 204 || r2.status === 200) { holdQueue(); return { ok: true }; }
         }
@@ -993,6 +993,41 @@ ipcMain.handle('lists:all', async (_e, force) => {
     saved: (readCfg().ytLists || []).filter((x) => !(ytApi.signedIn() && ytApi.playlists().some((p) => p.title === x.name))).map((x) => ({ name: x.name, n: x.ids.length })),
   };
   return { spotify, youtube, local: library.playlists().filter((p) => p.count > 0).map((p) => ({ name: p.name, n: p.count })) };
+});
+// search one library: [{ t (the line shown), kind, ... }] for the panel, played with lists:found
+ipcMain.handle('lists:search', async (_e, key, q) => {
+  q = String(q || '').trim().slice(0, 80);
+  if (!q) return [];
+  if (key === 'spotify') {
+    const tok = readCfg().spotRefresh ? await spotAccessToken().catch(() => null) : null;
+    if (!tok) return [{ t: 'Connect Spotify first', kind: 'none' }];
+    const j = await spotApi('/search?type=track,album,playlist&limit=6&q=' + encodeURIComponent(q), tok).catch(() => null);
+    if (!j) return [];
+    const by = (x) => (x.artists && x.artists[0] ? ' - ' + x.artists[0].name : '');
+    return [
+      ...((j.tracks && j.tracks.items) || []).filter(Boolean).map((x) => ({ t: x.name + by(x), kind: 'spotify', uri: x.uri })),
+      ...((j.albums && j.albums.items) || []).filter(Boolean).map((x) => ({ t: 'ALBUM ' + x.name + by(x), kind: 'spotify', uri: x.uri })),
+      ...((j.playlists && j.playlists.items) || []).filter(Boolean).map((x) => ({ t: 'LIST ' + x.name, kind: 'spotify', uri: x.uri })),
+    ];
+  }
+  if (key === 'youtube') {
+    const list = await library.ytEntries('ytsearch12:' + q).catch(() => []);
+    return list.map((v) => ({ t: v.title, kind: 'youtube', id: v.id, all: list.map((x) => x.id) }));
+  }
+  const n = (x) => x.toLowerCase();
+  const out = [];
+  for (const p of library.playlists()) library.tracks(p.name).forEach((t, i) => { if (out.length < 40 && n(t.title + ' ' + t.artist).includes(n(q))) out.push({ t: t.title, kind: 'local', list: p.name, i }); });
+  return out;
+});
+ipcMain.handle('lists:found', async (_e, r) => {
+  if (!r || typeof r !== 'object') return;
+  if (r.kind === 'spotify') return playSpotifyContext(String(r.uri || ''));
+  if (r.kind === 'youtube' && Array.isArray(r.all)) { // the chosen video first, then the other results
+    const ids = r.all.filter((x) => /^[\w-]{11}$/.test(x)), k = ids.indexOf(r.id);
+    writeCfg({ yt: { ids: k > 0 ? [...ids.slice(k), ...ids.slice(0, k)] : ids, list: null, v: null, name: 'Search results' } });
+    return setSource('youtube');
+  }
+  if (r.kind === 'local') return playLocal(String(r.list || ''), Number(r.i) || 0);
 });
 ipcMain.handle('lists:play', async (_e, kind, id, name) => {
   if (kind.startsWith('copy-')) {
