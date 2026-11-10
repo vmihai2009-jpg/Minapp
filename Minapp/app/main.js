@@ -2151,6 +2151,21 @@ ipcMain.on('download:ctl', (_e, a) => {
   if (a === 'cancel') library.cancel(); else library.pause(a === 'pause');
   buildMenu();
 });
+// the playlist window's MENU button draws the same menu in the skin's own look: it gets the items as plain data
+// (labels, ticks, sub-menus) and sends back the number of the one clicked
+let menuClicks = [];
+ipcMain.handle('menu:items', () => {
+  menuClicks = [];
+  const walk = (items) => (items || []).filter((m) => m && m.visible !== false).map((m) => {
+    if (m.type === 'separator') return { sep: true };
+    const o = { label: String(m.label || ''), on: !!m.checked, tick: m.type === 'checkbox' || m.type === 'radio', off: m.enabled === false };
+    if (m.submenu) o.sub = walk(Array.isArray(m.submenu) ? m.submenu : []);
+    else if (typeof m.click === 'function') { o.id = menuClicks.length; menuClicks.push(m.click); }
+    return o;
+  });
+  try { return walk(menuItems()); } catch (e) { log('menu items error: ' + e.message); return []; }
+});
+ipcMain.on('menu:pick', (_e, id) => { const f = menuClicks[id]; if (typeof f === 'function') { try { f({}, win); } catch (e) { log('menu pick error: ' + e.message); } } });
 ipcMain.on('menu:show', () => {
   if (win) Menu.buildFromTemplate(menuItems()).popup({ window: win });
 });

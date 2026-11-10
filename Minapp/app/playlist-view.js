@@ -4,7 +4,7 @@
 // bottom are the skin's own buttons with new words: FIND, LIKE, COPY, SORT and INFO (it was LIST OPTS).
 import { skinImage, paintWord } from './download-bar.js';
 
-const ROW = 13;
+const ROW = 14, FS = 11; // row height and letter size: a little bigger than the skin's 9 px so it reads easily
 const BUTTONS = [ // the skin's button, where it sits inside the bottom pieces of the window, and its new job
   { sel: '#playlist-add-menu', piece: 'left', x: 14, word: 'FIND', tip: 'Find a song in the list on the right (Enter searches a whole library)' },
   { sel: '#playlist-remove-menu', piece: 'left', x: 43, word: 'LIKE', tip: 'Spotify: like the song. YouTube: save it to Minapp likes. Local: copy it to Liked' },
@@ -12,11 +12,12 @@ const BUTTONS = [ // the skin's button, where it sits inside the bottom pieces o
   { sel: '#playlist-misc-menu', piece: 'left', x: 101, word: 'SORT', tip: 'Shuffle, or sort the list' },
   { sel: '#playlist-list-menu', piece: 'right', x: -44, word: 'MENU', tip: 'Minapp menu: sources, skins, sleep timer and more' },
 ];
-const TABS = [['library', 'LIBRARY'], ['lyrics', 'LYRICS'], ['artist', 'ARTIST'], ['album', 'ALBUM']];
+const TABS = [['playlist', 'PLAYLIST'], ['library', 'LIBRARY'], ['lyrics', 'LYRICS'], ['artist', 'ARTIST'], ['album', 'ALBUM']];
 const SORTS = [['shuffle', 'SHUF'], ['az', 'A-Z'], ['artist', 'ARTST'], ['reverse', 'REV']];
 
 export function initPlaylistView(webamp, api) {
-  let tab = 'library', bar = null, infoBox = null, infoCur = -1, infoTop = 0, infoHover = -1, infoRows = [];
+  let tools = true, tab = 'playlist', lw = 100, hoverAt = 0, menuOpen = false, bar = null, infoBox = null, infoCur = -1, infoTop = 0, infoHover = -1, infoRows = [];
+  try { tools = localStorage.getItem('minapp.pvTools') !== '0'; } catch {}
   try { const t = localStorage.getItem('minapp.pvTab'); if (TABS.some((x) => x[0] === t)) tab = t; } catch {}
   let root = null, left = null, right = null, line = null, data = null, loadedAt = 0, skinKey = '';
   let pick = { kind: 'queue' }, songs = null, results = null, busy = false, find = null, sort = 'order', sortOpen = false;
@@ -58,18 +59,20 @@ export function initPlaylistView(webamp, api) {
     folder('ytmusic', 'YT MUSIC', yml, ym && ym.loading ? 'Loading...' : 'No playlists');
     folder('local', 'LOCAL', ((data && data.local) || []).map((p) => ({ t: p.name, kind: 'local', id: p.name })), 'No playlists');
   }
+  const pickNow = () => pick;
   const same = (r) => r.kind === pick.kind && (r.kind === 'queue' || (r.folder ? r.folder === pick.key : (r.id || '') === (pick.id || '')));
 
   // ---------- the right side: the queue, a playlist's songs or search results ----------
   function buildRight() {
     rRows = [];
+    const pick = tab === 'playlist' ? { kind: 'queue' } : pickNow(); // the PLAYLIST tab always shows what's playing
     if (find !== null) rRows.push({ t: 'Find: ' + find + (Date.now() % 1000 < 550 ? '_' : ' '), input: true });
     let list = [];
     if (pick.kind === 'queue') {
       queue.hist.forEach((x, i) => list.push({ x, off: i - queue.hist.length }));
       if (queue.cur) list.push({ x: queue.cur, off: 0 });
       queue.q.forEach((x, i) => list.push({ x, off: i + 1 }));
-      list = list.map((e) => ({ t: (e.x.artist ? e.x.artist + ' - ' : '') + e.x.title, d: e.x.duration, off: e.off, now: e.off === 0, dim: e.off < 0, hint: e.x.hint }));
+      list = list.map((e, i) => ({ t: (tab === 'playlist' ? i + 1 + '. ' : '') + (e.x.artist ? e.x.artist + ' - ' : '') + e.x.title, d: e.x.duration, off: e.off, now: e.off === 0, dim: e.off < 0, hint: e.x.hint }));
       if (!list.length) { rRows.push({ t: 'Nothing is playing.', dim: true }); return; }
     } else if (pick.kind === 'search') {
       if (busy) { rRows.push({ t: 'Searching...', dim: true }); return; }
@@ -94,7 +97,7 @@ export function initPlaylistView(webamp, api) {
   // ---------- drawing ----------
   const mmss = (s) => (s > 0 ? `${Math.floor(s / 60)}:${String(Math.round(s) % 60).padStart(2, '0')}` : '');
   function paint(box, rows, top, hover, side) {
-    const { fg, cur, sel } = colours();
+    const { fg, cur } = colours();
     const vis = Math.max(1, Math.floor(box.clientHeight / ROW));
     const maxTop = Math.max(0, rows.length - vis);
     top = Math.max(0, Math.min(top, maxTop));
@@ -105,26 +108,40 @@ export function initPlaylistView(webamp, api) {
       const live = side === 'L' ? !r.dim : !!(r.found || (r.off && !r.hint));
       const on = picked || r.now || (live && top + i === hover);
       d.dataset.i = String(top + i);
-      d.style.cssText = `position:absolute;left:0;right:0;top:${i * ROW}px;height:${ROW}px;line-height:${ROW}px;white-space:nowrap;overflow:hidden;padding:0 3px;box-sizing:border-box;` +
-        (on ? `background:${sel};` : '') + `color:${r.now || picked || r.folder || r.input || r.kind === 'queue' ? cur : fg};` + (r.dim ? 'opacity:.55;' : '') + (live ? 'cursor:pointer;' : '');
-      if (r.d) { const t = document.createElement('span'); t.style.cssText = 'float:right;padding-left:4px;'; t.textContent = mmss(r.d); d.appendChild(t); }
-      d.appendChild(document.createTextNode(r.t));
+      d.style.cssText = `position:absolute;left:0;right:0;top:${i * ROW}px;height:${ROW}px;line-height:${ROW}px;white-space:nowrap;overflow:hidden;padding:0 3px;box-sizing:border-box;display:flex;` +
+        `color:${on || r.input ? cur : fg};` + (r.dim ? 'opacity:.55;' : '') + (live ? 'cursor:pointer;' : '');
+      const wrap = document.createElement('div'), t = document.createElement('span');
+      wrap.style.cssText = 'flex:1;min-width:0;overflow:hidden;'; t.style.cssText = 'display:inline-block;';
+      t.textContent = r.t; wrap.appendChild(t); d.appendChild(wrap);
+      if (r.d) { const u = document.createElement('span'); u.style.cssText = 'flex:none;padding-left:4px;'; u.textContent = mmss(r.d); d.appendChild(u); }
       box.appendChild(d);
+      if (live && top + i === hover) slide(t, wrap);
     });
     return top;
   }
+  // a title too long for its row slides along while the pointer rests on it (and back), so it can be read
+  function slide(t, wrap) {
+    const over = t.scrollWidth - wrap.clientWidth;
+    if (over <= 2) return;
+    const secs = Math.max(2.5, over / 22);
+    t.style.setProperty('--pv-mq', -over + 'px');
+    t.style.animation = `pv-mq ${secs}s linear ${-((Date.now() - hoverAt) / 1000) % (secs * 2)}s infinite alternate`;
+  }
   // the always-on bar at the top: LIBRARY, LYRICS, ARTIST, ALBUM
   function drawBar() {
-    const { cur, sel, fg } = colours();
+    const { cur, fg } = colours();
     bar.textContent = '';
-    let x = 3;
     for (const [k, label] of TABS) {
       const b = document.createElement('div');
       b.dataset.tab = k; b.textContent = label;
-      b.style.cssText = `position:absolute;left:${x}px;top:0;height:${ROW}px;padding:0 5px;cursor:pointer;color:${k === tab ? cur : fg};` + (k === tab ? `background:${sel};` : '');
+      b.style.cssText = `flex:1;text-align:center;height:${ROW}px;cursor:pointer;color:${k === tab ? cur : fg};` + (k === tab ? 'text-decoration:underline;text-underline-offset:2px;' : 'opacity:.8;');
       bar.appendChild(b);
-      x += Math.ceil(label.length * 6.2) + 14;
     }
+    const t = document.createElement('div'); // show / hide the bottom tools bar
+    t.dataset.tools = '1'; t.textContent = tools ? '\u25be' : '\u25b4';
+    t.title = tools ? 'Hide the buttons at the bottom (more room for songs)' : 'Show the buttons at the bottom';
+    t.style.cssText = `flex:none;width:14px;text-align:center;height:${ROW}px;cursor:pointer;color:${fg};`;
+    bar.appendChild(t);
   }
   function setTab(k) {
     if (!TABS.some((x) => x[0] === k)) return;
@@ -135,7 +152,7 @@ export function initPlaylistView(webamp, api) {
   }
   // the LYRICS / ARTIST / ALBUM pages (their words come from info-tab.js)
   function drawInfo() {
-    const { fg, cur, sel } = colours();
+    const { fg, cur } = colours();
     const v = window.__infoTab ? window.__infoTab.view(tab, Math.max(20, Math.floor(infoBox.clientWidth / 5.4))) : { rows: [], cur: -1 };
     infoRows = v.rows;
     const vis = Math.max(1, Math.floor(infoBox.clientHeight / ROW));
@@ -148,7 +165,7 @@ export function initPlaylistView(webamp, api) {
       const now = r.now || (r.li !== undefined && r.li === v.cur && tab === 'lyrics'), on = now || (r.act && infoTop + i === infoHover);
       d.dataset.i = String(infoTop + i);
       d.style.cssText = `position:absolute;left:0;right:0;top:${i * ROW}px;height:${ROW}px;line-height:${ROW}px;white-space:nowrap;overflow:hidden;padding:0 4px;box-sizing:border-box;` +
-        (r.mid ? 'text-align:center;' : '') + (on ? `background:${sel};` : '') + `color:${now || r.bright || r.act ? cur : fg};` + (r.dim || (tab === 'lyrics' && v.cur >= 0 && r.li !== undefined && !now) ? 'opacity:.55;' : '') + (r.act ? 'cursor:pointer;' : '');
+        (r.mid ? 'text-align:center;' : '') + `color:${on || r.bright ? cur : fg};` + (r.act && !on ? 'text-decoration:underline;' : '') + (r.dim || (tab === 'lyrics' && v.cur >= 0 && r.li !== undefined && !now) ? 'opacity:.55;' : '') + (r.act ? 'cursor:pointer;' : '');
       d.textContent = r.t;
       infoBox.appendChild(d);
     });
@@ -157,12 +174,13 @@ export function initPlaylistView(webamp, api) {
   function draw() {
     if (!root) return;
     drawBar();
-    const lib = tab === 'library';
+    const lib = tab === 'library' || tab === 'playlist';
     for (const el of [left, line, right]) el.style.visibility = lib ? '' : 'hidden';
+    if (tab === 'playlist') { left.style.visibility = line.style.visibility = 'hidden'; right.style.left = '0px'; } else right.style.left = lw + 1 + 'px';
     infoBox.style.display = lib ? 'none' : '';
     if (!lib) { drawInfo(); const m = document.getElementById('pv-sort'); if (m) m.remove(); buttons(true); return; }
     buildLeft(); buildRight();
-    lTop = paint(left, lRows, lTop, lHover, 'L');
+    if (tab !== 'playlist') lTop = paint(left, lRows, lTop, lHover, 'L');
     rTop = paint(right, rRows, rTop, rHover, 'R');
     // the skin's scrollbar follows the right side, and dragging it scrolls the right side
     rMax = Math.max(0, rRows.length - Math.max(1, Math.floor(right.clientHeight / ROW)));
@@ -178,7 +196,7 @@ export function initPlaylistView(webamp, api) {
     const w = win(), tracks = w && w.querySelector('.playlist-tracks');
     const show = !!(tracks && w.offsetParent !== null);
     document.documentElement.classList.toggle('pv-on', show);
-    if (!show) { if (root) root.style.display = 'none'; hideButtons(); return; }
+    if (!show) { if (root) root.style.display = 'none'; if (gripEl) gripEl.style.display = 'none'; hideButtons(); return; }
     if (!root) build();
     // the first time: make the window wider so the libraries fit beside the songs (it can still be resized)
     try {
@@ -187,19 +205,27 @@ export function initPlaylistView(webamp, api) {
         const g = webamp.store.getState().windows.genWindows.playlist, sz = (g && g.size) || [0, 0];
         if (sz[0] < 4 || sz[1] < 4) webamp.store.dispatch({ type: 'WINDOW_SIZE_CHANGED', windowId: 'playlist', size: [Math.max(4, sz[0]), Math.max(4, sz[1])] }); // 12 songs in view
       }
+      if (!localStorage.getItem('minapp.pvTall2')) { // 1.9.28: a proper page of songs (about 14 rows), not one or two
+        localStorage.setItem('minapp.pvTall2', '1');
+        const g = webamp.store.getState().windows.genWindows.playlist, sz = (g && g.size) || [0, 0];
+        if (sz[1] < 8) webamp.store.dispatch({ type: 'WINDOW_SIZE_CHANGED', windowId: 'playlist', size: [sz[0], 8] });
+      }
     } catch {}
-    const r = tracks.getBoundingClientRect(), { bg, fg, font } = colours();
+    const r0 = tracks.getBoundingClientRect(), { bg, fg, font } = colours();
+    // tools hidden: the list also covers the bottom bar (buttons, timer), all but the resize corner on the right
+    const wr = w.getBoundingClientRect();
+    const r = tools ? r0 : { left: r0.left, top: r0.top, width: r0.width, right: r0.right, height: Math.max(r0.height, wr.bottom - r0.top - 3) };
     // with the cassette above, the library column lines up under it; otherwise about a third of the width
-    let lw = Math.max(90, Math.round(r.width * 0.36));
+    lw = Math.max(90, Math.round(r.width * 0.36));
     const art = document.getElementById('album-tab'), a = art && art.style.display !== 'none' ? art.getBoundingClientRect() : null;
     if (a && a.width && a.bottom <= r.top + 2 && a.right > r.left + 60 && a.right < r.right - 100) lw = Math.round(a.right - r.left) - 1;
-    const key = [r.left, r.top, r.width, r.height, bg, fg, font, lw].join();
+    const key = [r.left, r.top, r.width, r.height, bg, fg, font, lw, tools].join();
     root.style.display = '';
     if (key !== skinKey) {
       skinKey = key;
-      root.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;z-index:30;background:${bg};font:9px/${ROW}px ${font},Arial,sans-serif;user-select:none;overflow:hidden;`;
+      root.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;z-index:30;background:${bg};font:${FS}px/${ROW}px ${font},Arial,sans-serif;user-select:none;overflow:hidden;`;
       const T = ROW + 2; // under the top bar
-      bar.style.cssText = `position:absolute;left:0;right:0;top:0;height:${ROW}px;border-bottom:1px solid ${fg};box-sizing:content-box;opacity:1;`;
+      bar.style.cssText = `position:absolute;left:0;right:0;top:0;height:${ROW}px;border-bottom:1px solid ${fg};box-sizing:content-box;display:flex;padding:0 2px;`;
       bar.style.borderBottomColor = fg; bar.style.borderBottomStyle = 'solid';
       left.style.cssText = `position:absolute;left:0;top:${T}px;bottom:0;width:${lw}px;overflow:hidden;`;
       line.style.cssText = `position:absolute;left:${lw}px;top:${T}px;bottom:0;width:1px;background:${fg};opacity:.5;`;
@@ -207,7 +233,9 @@ export function initPlaylistView(webamp, api) {
       infoBox.style.cssText = `position:absolute;left:0;right:0;top:${T}px;bottom:0;overflow:hidden;`;
       draw();
     }
-    buttons(false);
+    if (tools) buttons(false); else { hideButtons(); if (menuOpen) closeMenu(); }
+    extras();
+    grip(w);
     try { // the scrollbar was dragged
       const pos = webamp.store.getState().display.playlistScrollPosition;
       if (barSet >= 0 && Math.abs(pos - barSet) > 0.5) { barSet = pos; rTop = Math.round((pos / 100) * rMax); draw(); }
@@ -218,13 +246,18 @@ export function initPlaylistView(webamp, api) {
   function build() {
     style = document.createElement('style');
     // the skin's own rows (Webamp's copy of the queue) stay underneath, out of sight
-    style.textContent = 'html.pv-on #playlist-window .playlist-track-titles, html.pv-on #playlist-window .playlist-track-durations { visibility: hidden; }';
+    style.textContent = 'html.pv-on #playlist-window .playlist-track-titles, html.pv-on #playlist-window .playlist-track-durations { visibility: hidden; }' +
+      ' html.pv-on #playlist-window .playlist-running-time-display > div:not(#pv-time) { display: none; }' +
+      ' @keyframes pv-mq { 0%, 12% { transform: translateX(0); } 88%, 100% { transform: translateX(var(--pv-mq)); } }';
     document.head.appendChild(style);
     root = document.createElement('div'); root.id = 'playlist-view';
     left = document.createElement('div'); line = document.createElement('div'); right = document.createElement('div');
     bar = document.createElement('div'); infoBox = document.createElement('div');
     root.append(bar, left, line, right, infoBox);
-    bar.addEventListener('click', (e) => { const t = e.target.closest && e.target.closest('[data-tab]'); if (t) setTab(t.dataset.tab); });
+    bar.addEventListener('click', (e) => {
+      if (e.target.closest && e.target.closest('[data-tools]')) { tools = !tools; try { localStorage.setItem('minapp.pvTools', tools ? '1' : '0'); } catch {} skinKey = ''; place(); return; }
+      const t = e.target.closest && e.target.closest('[data-tab]'); if (t) setTab(t.dataset.tab);
+    });
     infoBox.addEventListener('mousemove', (e) => { const i = rowOf(e); if (i !== infoHover) { infoHover = i; draw(); } });
     infoBox.addEventListener('click', (e) => { const r = infoRows[rowOf(e)]; if (r && window.__infoTab) window.__infoTab.click(r); });
     infoBox.addEventListener('wheel', (e) => { e.preventDefault(); infoTop += e.deltaY > 0 ? 3 : -3; infoHands = Date.now() + 6000; draw(); }, { passive: false });
@@ -239,8 +272,8 @@ export function initPlaylistView(webamp, api) {
     });
     (document.getElementById('webamp') || document.body).appendChild(root);
     const rowOf = (e) => { const d = e.target.closest && e.target.closest('[data-i]'); return d ? Number(d.dataset.i) : -1; };
-    left.addEventListener('mousemove', (e) => { const i = rowOf(e); if (i !== lHover) { lHover = i; draw(); } });
-    right.addEventListener('mousemove', (e) => { const i = rowOf(e); if (i !== rHover) { rHover = i; draw(); } });
+    left.addEventListener('mousemove', (e) => { const i = rowOf(e); if (i !== lHover) { lHover = i; hoverAt = Date.now(); draw(); } });
+    right.addEventListener('mousemove', (e) => { const i = rowOf(e); if (i !== rHover) { rHover = i; hoverAt = Date.now(); draw(); } });
     root.addEventListener('mouseleave', () => { lHover = rHover = -1; draw(); });
     left.addEventListener('click', (e) => clickLeft(lRows[rowOf(e)], false));
     left.addEventListener('dblclick', (e) => clickLeft(lRows[rowOf(e)], true));
@@ -279,6 +312,7 @@ export function initPlaylistView(webamp, api) {
   function hideButtons() { for (const k in btnEls) btnEls[k].style.display = 'none'; }
   function buttons(redraw) {
     const w = win(); if (!w) return;
+    if (!tools) { hideButtons(); return; }
     for (const b of BUTTONS) {
       const el = w.querySelector(b.sel); if (!el) continue;
       const r = el.getBoundingClientRect();
@@ -291,7 +325,7 @@ export function initPlaylistView(webamp, api) {
         (document.getElementById('webamp') || document.body).appendChild(c);
       }
       c.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;z-index:31;cursor:pointer;image-rendering:pixelated;`;
-      const pressed = (b.word === 'FIND' && find !== null) || (b.word === 'SORT' && sortOpen);
+      const pressed = (b.word === 'FIND' && find !== null) || (b.word === 'SORT' && sortOpen) || (b.word === 'MENU' && menuOpen);
       const src = skinImage(`#webamp .playlist-bottom-${b.piece}`), key = src + pressed + r.width;
       if (c._key === key && !redraw) continue;
       c._key = key;
@@ -347,11 +381,11 @@ export function initPlaylistView(webamp, api) {
     sortOpen = false; rTop = 0; draw();
   }
   function press(word) {
-    if ((word === 'FIND' || word === 'SORT') && tab !== 'library') setTab('library');
+    if ((word === 'FIND' || word === 'SORT') && tab !== 'library' && tab !== 'playlist') setTab('library');
     if (word === 'FIND') { find = find === null ? '' : null; sortOpen = false; if (find === null && pick.kind === 'search') results = null; rTop = 0; }
     else if (word === 'SORT') sortOpen = !sortOpen;
     else if (word === 'LIKE') { api.queueLike().then(say, () => say('COULD NOT SAVE')); return; }
-    else if (word === 'MENU') { api.showMenu(); return; }
+    else if (word === 'MENU') { toggleMenu(); return; }
     else if (word === 'ADD') {
       if (!['spotify', 'youtube', 'ytmusic', 'local'].includes(pick.kind)) { say('PICK A PLAYLIST ON THE LEFT'); return; }
       say('ADDING...'); api.listsAddCurrent(pick.kind, pick.id).then(say, () => say('COULD NOT ADD')); return;
@@ -370,9 +404,9 @@ export function initPlaylistView(webamp, api) {
     let f = document.getElementById('pv-flash');
     const w = win(); if (!w) return;
     if (!f) { f = document.createElement('div'); f.id = 'pv-flash'; (document.getElementById('webamp') || document.body).appendChild(f); }
-    const r = right.getBoundingClientRect(), { sel, cur, font } = colours();
+    const r = root.getBoundingClientRect(), { bg, fg, cur, font } = colours();
     f.textContent = flash;
-    f.style.cssText = `position:fixed;left:${r.left}px;top:${r.bottom - ROW}px;width:${r.width}px;height:${ROW}px;line-height:${ROW}px;z-index:31;background:${sel};color:${cur};font:9px ${font},Arial,sans-serif;text-align:center;pointer-events:none;`;
+    f.style.cssText = `position:fixed;left:${r.left}px;top:${r.bottom - ROW}px;width:${r.width}px;height:${ROW}px;line-height:${ROW}px;z-index:31;background:${bg};border-top:1px solid ${fg};color:${cur};font:${FS}px ${font},Arial,sans-serif;text-align:center;pointer-events:none;`;
     setTimeout(() => { if (Date.now() >= flashUntil && f) f.remove(); }, 3100);
   }
 
@@ -404,6 +438,130 @@ export function initPlaylistView(webamp, api) {
     draw();
   }
 
+  // ---------- drag the bottom edge of the playlist to make it taller or shorter (in the skin's 29 px steps) ----------
+  let gripEl = null;
+  function grip(w) {
+    if (!gripEl) {
+      gripEl = document.createElement('div'); gripEl.id = 'pv-grip'; gripEl.title = 'Drag to make the playlist taller or shorter';
+      let start = null;
+      gripEl.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const g = webamp.store.getState().windows.genWindows.playlist;
+        start = { y: e.screenY, size: ((g && g.size) || [0, 0]).slice() };
+        gripEl.setPointerCapture(e.pointerId);
+      });
+      gripEl.addEventListener('pointermove', (e) => {
+        if (!start) return;
+        const h = Math.max(0, Math.min(30, start.size[1] + Math.round((e.screenY - start.y) / 29)));
+        const g = webamp.store.getState().windows.genWindows.playlist, sz = (g && g.size) || [0, 0];
+        if (h !== sz[1]) webamp.store.dispatch({ type: 'WINDOW_SIZE_CHANGED', windowId: 'playlist', size: [sz[0], h] });
+      });
+      const end = () => { start = null; };
+      gripEl.addEventListener('pointerup', end); gripEl.addEventListener('pointercancel', end);
+      gripEl.addEventListener('mousedown', (e) => e.stopPropagation());
+      (document.getElementById('webamp') || document.body).appendChild(gripEl);
+    }
+    const r = w.getBoundingClientRect();
+    gripEl.style.cssText = `position:fixed;left:${r.left}px;top:${r.bottom - 4}px;width:${r.width - 20}px;height:7px;z-index:33;cursor:ns-resize;`;
+  }
+
+  // ---------- the black box and the timer at the bottom of the window ----------
+  // the box shows the player's visualizer; the timer shows how far into the playing song we are, out of its length
+  let mirror = null, mirrorAt = 0, timeKey = '';
+  function extras() {
+    const w = win(); if (!w) return;
+    const box = w.querySelector('.playlist-visualizer');
+    if (box && !box.querySelector('canvas:not(#pv-vis)')) {
+      if (!mirror || !box.contains(mirror)) { mirror = document.createElement('canvas'); mirror.id = 'pv-vis'; mirror.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;image-rendering:pixelated;pointer-events:none;'; box.style.position = box.style.position || 'absolute'; box.appendChild(mirror); requestAnimationFrame(mirrorFrame); }
+    }
+    const t = w.querySelector('.playlist-running-time-display');
+    if (t) {
+      let el = t.querySelector('#pv-time');
+      if (!el) { el = document.createElement('div'); el.id = 'pv-time'; t.appendChild(el); timeKey = ''; }
+      let pos = 0, len = 0;
+      try { const m = webamp.store.getState().media; pos = m.timeElapsed || 0; len = m.length || 0; } catch {}
+      if (!len && queue.cur) len = queue.cur.duration || 0;
+      const txt = `${mmss(pos) || '0:00'}/${mmss(len) || '0:00'}`;
+      if (txt !== timeKey) {
+        timeKey = txt; el.textContent = '';
+        for (const ch of txt) { const sp = document.createElement('span'); sp.className = 'character character-' + ch.toLowerCase().charCodeAt(0); sp.textContent = ch; el.appendChild(sp); }
+      }
+    }
+  }
+  function mirrorFrame(ts) {
+    if (!mirror || !mirror.isConnected) { mirror = null; return; }
+    requestAnimationFrame(mirrorFrame);
+    if (document.hidden || ts - mirrorAt < 33) return;
+    mirrorAt = ts;
+    const src = document.querySelector('#webamp #main-window canvas#visualizer') || document.querySelector('#webamp #main-window canvas');
+    const r = mirror.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    if (mirror.width !== Math.round(r.width)) { mirror.width = Math.round(r.width); mirror.height = Math.round(r.height); }
+    const g = mirror.getContext('2d');
+    g.imageSmoothingEnabled = false;
+    g.clearRect(0, 0, mirror.width, mirror.height);
+    if (src && src.width) try { g.drawImage(src, 0, 0, src.width, src.height, 0, 0, mirror.width, mirror.height); } catch {}
+  }
+
+  // ---------- MENU: the app menu in the skin's look; click MENU again, click outside or press Esc to close ----------
+  let menuEl = null, menuItems = [], menuTop = 0, menuOpenSubs = new Set(), menuHover = -1;
+  function toggleMenu() { if (menuOpen) closeMenu(); else openMenu(); }
+  function closeMenu() { menuOpen = false; if (menuEl) menuEl.remove(); menuEl = null; buttons(true); }
+  async function openMenu() {
+    menuOpen = true; menuTop = 0; menuOpenSubs = new Set(); buttons(true);
+    try { menuItems = await api.menuItems(); } catch { menuItems = []; }
+    if (!menuOpen) return;
+    drawMenu();
+  }
+  function menuRows() {
+    const out = [];
+    const walk = (items, depth, path) => items.forEach((m, i) => {
+      const key = path + '/' + i;
+      out.push({ ...m, depth, key });
+      if (m.sub && menuOpenSubs.has(key)) walk(m.sub, depth + 1, key);
+    });
+    walk(menuItems || [], 0, '');
+    return out;
+  }
+  function drawMenu() {
+    const a = btnEls.MENU && btnEls.MENU.getBoundingClientRect(), w = win();
+    if (!a || !w) return;
+    const { bg, fg, cur, font } = colours(), rows = menuRows();
+    if (!menuEl) {
+      menuEl = document.createElement('div'); menuEl.id = 'pv-menu';
+      menuEl.addEventListener('mousedown', (e) => e.stopPropagation());
+      menuEl.addEventListener('wheel', (e) => { e.preventDefault(); menuTop += e.deltaY > 0 ? 3 : -3; drawMenu(); }, { passive: false });
+      menuEl.addEventListener('mousemove', (e) => { const d = e.target.closest && e.target.closest('[data-i]'), i = d ? Number(d.dataset.i) : -1; if (i !== menuHover) { menuHover = i; drawMenu(); } });
+      menuEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const d = e.target.closest && e.target.closest('[data-i]'); if (!d) return;
+        const m = menuRows()[Number(d.dataset.i)]; if (!m || m.off || m.sep) return;
+        if (m.sub) { if (menuOpenSubs.has(m.key)) menuOpenSubs.delete(m.key); else menuOpenSubs.add(m.key); drawMenu(); return; }
+        if (m.id !== undefined) { api.menuPick(m.id); closeMenu(); }
+      });
+      (document.getElementById('webamp') || document.body).appendChild(menuEl);
+    }
+    const width = 190, room = Math.max(ROW * 4, Math.floor((a.top - 2) / ROW) * ROW);
+    const vis = Math.min(rows.length, Math.floor(room / ROW));
+    menuTop = Math.max(0, Math.min(menuTop, rows.length - vis));
+    const left = Math.max(0, a.right - width);
+    menuEl.style.cssText = `position:fixed;left:${left}px;top:${a.top - vis * ROW - 4}px;width:${width}px;height:${vis * ROW + 2}px;z-index:40;background:${bg};border:1px solid ${fg};box-sizing:content-box;font:${FS}px/${ROW}px ${font},Arial,sans-serif;color:${fg};overflow:hidden;user-select:none;box-shadow:0 0 0 1px rgba(0,0,0,.6);`;
+    menuEl.textContent = '';
+    rows.slice(menuTop, menuTop + vis).forEach((m, i) => {
+      const d = document.createElement('div'), at = menuTop + i;
+      d.dataset.i = String(at);
+      const on = at === menuHover && !m.off && !m.sep;
+      d.style.cssText = `position:absolute;left:0;right:0;top:${i * ROW + 1}px;height:${ROW}px;padding:0 6px 0 ${6 + m.depth * 10}px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;` +
+        (m.sep ? '' : `color:${on ? cur : fg};cursor:${m.off ? 'default' : 'pointer'};`) + (m.off ? 'opacity:.5;' : '');
+      if (m.sep) { const l = document.createElement('div'); l.style.cssText = `position:absolute;left:6px;right:6px;top:${ROW / 2}px;height:1px;background:${fg};opacity:.4;`; d.appendChild(l); }
+      else d.textContent = (m.tick ? (m.on ? '\u2022 ' : '   ') : '') + m.label + (m.sub ? (menuOpenSubs.has(m.key) ? '  \u25be' : '  \u25b8') : '');
+      menuEl.appendChild(d);
+    });
+  }
+  document.addEventListener('mousedown', (e) => { if (menuOpen && !(menuEl && menuEl.contains(e.target)) && e.target !== btnEls.MENU) closeMenu(); }, true);
+  document.addEventListener('keydown', (e) => { if (menuOpen && e.key === 'Escape') { closeMenu(); e.preventDefault(); } }, true);
+
   // called with every poll: played songs, the playing one and the ones up next
   function setQueue(hist, cur, q) {
     const pickQ = (x) => ({ artist: x.artist || '', title: x.title || '', duration: x.duration || 0, hint: !!x.hint });
@@ -411,7 +569,7 @@ export function initPlaylistView(webamp, api) {
     const sig = JSON.stringify(queue);
     if (sig === qSig) return;
     const first = !qSig; qSig = sig;
-    if (root && pick.kind === 'queue') {
+    if (root && (pick.kind === 'queue' || tab === 'playlist')) {
       buildRight();
       const i = rRows.findIndex((r) => r.now), vis = Math.floor(right.clientHeight / ROW) || 4;
       if (i >= 0 && (first || i < rTop || i >= rTop + vis)) rTop = Math.max(0, i - 1);

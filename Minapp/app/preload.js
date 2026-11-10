@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('bridge', {
   onDownloadProgress: (cb) => ipcRenderer.on('download:progress', (_e, v) => cb(v)),
   downloadCtl: (a) => ipcRenderer.send('download:ctl', a),
   showMenu: () => ipcRenderer.send('menu:show'),
+  menuItems: () => ipcRenderer.invoke('menu:items'),
+  menuPick: (id) => ipcRenderer.send('menu:pick', id),
   onUpdate: (cb) => ipcRenderer.on('update:available', (_e, v) => cb(v)),
   updateGet: () => ipcRenderer.invoke('update:get'),
   updateInstall: () => ipcRenderer.send('update:install'),
