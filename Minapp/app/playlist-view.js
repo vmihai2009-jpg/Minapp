@@ -112,7 +112,7 @@ export function initPlaylistView(webamp, api) {
         `color:${on || r.input ? cur : fg};` + (r.dim ? 'opacity:.55;' : '') + (live ? 'cursor:pointer;' : '');
       const wrap = document.createElement('div'), t = document.createElement('span');
       wrap.style.cssText = 'flex:1;min-width:0;overflow:hidden;'; t.style.cssText = 'display:inline-block;';
-      t.textContent = r.t; wrap.appendChild(t); d.appendChild(wrap);
+      t.textContent = (r.now ? '\u25b8 ' : '') + r.t; wrap.appendChild(t); d.appendChild(wrap); // a small arrow marks the playing song
       if (r.d) { const u = document.createElement('span'); u.style.cssText = 'flex:none;padding-left:4px;'; u.textContent = mmss(r.d); d.appendChild(u); }
       box.appendChild(d);
       if (live && top + i === hover) slide(t, wrap);
@@ -148,6 +148,7 @@ export function initPlaylistView(webamp, api) {
     tab = k; infoTop = 0; infoCur = -1;
     try { localStorage.setItem('minapp.pvTab', tab); } catch {}
     if (k !== 'library') { find = null; sortOpen = false; }
+    if (k === 'playlist') { buildRight(); const i = rRows.findIndex((r) => r.now); if (i >= 0) rTop = Math.max(0, i - 2); } // open on the playing song
     draw();
   }
   // the LYRICS / ARTIST / ALBUM pages (their words come from info-tab.js)
@@ -274,7 +275,8 @@ export function initPlaylistView(webamp, api) {
     const rowOf = (e) => { const d = e.target.closest && e.target.closest('[data-i]'); return d ? Number(d.dataset.i) : -1; };
     left.addEventListener('mousemove', (e) => { const i = rowOf(e); if (i !== lHover) { lHover = i; hoverAt = Date.now(); draw(); } });
     right.addEventListener('mousemove', (e) => { const i = rowOf(e); if (i !== rHover) { rHover = i; hoverAt = Date.now(); draw(); } });
-    root.addEventListener('mouseleave', () => { lHover = rHover = -1; draw(); });
+    root.addEventListener('mouseenter', () => { inside = true; });
+    root.addEventListener('mouseleave', () => { inside = false; lHover = rHover = -1; draw(); });
     left.addEventListener('click', (e) => clickLeft(lRows[rowOf(e)], false));
     left.addEventListener('dblclick', (e) => clickLeft(lRows[rowOf(e)], true));
     right.addEventListener('click', (e) => clickRight(rRows[rowOf(e)]));
@@ -409,6 +411,24 @@ export function initPlaylistView(webamp, api) {
     f.style.cssText = `position:fixed;left:${r.left}px;top:${r.bottom - ROW}px;width:${r.width}px;height:${ROW}px;line-height:${ROW}px;z-index:31;background:${bg};border-top:1px solid ${fg};color:${cur};font:${FS}px ${font},Arial,sans-serif;text-align:center;pointer-events:none;`;
     setTimeout(() => { if (Date.now() >= flashUntil && f) f.remove(); }, 3100);
   }
+
+  // ---------- keys: Cmd/Ctrl+F finds; with the pointer over the list, up / down move and Enter plays ----------
+  let inside = false;
+  document.addEventListener('keydown', (e) => {
+    if (!root || root.style.display === 'none' || (tab !== 'playlist' && tab !== 'library')) return;
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); e.stopPropagation(); if (find === null) press('FIND'); return; }
+    if (!inside || find !== null || e.metaKey || e.ctrlKey || e.altKey) return;
+    const live = (r) => r && (r.found || (r.off && !r.hint));
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      let i = rHover < 0 ? rRows.findIndex((r) => r.now) : rHover;
+      for (let n = 0; n < rRows.length; n++) { i += step; if (i < 0 || i >= rRows.length) return; if (live(rRows[i])) break; }
+      const vis = Math.max(1, Math.floor(right.clientHeight / ROW));
+      rHover = i; hoverAt = Date.now();
+      if (i < rTop) rTop = i; else if (i >= rTop + vis) rTop = i - vis + 1;
+      e.preventDefault(); e.stopPropagation(); draw();
+    } else if (e.key === 'Enter' && live(rRows[rHover])) { e.preventDefault(); e.stopPropagation(); clickRight(rRows[rHover]); }
+  }, true);
 
   // ---------- typing while FIND is on ----------
   document.addEventListener('keydown', (e) => {
