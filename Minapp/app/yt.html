@@ -56,7 +56,7 @@
     if ((list || ids.length) && skippable && errRun < 8) {
       errRun++; total++;
       note('This video can\'t be played outside YouTube (error ' + e.data + '). Skipping to the next one…', 2500);
-      setTimeout(() => { try { player.nextVideo(); } catch (x) {} }, 600);
+      setTimeout(() => { try { if (!blockStep(1)) player.nextVideo(); } catch (x) {} }, 600);
       return;
     }
     const hints = {
@@ -72,11 +72,34 @@
       'YouTube error ' + e.data + '<br>' + (hints[e.data] || '') + many + '<br><br>Try another link (menu &gt; YouTube link…).</div>');
   }
 
+  // long lists: the player gets BLOCK songs at a time; when the block ends (or next / previous steps out of it) the
+  // neighbouring block is loaded
+  const SHORT = 40, BLOCK = 150;
+  let base = -1;
+  function loadBlock(b, at) {
+    base = b;
+    try { player.loadPlaylist(ids.slice(b, b + BLOCK), at, 0); } catch (e) {}
+  }
+  function blockStep(dir) { // true when it moved to another block
+    if (base < 0) return false;
+    let n = 0, i = 0;
+    try { n = (player.getPlaylist() || []).length; i = player.getPlaylistIndex(); } catch (e) { return false; }
+    if (dir > 0 && i >= n - 1 && base + BLOCK < ids.length) { loadBlock(base + BLOCK, 0); return true; }
+    if (dir < 0 && i <= 0 && base > 0) { const b = Math.max(0, base - BLOCK); loadBlock(b, Math.min(BLOCK, base - b) - 1); return true; }
+    return false;
+  }
+
   function onYouTubeIframeAPIReady() {
     const playerVars = { autoplay: 1, playsinline: 1, rel: 0, origin: location.origin };
-    const opts = { width: '100%', height: '100%', playerVars, events: { onReady: push, onStateChange: (ev) => { if (ev.data === 1) { errRun = 0; const n = document.getElementById('note'); if (n && total) { n.style.display = 'none'; } } push(); }, onError: showError } };
+    const opts = { width: '100%', height: '100%', playerVars, events: { onReady: push, onStateChange: (ev) => { if (ev.data === 0) blockStep(1); if (ev.data === 1) { errRun = 0; const n = document.getElementById('note'); if (n && total) { n.style.display = 'none'; } } push(); }, onError: showError } };
     if (list) { playerVars.listType = 'playlist'; playerVars.list = list; }
-    else if (ids.length) { opts.videoId = ids[0]; if (ids.length > 1) playerVars.playlist = ids.slice(1).join(','); }
+    else if (ids.length) {
+      opts.videoId = ids[0];
+      // a long list does not fit in the player's address (100+ songs made it show nothing and play nothing): short
+      // lists go in as before, long ones are handed over once the player is ready, a block of songs at a time
+      if (ids.length > 1 && ids.length <= SHORT) playerVars.playlist = ids.slice(1).join(',');
+      else if (ids.length > SHORT) opts.events.onReady = () => { loadBlock(0, 0); push(); };
+    }
     else opts.videoId = vid;
     player = new YT.Player('p', opts);
     setInterval(push, 500);
@@ -88,8 +111,8 @@
       play: () => player.playVideo(),
       pause: () => player.pauseVideo(),
       playpause: () => (player.getPlayerState() === 1 ? player.pauseVideo() : player.playVideo()),
-      next: () => player.nextVideo(),
-      previous: () => player.previousVideo(),
+      next: () => { if (!blockStep(1)) player.nextVideo(); },
+      previous: () => { if (!blockStep(-1)) player.previousVideo(); },
       volume: () => player.setVolume(Number(a) || 0),
       seek: () => player.seekTo(Number(a) || 0, true),
       jump: () => player.playVideoAt(Math.max(0, player.getPlaylistIndex() + (Number(a) || 0))),

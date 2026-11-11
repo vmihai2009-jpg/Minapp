@@ -215,8 +215,10 @@
 
   // drag the window by the skin's title bar (no CSS drag regions, so menus stay clickable)
   document.addEventListener('mousedown', (e) => {
-    const grab = widgetMode === 'small' ? e.target.closest('#main-window') && !e.target.closest('#time, #visualizer') : e.target.closest('#title-bar');
-    if (e.button !== 0 || !grab || e.target.closest('#option, #minimize, #shade, #close')) return;
+    // any of the skin's title bars (player, equalizer, playlist, Milkdrop) moves the whole of Minapp. Webamp's own
+    // dragging used to move just that one window inside ours, where it was snapped straight back: the "glitch"
+    const grab = widgetMode === 'small' ? e.target.closest('#main-window') && !e.target.closest('#time, #visualizer') : (e.target.closest('#title-bar') || (e.target.classList && e.target.classList.contains('draggable') && e.target.closest('#webamp') ? e.target : null));
+    if (e.button !== 0 || !grab || e.target.closest('#option, #minimize, #shade, #close, #playlist-close-button, #playlist-shade-button, #equalizer-close, #equalizer-shade, .gen-close, button, input, [role=button]')) return;
     e.stopPropagation();
     api.dragStart();
   }, true);
