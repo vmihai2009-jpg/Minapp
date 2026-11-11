@@ -68,7 +68,7 @@ async function themeFont(key) {
   const span = Math.max(40, Math.abs(ink[0] - b[0]) + Math.abs(ink[1] - b[1]) + Math.abs(ink[2] - b[2]));
   const poor = Math.abs(lum(ink) - lum(tone)) < 80, fixed = lum(tone) < 128 ? [255, 255, 255] : [0, 0, 0];
   const load = (src) => new Promise((ok) => { const m = /url\("?(.*?)"?\)$/.exec(src); if (!m) return ok(null); const im = new Image(); im.onload = () => ok(im); im.onerror = () => ok(null); im.src = m[1]; });
-  const rules = [];
+  const rules = [], masks = new Map();
   for (const [code, src] of codes) {
     const im = await load(src);
     if (!im || key !== theme.fontKey) { if (key !== theme.fontKey) return; continue; }
@@ -80,14 +80,20 @@ async function themeFont(key) {
       d[o + 3] = Math.min(255, Math.round((k / span) * 1.3 * 255));
       if (poor) { d[o] = fixed[0]; d[o + 1] = fixed[1]; d[o + 2] = fixed[2]; }
     }
+    { const a = new Uint8ClampedArray(c.width * c.height); for (let o = 0, k = 0; o < d.length; o += 4, k++) a[k] = d[o + 3]; masks.set(String(code), { w: c.width, h: c.height, a }); }
     g.putImageData(id, 0, 0);
     rules.push(`${PANELS.map((p) => p + ' .character-' + code).join(',')}{background-image:url(${c.toDataURL()}) !important}`);
   }
   if (!theme.style) { theme.style = document.createElement('style'); theme.style.id = 'minapp-font'; }
   theme.style.textContent = rules.join('\n');
   document.head.appendChild(theme.style); // last in the page, so it wins over the skin's own
+  theme.masks = masks; theme.maskKey = String(key);
   theme.ready = true;
 }
+// the skin font's letters as see-through shapes (how solid each pixel is), so they can be drawn in any colour:
+// the playlist window writes its rows with them
+export function glyphMask(code) { return theme.masks ? theme.masks.get(String(code)) || null : null; }
+export const fontStamp = () => (theme.masks ? theme.maskKey : '');
 // the colour the panel letters are drawn in (for little drawings next to them, such as the magnifier)
 export function textInk(fallback) {
   const ink = fontBg.ink, t = theme.tone;

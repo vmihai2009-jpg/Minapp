@@ -3,9 +3,9 @@
 // playlist window with the skin's playlist font and colours, so every skin keeps its look. The five buttons at the
 // bottom are the skin's own buttons with new words: FIND, LIKE, COPY, SORT and INFO (it was LIST OPTS).
 import { skinImage, paintWord } from './download-bar.js';
-import { setPixel } from './pixel-font.js';
+import { setPixel, fontStamp } from './pixel-font.js';
 
-const ROW = 14, FS = 11; // row height and letter size: a little bigger than the skin's 9 px so it reads easily
+const ROW = 11, FS = 10; // row height and letter size: a little bigger than the skin's 9 px so it reads easily
 const BUTTONS = [ // the skin's button, where it sits inside the bottom pieces of the window, and its new job
   { sel: '#playlist-add-menu', piece: 'left', x: 14, word: 'FIND', tip: 'Find a song in the list on the right (Enter searches a whole library)' },
   { sel: '#playlist-remove-menu', piece: 'left', x: 43, word: 'LIKE', tip: 'Spotify: like the song. YouTube: save it to Minapp likes. Local: copy it to Liked' },
@@ -162,7 +162,7 @@ export function initPlaylistView(webamp, api) {
   // the LYRICS / ARTIST / ALBUM pages (their words come from info-tab.js)
   function drawInfo() {
     const { fg, cur } = colours();
-    const v = window.__infoTab ? window.__infoTab.view(tab, Math.max(16, Math.floor(infoBox.clientWidth / 8))) : { rows: [], cur: -1 };
+    const v = window.__infoTab ? window.__infoTab.view(tab, Math.max(20, Math.floor(infoBox.clientWidth / 5))) : { rows: [], cur: -1 };
     infoRows = v.rows;
     const vis = Math.max(1, Math.floor(infoBox.clientHeight / ROW));
     if (tab === 'lyrics' && v.cur >= 0 && v.cur !== infoCur && Date.now() > infoHands) { const i = infoRows.findIndex((r) => r.li === v.cur); if (i >= 0) infoTop = i - Math.floor((vis - 1) / 2); }
@@ -228,7 +228,7 @@ export function initPlaylistView(webamp, api) {
     lw = Math.max(90, Math.round(r.width * 0.36));
     const art = document.getElementById('album-tab'), a = art && art.style.display !== 'none' ? art.getBoundingClientRect() : null;
     if (a && a.width && a.bottom <= r.top + 2 && a.right > r.left + 60 && a.right < r.right - 100) lw = Math.round(a.right - r.left) - 1;
-    const key = [r.left, r.top, r.width, r.height, bg, fg, font, lw, tools].join();
+    const key = [r.left, r.top, r.width, r.height, bg, fg, font, lw, tools, fontStamp()].join();
     root.style.display = '';
     if (key !== skinKey) {
       skinKey = key;
@@ -586,7 +586,7 @@ export function initPlaylistView(webamp, api) {
       });
       (document.getElementById('webamp') || document.body).appendChild(menuEl);
     }
-    const width = 230, room = Math.max(ROW * 4, Math.floor((a.top - 2) / ROW) * ROW);
+    const width = 200, room = Math.max(ROW * 4, Math.floor((a.top - 2) / ROW) * ROW);
     const vis = Math.min(rows.length, Math.floor(room / ROW));
     menuTop = Math.max(0, Math.min(menuTop, rows.length - vis));
     const left = Math.max(0, a.right - width);
@@ -599,7 +599,7 @@ export function initPlaylistView(webamp, api) {
       d.style.cssText = `position:absolute;left:0;right:0;top:${i * ROW + 1}px;height:${ROW}px;padding:0 6px 0 ${6 + m.depth * 10}px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;` +
         (m.sep ? '' : `color:${on ? cur : fg};cursor:${m.off ? 'default' : 'pointer'};`) + (m.off ? 'opacity:.5;' : '');
       if (m.sep) { const l = document.createElement('div'); l.style.cssText = `position:absolute;left:6px;right:6px;top:${ROW / 2}px;height:1px;background:${fg};opacity:.4;`; d.appendChild(l); }
-      else setPixel(d, (m.tick ? (m.on ? '\u2022 ' : '  ') : '') + m.label + (m.sub ? (menuOpenSubs.has(m.key) ? ' \u25be' : ' \u25b8') : ''), on ? cur : fg);
+      else setPixel(d, (m.tick ? (m.on ? '\u2022 ' : '  ') : '') + m.label + (m.sub ? (menuOpenSubs.has(m.key) ? ' -' : ' +') : ''), on ? cur : fg);
       menuEl.appendChild(d);
     });
   }
