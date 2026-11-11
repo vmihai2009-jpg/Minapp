@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.32
+- The library loads right away again. Spotify, YouTube and local playlists no longer wait for YouTube Music to answer (that could take 20 seconds or more); YT Music fills in on its own when it is ready.
+
 ## 1.9.31
 - Moving Minapp no longer glitches: you can now grab the playlist's or the equalizer's title bar as well as the player's, and the whole of Minapp follows smoothly.
 - Long YouTube lists (100+ songs) saved in Minapp now show in the queue and play. They are handed to the player in blocks of 150 songs.
