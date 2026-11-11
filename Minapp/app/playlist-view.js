@@ -92,6 +92,10 @@ export function initPlaylistView(webamp, api) {
     if (sort === 'reverse') list.reverse();
     if (!list.length) rRows.push({ t: 'Nothing found.', dim: true });
     rRows.push(...list);
+    if (list.length > 1) { // the last line: how many songs, and how long they run when the lengths are known
+      const secs = list.reduce((a, r) => a + (r.d || 0), 0), h = Math.floor(secs / 3600);
+      rRows.push({ t: `${list.length} songs` + (secs ? ' \u00b7 ' + (h ? h + ':' + String(Math.floor(secs / 60) % 60).padStart(2, '0') + ':' + String(Math.round(secs) % 60).padStart(2, '0') : mmss(secs)) : ''), dim: true, mid: true });
+    }
   }
 
   // ---------- drawing ----------
@@ -111,7 +115,7 @@ export function initPlaylistView(webamp, api) {
       d.style.cssText = `position:absolute;left:0;right:0;top:${i * ROW}px;height:${ROW}px;line-height:${ROW}px;white-space:nowrap;overflow:hidden;padding:0 3px;box-sizing:border-box;display:flex;` +
         `color:${on || r.input ? cur : fg};` + (r.dim ? 'opacity:.55;' : '') + (live ? 'cursor:pointer;' : '');
       const wrap = document.createElement('div'), t = document.createElement('span');
-      wrap.style.cssText = 'flex:1;min-width:0;overflow:hidden;'; t.style.cssText = 'display:inline-block;';
+      wrap.style.cssText = 'flex:1;min-width:0;overflow:hidden;' + (r.mid ? 'text-align:center;' : ''); t.style.cssText = 'display:inline-block;';
       t.textContent = (r.now ? '\u25b8 ' : '') + r.t; wrap.appendChild(t); d.appendChild(wrap); // a small arrow marks the playing song
       if (r.d) { const u = document.createElement('span'); u.style.cssText = 'flex:none;padding-left:4px;'; u.textContent = mmss(r.d); d.appendChild(u); }
       box.appendChild(d);
@@ -296,10 +300,11 @@ export function initPlaylistView(webamp, api) {
     }
     if (r.kind === 'spotaddlink') { api.spotAddLink().then((ok) => { if (ok) load(true); }).catch(() => {}); return; }
     if (r.act) { api.listsPlay(r.kind, r.id || '', r.t.trim()).then(() => load(true)).catch(() => {}); return; }
-    if (r.kind === 'queue') { pick = { kind: 'queue' }; rTop = 0; draw(); return; }
+    if (r.kind === 'queue') { pick = { kind: 'queue' }; try { localStorage.removeItem('minapp.pvPick'); } catch {} rTop = 0; draw(); return; }
     if (twice) { say('PLAYING'); api.listsPlay(r.kind, r.id || '', r.t.trim()).catch(() => {}); return; } // double-click: play the whole playlist
     if (same(r)) return;
     const mine = pick = { kind: r.kind, id: r.id || '', name: r.t.trim() };
+    try { localStorage.setItem('minapp.pvPick', JSON.stringify(pick)); } catch {}
     songs = null; rTop = 0; draw();
     api.listsSongs(r.kind, r.id || '').then((x) => { if (pick === mine) { songs = x || []; draw(); } }).catch(() => { if (pick === mine) { songs = []; draw(); } });
   }
@@ -452,9 +457,21 @@ export function initPlaylistView(webamp, api) {
     busy = false; results = res || []; draw();
   }
 
+  let restored = false;
   async function load(force) {
     loadedAt = Date.now();
     try { data = await api.listsAll(!!force); } catch (e) { api.log('playlists failed: ' + (e && e.message)); }
+    if (!restored) { // open LIBRARY on the playlist that was open last time
+      restored = true;
+      try {
+        const p = JSON.parse(localStorage.getItem('minapp.pvPick') || 'null');
+        if (p && ['spotify', 'youtube', 'ytmusic', 'ytsaved', 'local'].includes(p.kind) && pick.kind === 'queue') {
+          const mine = pick = { kind: p.kind, id: String(p.id || ''), name: String(p.name || '') };
+          songs = null;
+          api.listsSongs(mine.kind, mine.id).then((x) => { if (pick === mine) { songs = x || []; draw(); } }).catch(() => { if (pick === mine) { songs = []; draw(); } });
+        }
+      } catch {}
+    }
     draw();
   }
 

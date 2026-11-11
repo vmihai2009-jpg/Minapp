@@ -1,5 +1,12 @@
 # What's new in Minapp
 
+## 1.9.30
+- The album picture is back to its normal size. Drag its bottom-right corner outwards for the double size, inwards for the normal one.
+- A small arrow marks the playing song, and the PLAYLIST tab opens on it.
+- Cmd+F (Ctrl+F on Windows) opens FIND. With the pointer over the list, the up / down keys move through the songs and Enter plays.
+- LIBRARY opens on the playlist you had open last time. The end of each list shows how many songs it has.
+- Double-click the playlist's title bar to roll it up into a bar (and again to bring it back).
+
 ## 1.9.29
 - Fixed the double-size album picture covering the left side of the playlist. The playlist now sits beside the big picture (and runs under it only when the equalizer is open and there is room). The tabs also fit when the playlist is narrow.
 

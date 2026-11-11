@@ -26,6 +26,8 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     const l = localStorage.getItem('minapp.albumStyle'); if (LOOK_ORDER.includes(l)) look = l;
     spin = localStorage.getItem('minapp.albumSpin') === '1';
     const f = localStorage.getItem('minapp.albumFilter'); if (FILTERS.includes(f)) filter = f;
+    // 1.9.30: back to the normal size once (the double size took too much room); drag the corner to change it
+    if (!localStorage.getItem('minapp.albumBigReset')) { localStorage.setItem('minapp.albumBigReset', '1'); localStorage.setItem('minapp.albumBig', '0'); }
     big = localStorage.getItem('minapp.albumBig') === '1';
   } catch {}
   const report = () => api.albumState({ look, spin, open, filter, big });
@@ -56,6 +58,23 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
       if (timer) { clearInterval(timer); timer = null; }
       draw(); animate(); report();
     });
+    // the bottom-right corner: drag it outwards for the double size, inwards for the normal size
+    const grip = document.createElement('div');
+    grip.title = 'Drag to make the picture bigger or smaller';
+    grip.style.cssText = 'position:absolute;right:0;bottom:0;width:9px;height:9px;cursor:nwse-resize;' +
+      'background:linear-gradient(135deg,transparent 50%,rgba(255,255,255,.45) 50%,rgba(255,255,255,.45) 60%,transparent 60%,transparent 72%,rgba(255,255,255,.45) 72%,rgba(255,255,255,.45) 82%,transparent 82%);';
+    let from = null;
+    grip.addEventListener('pointerdown', (e) => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); from = { x: e.screenX, y: e.screenY }; grip.setPointerCapture(e.pointerId); });
+    grip.addEventListener('pointermove', (e) => {
+      if (!from) return;
+      const d = Math.max(e.screenX - from.x, e.screenY - from.y), u = Math.min(e.screenX - from.x, e.screenY - from.y);
+      if (!big && d > 30) { setOptions({ big: true }); from = { x: e.screenX, y: e.screenY }; }
+      else if (big && u < -30) { setOptions({ big: false }); from = { x: e.screenX, y: e.screenY }; }
+    });
+    const drop = () => { from = null; };
+    grip.addEventListener('pointerup', drop); grip.addEventListener('pointercancel', drop);
+    grip.addEventListener('click', (e) => e.stopPropagation());
+    tab.append(grip);
     (document.getElementById('webamp') || document.body).appendChild(tab);
     frameStyle(); draw();
     setInterval(() => { if (open && textBg(skin().normalbg || '#000') !== skinKey) { frameStyle(); draw(); } }, 2000); // skin changed
