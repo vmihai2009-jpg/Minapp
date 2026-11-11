@@ -97,7 +97,7 @@
   api.onMini(() => document.querySelector('#shade')?.click());
 
   // ----- stack the windows with no gaps; Milkdrop sits to the right of the player -----
-  const SEL = { main: '#main-window', equalizer: '#equalizer-window', playlist: '#playlist-window' };
+  const SEL = { main: '#main-window', equalizer: '#equalizer-window', playlist: '#playlist-window, #playlist-window-shade' };
   let lastSig = '';
   const artOffset = () => (window.__albumTab ? window.__albumTab.offset() : 0);
   let plWide = null; // the playlist's own width while it is stretched under the album panel
@@ -126,7 +126,7 @@
       // ...but only when the panel ends above the playlist: the double-size panel is taller than the player, so then
       // the playlist stays beside it (or goes under once the equalizer pushes it below the panel)
       const ah = window.__albumTab && window.__albumTab.height ? window.__albumTab.height() : 116;
-      const under = ao > 0 && ao % 25 === 0 && !gen.main.shade && !!h.playlist && ah <= h.main + h.equalizer;
+      const under = ao > 0 && ao % 25 === 0 && !gen.main.shade && h.playlist > 14 && ah <= h.main + h.equalizer;
       for (const id of ['main', 'equalizer', 'playlist']) {
         if (h[id]) { positions[id] = { x: id === 'playlist' && under ? 0 : ao, y }; y += h[id]; }
       }
@@ -184,7 +184,7 @@
     if (document.hidden) return;
     restack();
     // only the few top-level boxes are measured (cheap); a full-tree scan every tick made the playlist feel laggy
-    const els = [...document.querySelectorAll('#main-window, #equalizer-window, #playlist-window, #milkdrop-window, #dl-panel, #whatsnew-panel, #album-tab, #info-tab, #lists-tab')];
+    const els = [...document.querySelectorAll('#main-window, #equalizer-window, #playlist-window, #playlist-window-shade, #milkdrop-window, #dl-panel, #whatsnew-panel, #album-tab, #info-tab, #lists-tab')];
     for (const c of document.body.children) {
       if (c.id !== 'app' && !['SCRIPT', 'STYLE'].includes(c.tagName)) els.push(c);
     }
