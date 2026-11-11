@@ -987,7 +987,7 @@ async function copyToSpotify(kind, id, name) {
 }
 
 // the playlist panel under the album picture: everything that can be played, by source
-ipcMain.handle('lists:all', async (_e, force) => {
+ipcMain.handle('lists:all', async (_e, force, wantYtm) => {
   let spotify;
   try { spotify = readCfg().spotRefresh ? await getSpotifyPlaylists(!!force) : { status: 'login' }; } catch (e) { spotify = { status: 'error', message: e.message }; }
   const yt = readCfg().yt;
@@ -1002,9 +1002,42 @@ ipcMain.handle('lists:all', async (_e, force) => {
   // plus Liked music (the songs liked in either app)
   // ...read in the background: its hidden window can take long (or never answer), and that must not hold up the
   // Spotify, YouTube and local lists. Until it answers the folder says Loading and the panel asks again shortly.
-  const ytmusic = ytmSoon(!!force);
+  // ...and only while its folder is open: its page is heavy, so it is not kept running for nothing
+  const ytmusic = wantYtm ? ytmSoon(!!force) : (ytmLib ? ytmLib.data : { signedIn: true, items: [], idle: true });
   return { spotify, youtube, ytmusic, local: library.playlists().filter((p) => p.count > 0).map((p) => ({ name: p.name, n: p.count })) };
 });
+// a quick YouTube search: read the results page YouTube serves to browsers and take the videos out of its data
+async function ytQuickSearch(q) {
+  try {
+    const r = await fetch('https://www.youtube.com/results?hl=en&sp=EgIQAQ%253D%253D&search_query=' + encodeURIComponent(q), {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36', 'Accept-Language': 'en', Cookie: 'SOCS=CAI; CONSENT=YES+1' },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) { log('yt quick search: HTTP ' + r.status); return []; }
+    const html = await r.text();
+    const at = html.indexOf('ytInitialData');
+    const from = at < 0 ? -1 : html.indexOf('{', at);
+    if (from < 0) { log('yt quick search: no data in the page'); return []; }
+    // the data is one JSON object: walk to its closing brace (strings may hold braces)
+    let depth = 0, inStr = false, end = -1;
+    for (let i = from; i < html.length; i++) {
+      const c = html[i];
+      if (inStr) { if (c === '\\') i++; else if (c === '"') inStr = false; }
+      else if (c === '"') inStr = true;
+      else if (c === '{') depth++;
+      else if (c === '}' && --depth === 0) { end = i; break; }
+    }
+    if (end < 0) return [];
+    const out = [];
+    for (const v of findAll(JSON.parse(html.slice(from, end + 1)), 'videoRenderer')) {
+      if (!v || !/^[\w-]{11}$/.test(v.videoId || '') || out.some((x) => x.id === v.videoId)) continue;
+      out.push({ id: v.videoId, title: runsText(v.title) || '', channel: runsText(v.ownerText || v.longBylineText) || '' });
+      if (out.length >= 15) break;
+    }
+    log('yt quick search: ' + out.length);
+    return out;
+  } catch (e) { log('yt quick search: ' + e.message); return []; }
+}
 // search one library: [{ t (the line shown), kind, ... }] for the panel, played with lists:found
 ipcMain.handle('lists:search', async (_e, key, q, only) => {
   q = String(q || '').trim().slice(0, 80);
@@ -1025,8 +1058,10 @@ ipcMain.handle('lists:search', async (_e, key, q, only) => {
     ];
   }
   if (key === 'youtube' || key === 'ytmusic') {
-    const list = await library.ytEntries('ytsearch12:' + q).catch(() => []);
-    return list.map((v) => ({ t: v.title, kind: key, id: v.id, all: list.map((x) => x.id) }));
+    let list = await ytQuickSearch(q); // YouTube's own results page: about a second
+    if (!list.length) list = await Promise.race([library.ytEntries('ytsearch12:' + q).catch(() => []), new Promise((r) => setTimeout(() => r([]), 20000))]); // the downloader's search: slower (given 20 s), but a second way in
+    if (!list.length) return [{ t: 'YouTube did not answer. Try again in a moment.', kind: 'none' }];
+    return list.map((v) => ({ t: v.title + (v.channel ? ' - ' + v.channel : ''), kind: key, id: v.id, all: list.map((x) => x.id) }));
   }
   const n = (x) => x.toLowerCase();
   const out = [];
@@ -1098,8 +1133,16 @@ ipcMain.handle('lists:found', async (_e, r) => {
 });
 // ---------- YouTube Music's own library, read through its window (signed in there) with the page's own API ----------
 let ytmLib = null;
+// The hidden YouTube Music page is a whole web app running out of sight (it made Minapp slow): once nothing has
+// asked it anything for a minute it is closed again, unless it is on screen or is what's playing.
+let ytmIdle = null;
+function ytmRest() {
+  clearTimeout(ytmIdle);
+  ytmIdle = setTimeout(() => { try { if (ytmWin && !ytmWin.isDestroyed() && !ytmWin.isVisible() && source !== 'ytmusic') ytmWin.destroy(); } catch {} }, 60000);
+}
 async function ytmBrowse(body) {
   await openYouTubeMusic(true);
+  ytmRest();
   for (let i = 0; i < 40 && ytmWin && ytmWin.webContents.isLoading(); i++) await new Promise((r) => setTimeout(r, 250));
   for (let i = 0; i < 6; i++) {
     if (!ytmWin) return { err: 'closed' };
