@@ -457,10 +457,12 @@ export function initPlaylistView(webamp, api) {
     busy = false; results = res || []; draw();
   }
 
-  let restored = false;
+  let restored = false, ytmTries = 0;
   async function load(force) {
     loadedAt = Date.now();
     try { data = await api.listsAll(!!force); } catch (e) { api.log('playlists failed: ' + (e && e.message)); }
+    // YouTube Music is read in the background: ask again shortly while it is still loading
+    if (data && data.ytmusic && data.ytmusic.loading && ytmTries < 8) { ytmTries++; setTimeout(() => load(false), 4000); } else ytmTries = 0;
     if (!restored) { // open LIBRARY on the playlist that was open last time
       restored = true;
       try {

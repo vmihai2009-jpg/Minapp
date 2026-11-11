@@ -1000,7 +1000,9 @@ ipcMain.handle('lists:all', async (_e, force) => {
   };
   // YouTube Music keeps its playlists on the same Google account as YouTube: the same lists, played in YouTube Music,
   // plus Liked music (the songs liked in either app)
-  const ytmusic = await ytmPlaylists(!!force).catch((e) => ({ signedIn: false, items: [], error: e.message }));
+  // ...read in the background: its hidden window can take long (or never answer), and that must not hold up the
+  // Spotify, YouTube and local lists. Until it answers the folder says Loading and the panel asks again shortly.
+  const ytmusic = ytmSoon(!!force);
   return { spotify, youtube, ytmusic, local: library.playlists().filter((p) => p.count > 0).map((p) => ({ name: p.name, n: p.count })) };
 });
 // search one library: [{ t (the line shown), kind, ... }] for the panel, played with lists:found
@@ -1109,13 +1111,14 @@ async function ytmBrowse(body) {
 }
 function ytmRun(body) {
   return ytmWin.webContents.executeJavaScript(`(async (body) => {
+    const stop = new AbortController(); setTimeout(() => stop.abort(), 12000);
     const cfg = window.ytcfg; if (!cfg || !cfg.get) return { err: 'loading' };
     const sap = (document.cookie.match(/(?:^|; )(?:__Secure-3PAPISID|SAPISID)=([^;]+)/) || [])[1];
     if (!sap) return { err: 'signin' };
     const ts = Math.floor(Date.now() / 1000), origin = 'https://music.youtube.com';
     const buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(ts + ' ' + sap + ' ' + origin));
     const hash = [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
-    const r = await fetch('/youtubei/v1/browse?prettyPrint=false', { method: 'POST', credentials: 'include',
+    const r = await fetch('/youtubei/v1/browse?prettyPrint=false', { method: 'POST', credentials: 'include', signal: stop.signal,
       headers: { 'Content-Type': 'application/json', Authorization: 'SAPISIDHASH ' + ts + '_' + hash, 'X-Origin': origin, 'X-Goog-AuthUser': '0' },
       body: JSON.stringify({ context: cfg.get('INNERTUBE_CONTEXT'), ...body }) });
     if (!r.ok) return { err: 'HTTP ' + r.status };
@@ -1130,6 +1133,17 @@ function findAll(o, key, out = []) {
   return out;
 }
 const runsText = (t) => (t && (t.simpleText || (t.runs || []).map((r) => r.text).join(''))) || '';
+let ytmBusy = null;
+function ytmSoon(force) {
+  if (!force && ytmLib && Date.now() - ytmLib.at < 5 * 60000) return ytmLib.data;
+  if (!ytmBusy) {
+    const give = new Promise((r) => setTimeout(() => r(null), 25000)); // give up after 25 s
+    ytmBusy = Promise.race([ytmPlaylists(true).catch((e) => ({ signedIn: false, items: [], error: e.message })), give])
+      .then((d) => { if (!d) { ytmLib = { at: Date.now(), data: { signedIn: true, items: [], error: 'timeout' } }; log('yt music playlists: timed out'); } })
+      .finally(() => { ytmBusy = null; });
+  }
+  return ytmLib ? { ...ytmLib.data, loading: true } : { signedIn: true, items: [], loading: true };
+}
 async function ytmPlaylists(force) {
   if (!force && ytmLib && Date.now() - ytmLib.at < 5 * 60000) return ytmLib.data;
   const res = await ytmBrowse({ browseId: 'FEmusic_liked_playlists' });
