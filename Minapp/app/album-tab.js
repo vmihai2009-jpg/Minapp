@@ -561,6 +561,7 @@ export function initAlbumTab(webamp, api, getWidgetMode) {
     setProgress(f) { const v = Math.max(0, Math.min(1, Number(f) || 0)); if (Math.abs(v - progress) >= 0.04 || (v === 0) !== (progress === 0)) { progress = v; if (open && look === 'tape' && !timer) draw(); } },
     // how far the player is pushed right to make room for the panel
     offset: () => (open && tab && getWidgetMode() === 'off' ? W * (big ? 2 : 1) : 0),
+    height: () => (open && tab && getWidgetMode() === 'off' ? H * (big ? 2 : 1) : 0), // how far down the panel reaches
   };
   document.addEventListener('visibilitychange', animate);
   api.onAlbumOptions((o) => setOptions(o || {}));
