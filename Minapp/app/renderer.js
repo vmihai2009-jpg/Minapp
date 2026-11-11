@@ -123,7 +123,10 @@
       const positions = {};
       // with the album panel open (and the player not rolled up into a bar) the playlist runs under it as well: its
       // library column sits under the cassette. It is made exactly as wide as panel + player (Webamp widens in 25 px steps).
-      const under = ao > 0 && ao % 25 === 0 && !gen.main.shade && !!h.playlist;
+      // ...but only when the panel ends above the playlist: the double-size panel is taller than the player, so then
+      // the playlist stays beside it (or goes under once the equalizer pushes it below the panel)
+      const ah = window.__albumTab && window.__albumTab.height ? window.__albumTab.height() : 116;
+      const under = ao > 0 && ao % 25 === 0 && !gen.main.shade && !!h.playlist && ah <= h.main + h.equalizer;
       for (const id of ['main', 'equalizer', 'playlist']) {
         if (h[id]) { positions[id] = { x: id === 'playlist' && under ? 0 : ao, y }; y += h[id]; }
       }

@@ -225,7 +225,7 @@ export function initPlaylistView(webamp, api) {
       skinKey = key;
       root.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;z-index:30;background:${bg};font:${FS}px/${ROW}px ${font},Arial,sans-serif;user-select:none;overflow:hidden;`;
       const T = ROW + 2; // under the top bar
-      bar.style.cssText = `position:absolute;left:0;right:0;top:0;height:${ROW}px;border-bottom:1px solid ${fg};box-sizing:content-box;display:flex;padding:0 2px;`;
+      bar.style.cssText = `position:absolute;left:0;right:0;top:0;height:${ROW}px;border-bottom:1px solid ${fg};box-sizing:content-box;display:flex;gap:4px;padding:0 2px;font-size:${r.width < 320 ? 9 : FS}px;`;
       bar.style.borderBottomColor = fg; bar.style.borderBottomStyle = 'solid';
       left.style.cssText = `position:absolute;left:0;top:${T}px;bottom:0;width:${lw}px;overflow:hidden;`;
       line.style.cssText = `position:absolute;left:${lw}px;top:${T}px;bottom:0;width:1px;background:${fg};opacity:.5;`;

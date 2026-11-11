@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.29
+- Fixed the double-size album picture covering the left side of the playlist. The playlist now sits beside the big picture (and runs under it only when the equalizer is open and there is room). The tabs also fit when the playlist is narrow.
+
 ## 1.9.28
 - New PLAYLIST tab: what's playing, in order, like the classic playlist. Click a song to jump to it.
 - The playlist opens much taller (about 14 rows). The small arrow at the end of the top bar hides the bottom buttons for even more room.
