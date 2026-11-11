@@ -513,7 +513,7 @@ export function initPlaylistView(webamp, api) {
     const w = win(); if (!w) return;
     const box = w.querySelector('.playlist-visualizer');
     if (box && !box.querySelector('canvas:not(#pv-vis)')) {
-      if (!mirror || !box.contains(mirror)) { mirror = document.createElement('canvas'); mirror.id = 'pv-vis'; mirror.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;image-rendering:pixelated;pointer-events:none;'; box.style.position = box.style.position || 'absolute'; box.appendChild(mirror); requestAnimationFrame(mirrorFrame); }
+      if (!mirror || !box.contains(mirror)) { mirror = document.createElement('canvas'); mirror.id = 'pv-vis'; mirror.style.cssText = 'position:absolute;left:2px;top:12px;width:72px;height:16px;image-rendering:pixelated;pointer-events:none;'; // the black window inside the bottom strip, not the whole strip box.appendChild(mirror); requestAnimationFrame(mirrorFrame); }
     }
     const t = w.querySelector('.playlist-running-time-display');
     if (t) {
@@ -537,7 +537,7 @@ export function initPlaylistView(webamp, api) {
     const src = document.querySelector('#webamp #main-window canvas#visualizer') || document.querySelector('#webamp #main-window canvas');
     const r = mirror.getBoundingClientRect();
     if (!r.width || !r.height) return;
-    if (mirror.width !== Math.round(r.width)) { mirror.width = Math.round(r.width); mirror.height = Math.round(r.height); }
+    if (mirror.width !== 72) { mirror.width = 72; mirror.height = 16; }
     const g = mirror.getContext('2d');
     g.imageSmoothingEnabled = false;
     g.clearRect(0, 0, mirror.width, mirror.height);
