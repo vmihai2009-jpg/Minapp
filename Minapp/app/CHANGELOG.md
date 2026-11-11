@@ -1,5 +1,9 @@
 # What's new in Minapp
 
+## 1.9.31
+- Moving Minapp no longer glitches: you can now grab the playlist's or the equalizer's title bar as well as the player's, and the whole of Minapp follows smoothly.
+- Long YouTube lists (100+ songs) saved in Minapp now show in the queue and play. They are handed to the player in blocks of 150 songs.
+
 ## 1.9.30
 - The album picture is back to its normal size. Drag its bottom-right corner outwards for the double size, inwards for the normal one.
 - A small arrow marks the playing song, and the PLAYLIST tab opens on it.
