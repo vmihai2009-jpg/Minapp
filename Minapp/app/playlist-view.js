@@ -3,8 +3,9 @@
 // playlist window with the skin's playlist font and colours, so every skin keeps its look. The five buttons at the
 // bottom are the skin's own buttons with new words: FIND, LIKE, COPY, SORT and INFO (it was LIST OPTS).
 import { skinImage, paintWord } from './download-bar.js';
+import { setPixel, fontStamp } from './pixel-font.js';
 
-const ROW = 14, FS = 11; // row height and letter size: a little bigger than the skin's 9 px so it reads easily
+const ROW = 11, FS = 10; // row height and letter size: a little bigger than the skin's 9 px so it reads easily
 const BUTTONS = [ // the skin's button, where it sits inside the bottom pieces of the window, and its new job
   { sel: '#playlist-add-menu', piece: 'left', x: 14, word: 'FIND', tip: 'Find a song in the list on the right (Enter searches a whole library)' },
   { sel: '#playlist-remove-menu', piece: 'left', x: 43, word: 'LIKE', tip: 'Spotify: like the song. YouTube: save it to Minapp likes. Local: copy it to Liked' },
@@ -116,8 +117,9 @@ export function initPlaylistView(webamp, api) {
         `color:${on || r.input ? cur : fg};` + (r.dim ? 'opacity:.55;' : '') + (live ? 'cursor:pointer;' : '');
       const wrap = document.createElement('div'), t = document.createElement('span');
       wrap.style.cssText = 'flex:1;min-width:0;overflow:hidden;' + (r.mid ? 'text-align:center;' : ''); t.style.cssText = 'display:inline-block;';
-      t.textContent = (r.now ? '\u25b8 ' : '') + r.t; wrap.appendChild(t); d.appendChild(wrap); // a small arrow marks the playing song
-      if (r.d) { const u = document.createElement('span'); u.style.cssText = 'flex:none;padding-left:4px;'; u.textContent = mmss(r.d); d.appendChild(u); }
+      const ink = on || r.input ? cur : fg;
+      setPixel(t, (r.now ? '\u25b8 ' : '') + r.t, ink); wrap.appendChild(t); d.appendChild(wrap); // a small arrow marks the playing song
+      if (r.d) { const u = document.createElement('span'); u.style.cssText = 'flex:none;padding-left:4px;'; setPixel(u, mmss(r.d), ink); d.appendChild(u); }
       box.appendChild(d);
       if (live && top + i === hover) slide(t, wrap);
     });
@@ -137,12 +139,14 @@ export function initPlaylistView(webamp, api) {
     bar.textContent = '';
     for (const [k, label] of TABS) {
       const b = document.createElement('div');
-      b.dataset.tab = k; b.textContent = label;
-      b.style.cssText = `flex:1;text-align:center;height:${ROW}px;cursor:pointer;color:${k === tab ? cur : fg};` + (k === tab ? 'text-decoration:underline;text-underline-offset:2px;' : 'opacity:.8;');
+      b.dataset.tab = k;
+      const c = setPixel(b, label, k === tab ? cur : fg, bar.clientWidth && bar.clientWidth < 320 ? 1 : 2);
+      if (c && k === tab) { c.style.paddingBottom = '1px'; c.style.borderBottom = '1px solid ' + cur; c.style.boxSizing = 'content-box'; }
+      b.style.cssText = `flex:1;text-align:center;height:${ROW}px;cursor:pointer;color:${k === tab ? cur : fg};` + (k === tab ? '' : 'opacity:.8;');
       bar.appendChild(b);
     }
     const t = document.createElement('div'); // show / hide the bottom tools bar
-    t.dataset.tools = '1'; t.textContent = tools ? '\u25be' : '\u25b4';
+    t.dataset.tools = '1'; setPixel(t, tools ? '\u25be' : '\u25b4', fg, 1);
     t.title = tools ? 'Hide the buttons at the bottom (more room for songs)' : 'Show the buttons at the bottom';
     t.style.cssText = `flex:none;width:14px;text-align:center;height:${ROW}px;cursor:pointer;color:${fg};`;
     bar.appendChild(t);
@@ -158,7 +162,7 @@ export function initPlaylistView(webamp, api) {
   // the LYRICS / ARTIST / ALBUM pages (their words come from info-tab.js)
   function drawInfo() {
     const { fg, cur } = colours();
-    const v = window.__infoTab ? window.__infoTab.view(tab, Math.max(20, Math.floor(infoBox.clientWidth / 5.4))) : { rows: [], cur: -1 };
+    const v = window.__infoTab ? window.__infoTab.view(tab, Math.max(20, Math.floor(infoBox.clientWidth / 5))) : { rows: [], cur: -1 };
     infoRows = v.rows;
     const vis = Math.max(1, Math.floor(infoBox.clientHeight / ROW));
     if (tab === 'lyrics' && v.cur >= 0 && v.cur !== infoCur && Date.now() > infoHands) { const i = infoRows.findIndex((r) => r.li === v.cur); if (i >= 0) infoTop = i - Math.floor((vis - 1) / 2); }
@@ -171,7 +175,7 @@ export function initPlaylistView(webamp, api) {
       d.dataset.i = String(infoTop + i);
       d.style.cssText = `position:absolute;left:0;right:0;top:${i * ROW}px;height:${ROW}px;line-height:${ROW}px;white-space:nowrap;overflow:hidden;padding:0 4px;box-sizing:border-box;` +
         (r.mid ? 'text-align:center;' : '') + `color:${on || r.bright ? cur : fg};` + (r.act && !on ? 'text-decoration:underline;' : '') + (r.dim || (tab === 'lyrics' && v.cur >= 0 && r.li !== undefined && !now) ? 'opacity:.55;' : '') + (r.act ? 'cursor:pointer;' : '');
-      d.textContent = r.t;
+      { const c = setPixel(d, r.t, on || r.bright ? cur : fg); if (c && r.act && !on) { c.style.paddingBottom = '1px'; c.style.borderBottom = '1px solid ' + fg; c.style.boxSizing = 'content-box'; } }
       infoBox.appendChild(d);
     });
   }
@@ -224,7 +228,7 @@ export function initPlaylistView(webamp, api) {
     lw = Math.max(90, Math.round(r.width * 0.36));
     const art = document.getElementById('album-tab'), a = art && art.style.display !== 'none' ? art.getBoundingClientRect() : null;
     if (a && a.width && a.bottom <= r.top + 2 && a.right > r.left + 60 && a.right < r.right - 100) lw = Math.round(a.right - r.left) - 1;
-    const key = [r.left, r.top, r.width, r.height, bg, fg, font, lw, tools].join();
+    const key = [r.left, r.top, r.width, r.height, bg, fg, font, lw, tools, fontStamp()].join();
     root.style.display = '';
     if (key !== skinKey) {
       skinKey = key;
@@ -413,8 +417,8 @@ export function initPlaylistView(webamp, api) {
     const w = win(); if (!w) return;
     if (!f) { f = document.createElement('div'); f.id = 'pv-flash'; (document.getElementById('webamp') || document.body).appendChild(f); }
     const r = root.getBoundingClientRect(), { bg, fg, cur, font } = colours();
-    f.textContent = flash;
     f.style.cssText = `position:fixed;left:${r.left}px;top:${r.bottom - ROW}px;width:${r.width}px;height:${ROW}px;line-height:${ROW}px;z-index:31;background:${bg};border-top:1px solid ${fg};color:${cur};font:${FS}px ${font},Arial,sans-serif;text-align:center;pointer-events:none;`;
+    setPixel(f, flash, cur);
     setTimeout(() => { if (Date.now() >= flashUntil && f) f.remove(); }, 3100);
   }
 
@@ -513,7 +517,7 @@ export function initPlaylistView(webamp, api) {
     const w = win(); if (!w) return;
     const box = w.querySelector('.playlist-visualizer');
     if (box && !box.querySelector('canvas:not(#pv-vis)')) {
-      if (!mirror || !box.contains(mirror)) { mirror = document.createElement('canvas'); mirror.id = 'pv-vis'; mirror.style.cssText = 'position:absolute;left:2px;top:12px;width:72px;height:16px;image-rendering:pixelated;pointer-events:none;'; // the black window inside the bottom strip, not the whole strip box.appendChild(mirror); requestAnimationFrame(mirrorFrame); }
+      if (!mirror || !box.contains(mirror)) { mirror = document.createElement('canvas'); mirror.id = 'pv-vis'; mirror.style.cssText = 'position:absolute;left:2px;top:12px;width:72px;height:16px;image-rendering:pixelated;pointer-events:none;'; box.appendChild(mirror); requestAnimationFrame(mirrorFrame); }
     }
     const t = w.querySelector('.playlist-running-time-display');
     if (t) {
@@ -582,7 +586,7 @@ export function initPlaylistView(webamp, api) {
       });
       (document.getElementById('webamp') || document.body).appendChild(menuEl);
     }
-    const width = 190, room = Math.max(ROW * 4, Math.floor((a.top - 2) / ROW) * ROW);
+    const width = 200, room = Math.max(ROW * 4, Math.floor((a.top - 2) / ROW) * ROW);
     const vis = Math.min(rows.length, Math.floor(room / ROW));
     menuTop = Math.max(0, Math.min(menuTop, rows.length - vis));
     const left = Math.max(0, a.right - width);
@@ -595,7 +599,7 @@ export function initPlaylistView(webamp, api) {
       d.style.cssText = `position:absolute;left:0;right:0;top:${i * ROW + 1}px;height:${ROW}px;padding:0 6px 0 ${6 + m.depth * 10}px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;` +
         (m.sep ? '' : `color:${on ? cur : fg};cursor:${m.off ? 'default' : 'pointer'};`) + (m.off ? 'opacity:.5;' : '');
       if (m.sep) { const l = document.createElement('div'); l.style.cssText = `position:absolute;left:6px;right:6px;top:${ROW / 2}px;height:1px;background:${fg};opacity:.4;`; d.appendChild(l); }
-      else d.textContent = (m.tick ? (m.on ? '\u2022 ' : '   ') : '') + m.label + (m.sub ? (menuOpenSubs.has(m.key) ? '  \u25be' : '  \u25b8') : '');
+      else setPixel(d, (m.tick ? (m.on ? '\u2022 ' : '  ') : '') + m.label + (m.sub ? (menuOpenSubs.has(m.key) ? ' -' : ' +') : ''), on ? cur : fg);
       menuEl.appendChild(d);
     });
   }

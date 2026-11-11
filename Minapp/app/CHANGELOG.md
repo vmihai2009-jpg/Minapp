@@ -1,5 +1,10 @@
 # What's new in Minapp
 
+## 1.9.35
+- The playlist is written in the skin's own title font (the one the song title uses), so it looks like the rest of the player. Other skins bring their own letters.
+- Rows sit a little closer together, so more songs fit on a page. The playing song is marked with a star.
+- Titles in other alphabets keep ordinary letters.
+
 ## 1.9.34
 - The moving bars in the playlist's small black window stay inside it (they were drawn too big and spilled over the frame).
 
