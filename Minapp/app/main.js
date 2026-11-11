@@ -987,7 +987,7 @@ async function copyToSpotify(kind, id, name) {
 }
 
 // the playlist panel under the album picture: everything that can be played, by source
-ipcMain.handle('lists:all', async (_e, force) => {
+ipcMain.handle('lists:all', async (_e, force, wantYtm) => {
   let spotify;
   try { spotify = readCfg().spotRefresh ? await getSpotifyPlaylists(!!force) : { status: 'login' }; } catch (e) { spotify = { status: 'error', message: e.message }; }
   const yt = readCfg().yt;
@@ -1002,7 +1002,8 @@ ipcMain.handle('lists:all', async (_e, force) => {
   // plus Liked music (the songs liked in either app)
   // ...read in the background: its hidden window can take long (or never answer), and that must not hold up the
   // Spotify, YouTube and local lists. Until it answers the folder says Loading and the panel asks again shortly.
-  const ytmusic = ytmSoon(!!force);
+  // ...and only while its folder is open: its page is heavy, so it is not kept running for nothing
+  const ytmusic = wantYtm ? ytmSoon(!!force) : (ytmLib ? ytmLib.data : { signedIn: true, items: [], idle: true });
   return { spotify, youtube, ytmusic, local: library.playlists().filter((p) => p.count > 0).map((p) => ({ name: p.name, n: p.count })) };
 });
 // search one library: [{ t (the line shown), kind, ... }] for the panel, played with lists:found
@@ -1098,8 +1099,16 @@ ipcMain.handle('lists:found', async (_e, r) => {
 });
 // ---------- YouTube Music's own library, read through its window (signed in there) with the page's own API ----------
 let ytmLib = null;
+// The hidden YouTube Music page is a whole web app running out of sight (it made Minapp slow): once nothing has
+// asked it anything for a minute it is closed again, unless it is on screen or is what's playing.
+let ytmIdle = null;
+function ytmRest() {
+  clearTimeout(ytmIdle);
+  ytmIdle = setTimeout(() => { try { if (ytmWin && !ytmWin.isDestroyed() && !ytmWin.isVisible() && source !== 'ytmusic') ytmWin.destroy(); } catch {} }, 60000);
+}
 async function ytmBrowse(body) {
   await openYouTubeMusic(true);
+  ytmRest();
   for (let i = 0; i < 40 && ytmWin && ytmWin.webContents.isLoading(); i++) await new Promise((r) => setTimeout(r, 250));
   for (let i = 0; i < 6; i++) {
     if (!ytmWin) return { err: 'closed' };

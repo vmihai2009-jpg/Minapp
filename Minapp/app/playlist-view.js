@@ -295,6 +295,7 @@ export function initPlaylistView(webamp, api) {
     if (!r || r.dim) return;
     if (r.folder) {
       if (!twice) { open[r.folder] = !open[r.folder]; try { localStorage.setItem('minapp.pvOpen', JSON.stringify(open)); } catch {} }
+      if (r.folder === 'ytmusic' && open.ytmusic && !twice) load(false); // YouTube Music is only read once its folder is opened
       pick = { kind: 'search', key: r.folder, folder: r.folder, name: { spotify: 'Spotify', youtube: 'YouTube', ytmusic: 'YouTube Music', local: 'your files' }[r.folder] };
       results = null; rTop = 0; draw(); return;
     }
@@ -460,7 +461,7 @@ export function initPlaylistView(webamp, api) {
   let restored = false, ytmTries = 0;
   async function load(force) {
     loadedAt = Date.now();
-    try { data = await api.listsAll(!!force); } catch (e) { api.log('playlists failed: ' + (e && e.message)); }
+    try { data = await api.listsAll(!!force, !!open.ytmusic); } catch (e) { api.log('playlists failed: ' + (e && e.message)); }
     // YouTube Music is read in the background: ask again shortly while it is still loading
     if (data && data.ytmusic && data.ytmusic.loading && ytmTries < 8) { ytmTries++; setTimeout(() => load(false), 4000); } else ytmTries = 0;
     if (!restored) { // open LIBRARY on the playlist that was open last time

@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.33
+- Minapp is quick again. A hidden YouTube Music page was being kept running in the background all the time, which slowed everything down (search included). It is now only opened while the YT MUSIC folder is open, and closed again after a minute.
+
 ## 1.9.32
 - The library loads right away again. Spotify, YouTube and local playlists no longer wait for YouTube Music to answer (that could take 20 seconds or more); YT Music fills in on its own when it is ready.
 

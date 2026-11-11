@@ -54,7 +54,7 @@ contextBridge.exposeInMainWorld('bridge', {
   onSleep: (cb) => ipcRenderer.on('sleep:state', (_e, s) => cb(s)),
   sleepGet: () => ipcRenderer.invoke('sleep:get'),
   sleepNow: () => ipcRenderer.send('sleep:now'),
-  listsAll: (force) => ipcRenderer.invoke('lists:all', force),
+  listsAll: (force, ytm) => ipcRenderer.invoke('lists:all', force, ytm),
   listsPlay: (kind, id, name) => ipcRenderer.invoke('lists:play', kind, id, name),
   listsSearch: (key, q, only) => ipcRenderer.invoke('lists:search', key, q, only),
   listsSongs: (kind, id) => ipcRenderer.invoke('lists:songs', kind, id),
