@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.37
+- The ARTIST page no longer says "Could not reach Wikipedia" when only the last lookup fails: it shows the page it did find. Busy or briefly unavailable Wikipedia answers are retried once, and Minapp identifies itself to Wikipedia with a descriptive client name.
+
 ## 1.9.36
 - In the ARTIST page, the singles and albums the text names (titles in quotes) are listed in white under "PLAY A SINGLE OR ALBUM". Click one and it plays straight away (Spotify: the album, or the song if no album has that name; YouTube: the best match).
 
