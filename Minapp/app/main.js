@@ -1977,6 +1977,35 @@ ipcMain.handle('info:get', async (_e, kind, song) => {
   return albumInfo({ artist: song.artist, title: song.title, album: song.album, trackId }, spot);
 });
 ipcMain.handle('info:play', (_e, uri, ctx) => playSpotifyContext(String(uri || ''), String(ctx || '')));
+// a single or album named in the artist's text (the quoted titles): find it in the current source and play it at once
+ipcMain.handle('info:mention', async (_e, name, artist) => {
+  name = String(name || '').trim().slice(0, 120); artist = String(artist || '').trim().slice(0, 120);
+  if (!name) return false;
+  const norm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}]+/gu, '');
+  const want = norm(name);
+  if (source === 'spotify') {
+    const tok = readCfg().spotRefresh ? await spotAccessToken().catch(() => null) : null;
+    if (!tok) return false;
+    const j = await spotApi('/search?type=album,track&limit=5&q=' + encodeURIComponent(`${name} ${artist}`), tok).catch(() => null);
+    if (!j) return false;
+    const album = ((j.albums && j.albums.items) || []).filter(Boolean).find((a) => norm(a.name) === want);
+    if (album) { await playSpotifyContext(album.uri, ''); return true; }
+    const track = ((j.tracks && j.tracks.items) || []).filter(Boolean).find((t) => norm(t.name) === want);
+    if (track) { await playSpotifyContext(track.uri, (track.album && track.album.uri) || ''); return true; }
+    return false;
+  }
+  if (source === 'youtube' || source === 'ytmusic') {
+    const list = await ytQuickSearch(`${name} ${artist}`.trim());
+    const hit = list.find((v) => norm(v.title).includes(want)) || list[0];
+    if (!hit) return false;
+    if (source === 'ytmusic') { playYtMusic('watch?v=' + hit.id); return true; }
+    const ids = [hit.id, ...list.map((v) => v.id).filter((x) => x !== hit.id)];
+    writeCfg({ yt: { ids, list: null, v: null, name: 'Search results' } });
+    await setSource('youtube');
+    return true;
+  }
+  return false; // local files: not searched
+});
 ipcMain.on('album:state', (_e, st) => { if (st && typeof st === 'object') { albumUi = { look: String(st.look || 'case'), spin: !!st.spin, open: !!st.open, filter: String(st.filter || 'dots32'), big: !!st.big }; buildMenu(); } });
 ipcMain.on('app:quit', () => app.quit());
 ipcMain.handle('app:version', () => app.getVersion());

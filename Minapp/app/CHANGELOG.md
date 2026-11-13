@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.36
+- In the ARTIST page, the singles and albums the text names (titles in quotes) are listed in white under "PLAY A SINGLE OR ALBUM". Click one and it plays straight away (Spotify: the album, or the song if no album has that name; YouTube: the best match).
+
 ## 1.9.35
 - The playlist is written in the skin's own title font (the one the song title uses), so it looks like the rest of the player. Other skins bring their own letters.
 - Rows sit a little closer together, so more songs fit on a page. The playing song is marked with a star.

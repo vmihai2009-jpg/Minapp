@@ -34,6 +34,18 @@ function wrap(t, width) {
   return out.length ? out : [''];
 }
 
+// the quoted titles in a text ("Dear Mama", "The Blueprint"): the singles and albums it names
+function mentions(text) {
+  const out = [], re = /["\u201c]([^"\u201c\u201d\n]{2,70})["\u201d]/g;
+  let m;
+  while ((m = re.exec(String(text || '')))) {
+    const t = m[1].trim(), k = t.toLowerCase();
+    if (t && !out.some((x) => x.toLowerCase() === k)) out.push(t);
+    if (out.length >= 6) break;
+  }
+  return out;
+}
+
 export function initInfoTab(webamp, api, getWidgetMode) {
   let open = false, kind = 'lyrics', panel = null, skinKey = '';
   let song = null, songKey = '', data = {}, rows = [], top = 0, cur = -1, handsOff = 0, ticket = 0, hover = -1, hasComma = true;
@@ -77,6 +89,9 @@ export function initInfoTab(webamp, api, getWidgetMode) {
       rows.push({ t: d.name || song.artist || '', bright: true });
       if (d.about) for (const t of wrap(d.about, cw)) rows.push({ t, dim: true });
       for (const para of d.text.split(/\n+/)) { rows.push({ t: '' }); for (const t of wrap(para, cw)) rows.push({ t }); }
+      // the singles and albums the text names (in quotes): white, and a click plays them straight away
+      const named = mentions([d.about, d.text].join('\n'));
+      if (named.length) { rows.push({ t: '' }); rows.push({ t: 'PLAY A SINGLE OR ALBUM', dim: true }); for (const m of named) for (const t of wrap(m, cw)) rows.push({ t: '[ ' + t + ' ]', bright: true, act: 'mention', name: m }); }
       rows.push({ t: '' }); rows.push({ t: 'From Wikipedia', dim: true });
     }
     if (!hasComma) for (const r of rows) r.t = r.t.replace(/,/g, '.');
@@ -396,6 +411,7 @@ export function initInfoTab(webamp, api, getWidgetMode) {
     if (r.act === 'retry') load(true);
     if (r.act === 'song' && data.album) api.infoPlay(r.uri, data.album.uri).catch(() => {});
     if (r.act === 'play' && data.album && data.album.uri) api.infoPlay(data.album.uri).catch(() => {});
+    if (r.act === 'mention' && song) api.infoMention(r.name, song.artist || '').catch(() => {});
   }
   window.__infoTab = { view, click, onChange: (cb) => { changed = cb; }, set, setKind, setSong, setQueue, colours, style: () => skin(), show: (k, d) => { data[k] = d; kind = k; build(); follow(true); } };
   open = false; report(); // the separate panel is not shown any more: its tabs live in the playlist window
