@@ -1,14 +1,19 @@
 // Words for the info panel: a song's lyrics (from lrclib.net, timed to the music where it has them) and a short
 // "about the artist" (the opening of the artist's Wikipedia page). Both are free services that need no account.
-const UA = 'Minapp/1.9 (desktop music player)';
+// Wikipedia asks for a descriptive client name (not a bare one) and refuses or throttles anonymous-looking ones
+const UA = 'Minapp/1.9.36 (desktop music player; https://github.com/vmihai2009-jpg/Minapp)';
 const cache = new Map(); // answers are remembered while the app runs
 const MUSIC = /\b(band|singer|musician|rapper|songwriter|dj|disc jockey|composer|duo|trio|group|producer|vocalist|guitarist|pianist|drummer|bassist|orchestra|ensemble|choir|recording artist|music)/i;
 
 async function getJson(url) {
-  const r = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' }, signal: AbortSignal.timeout(12000) });
-  if (r.status === 404) return null;
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
+  // one retry after a pause when the site is busy (429) or briefly down (5xx) instead of failing at once
+  for (let attempt = 0; ; attempt++) {
+    const r = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' }, signal: AbortSignal.timeout(12000) });
+    if (r.status === 404) return null;
+    if ((r.status === 429 || r.status >= 500) && attempt === 0) { await new Promise((res) => setTimeout(res, 1500)); continue; }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }
 }
 
 // YouTube titles and Spotify "remaster" suffixes get in the way of a match: reduce to the plain artist and song
@@ -90,7 +95,8 @@ async function about({ artist }) {
   if (!artist) return { status: 'none' };
   const hit = await firstOf([`${artist} (band)`, `${artist} (musician)`, `${artist} (singer)`, `${artist} (rapper)`, `${artist} (group)`, `${artist} (DJ)`, artist], isMusic);
   if (hit) return hit;
-  const j = await getJson('https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=4&srsearch=' + encodeURIComponent(`"${artist}" band OR musician OR singer`));
+  // the last try (a search of the site): if it cannot answer, the artist simply has no page to show
+  const j = await getJson('https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=4&srsearch=' + encodeURIComponent(`"${artist}" band OR musician OR singer`)).catch(() => null);
   const n = (x) => x.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
   const titles = ((j && j.query && j.query.search) || []).map((r) => r.title).filter((t) => n(t.replace(/ \([^)]*\)$/, '')) === n(artist));
   return (await firstOf(titles, isMusic)) || { status: 'none' };
