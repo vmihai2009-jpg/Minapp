@@ -34,6 +34,7 @@ trash "$HERE/Minapp.app"
 
 echo "Removing the player engine and downloads..."
 trash "$SUP/engine"
+trash "$SUP/app"
 trash "$SUP/engine.building"
 trash "$SUP/downloads"
 rm -f "$SUP/.asked-install"

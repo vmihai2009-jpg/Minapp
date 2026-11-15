@@ -4,7 +4,30 @@ const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
 const path = require('path');
+const os = require('os');
+
+// Mac: updates are kept in ~/Library/Application Support/Minapp/app, outside the signed player engine. macOS ties the
+// permissions it gave Minapp (control Spotify, listen for the visualizer) to the engine's signature; writing an update
+// into the engine and signing it again made macOS ask for them after every update. The copy inside the engine only
+// starts the updated copy when there is one. ".base" names the engine copy the update was made on top of, so a freshly
+// installed engine is never overruled by an older update; ".starting" is cleared once the window is up, so an update
+// that cannot start is skipped the next time.
+const extDir = path.join(os.homedir(), 'Library', 'Application Support', 'Minapp', 'app');
+if (process.platform === 'darwin' && __dirname.includes('.app/Contents/Resources') && !global.__minappBase) {
+  let go = false;
+  try {
+    const ver = (d) => JSON.parse(fs.readFileSync(path.join(d, 'package.json'), 'utf8')).version;
+    global.__minappBase = ver(__dirname);
+    const mark = path.join(extDir, '.starting');
+    if (fs.existsSync(path.join(extDir, 'main.js')) && fs.readFileSync(path.join(extDir, '.base'), 'utf8').trim() === global.__minappBase && ver(extDir) !== global.__minappBase) {
+      if (fs.existsSync(mark)) fs.renameSync(extDir, extDir + '.broken-' + Date.now()); // it did not get as far as showing the window last time
+      else { fs.writeFileSync(mark, ''); if (typeof app.setVersion === 'function') app.setVersion(ver(extDir)); global.__minappExt = mark; go = true; }
+    }
+  } catch { go = false; }
+  if (go) { require(path.join(extDir, 'main.js')); return; }
+}
 const widgetBridge = require('./widget-bridge');
+const appVersion = () => require('./package.json').version; // the running code's own version (on a Mac that can be the updated copy outside the engine)
 
 // Every web request gets a time limit: a connection that hangs (sleeping laptop, captive Wi-Fi) must not leave the
 // queue, cover or update checks waiting forever.
@@ -16,7 +39,7 @@ const isMac = process.platform === 'darwin';
 // Portable: keep settings next to the app (a "data" folder) instead of in %APPDATA% / Library.
 // Inside a macOS .app bundle the app folder is not a place to keep data (it is replaced on updates), so there it
 // uses ~/Library/Application Support/Minapp, which the uninstaller knows about.
-const inMacBundle = isMac && __dirname.includes('.app/Contents/Resources');
+const inMacBundle = isMac && (__dirname.includes('.app/Contents/Resources') || !!global.__minappExt);
 try {
   const dataDir = inMacBundle ? path.join(app.getPath('appData'), 'Minapp') : path.join(path.dirname(__dirname), 'data');
   fs.mkdirSync(dataDir, { recursive: true });
@@ -856,16 +879,11 @@ async function playSpotifyContext(uri, ctx) {
   if (!isTrack || !/^spotify:((playlist|album|artist):[A-Za-z0-9]+|user:[^:\s"]+:collection)$/.test(String(ctx || ''))) ctx = ''; // collection: Liked songs
   const bodies = isTrack ? [...(ctx ? [{ context_uri: ctx, offset: { uri } }] : []), { uris: [uri] }] : [{ context_uri: uri }];
   if (source !== 'spotify') await setSource('spotify');
-  if (isMac && !process.env.SKIN_FAKE) {
-    // the desktop app plays a playlist straight from its address (it is started first if it is closed)
-    // "launch" starts Spotify without bringing it to the front ("activate" did, and covered the player)
-    await osa('if application "Spotify" is not running then tell application "Spotify" to launch');
-    for (let i = 0; i < 20 && (await osa('if application "Spotify" is running then return "yes"')) !== 'yes'; i++) await new Promise((r) => setTimeout(r, 500));
-    if ((await osa(`tell application "Spotify" to play track "${uri}"` + (ctx ? ` in context "${ctx}"` : ''))) !== null) { holdQueue(); keepFront(); return { ok: true }; }
-  }
-  try { // Windows (and a Mac where the script failed): Spotify's Web API starts it on the device that is open
-    const tok = await spotAccessToken();
-    if (tok) {
+  // Spotify's Web API starts the music without touching the Spotify window, so it goes first wherever Spotify is connected
+  const viaApi = async () => {
+    try {
+      const tok = await spotAccessToken();
+      if (!tok) return false;
       const put = (body, dev) => fetch('https://api.spotify.com/v1/me/player/play' + (dev ? '?device_id=' + encodeURIComponent(dev) : ''), {
         method: 'PUT', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
@@ -877,12 +895,25 @@ async function playSpotifyContext(uri, ctx) {
           const found = d && ((d.devices || []).find((x) => x.type === 'Computer') || (d.devices || [])[0]);
           if (found) { dev = found.id; r = await put(body, dev); }
         }
-        if (r.status === 204 || r.status === 200) { holdQueue(); return { ok: true }; }
+        if (r.status === 204 || r.status === 200) { holdQueue(); return true; }
         log('play ' + uri + ': HTTP ' + r.status);
       }
-    }
-  } catch (e) { log('play playlist error: ' + ((e && e.message) || e)); }
-  shell.openExternal(uri); // last resort: Spotify opens the playlist, one press of its play button starts it
+    } catch (e) { log('play playlist error: ' + ((e && e.message) || e)); }
+    return false;
+  };
+  const mac = isMac && !process.env.SKIN_FAKE;
+  if (mac) {
+    // "launch" starts Spotify without bringing it to the front ("activate" did, and covered the player)
+    await osa('if application "Spotify" is not running then tell application "Spotify" to launch');
+    for (let i = 0; i < 20 && (await osa('if application "Spotify" is running then return "yes"')) !== 'yes'; i++) await new Promise((r) => setTimeout(r, 500));
+  }
+  if (await viaApi()) return { ok: true };
+  if (mac) {
+    // not connected (or Spotify said no): the desktop app plays it straight from its address. This way can make the
+    // Spotify window come forward, so Minapp is put back on top afterwards
+    if ((await osa(`tell application "Spotify" to play track "${uri}"` + (ctx ? ` in context "${ctx}"` : ''))) !== null) { holdQueue(); keepFront(); return { ok: true }; }
+    execFile('open', ['-g', uri], () => {}); // last resort, opened behind the other windows
+  } else shell.openExternal(uri); // last resort: Spotify opens the playlist, one press of its play button starts it
   keepFront();
   return { ok: true, opened: true };
 }
@@ -1612,12 +1643,20 @@ async function importIntoPlaylist(folderMode) {
 
 // ---------- Updates (GitHub Releases) ----------
 const updater = require('./updater');
+// Where an update or an earlier version is written: on a Mac the copy outside the engine (made from the running code first)
+function codeDir() {
+  if (!inMacBundle) return __dirname;
+  if (__dirname !== extDir) { fs.rmSync(extDir, { recursive: true, force: true }); fs.cpSync(__dirname, extDir, { recursive: true }); }
+  stampExt();
+  return extDir;
+}
+function stampExt() { if (inMacBundle) { try { fs.writeFileSync(path.join(extDir, '.base'), global.__minappBase || ''); fs.rmSync(path.join(extDir, '.starting'), { force: true }); } catch {} } }
 if (updater.cleanupOld) updater.cleanupOld(__dirname); // files an earlier update could not overwrite while they were in use
 let updateInfo = null, updating = false;
 async function checkForUpdate(manual) {
   if (updating) return;
   let info;
-  try { info = await updater.check(app.getVersion()); }
+  try { info = await updater.check(appVersion()); }
   catch (e) {
     log('update check failed: ' + e.message);
     if (manual) dialog.showMessageBox(win, { type: 'error', message: 'Could not check for updates', detail: 'Check your internet connection and try again.\n\n' + e.message });
@@ -1627,7 +1666,7 @@ async function checkForUpdate(manual) {
   updateInfo = info.newer ? info : null; buildMenu();
   if (win && !win.isDestroyed()) win.webContents.send('update:available', updateInfo ? updateInfo.latest : null);
   if (!info.newer) {
-    if (manual) dialog.showMessageBox(win, { message: `Minapp is up to date (version ${app.getVersion()})`, detail: info.none ? 'No release has been published on GitHub yet.' : '' });
+    if (manual) dialog.showMessageBox(win, { message: `Minapp is up to date (version ${appVersion()})`, detail: info.none ? 'No release has been published on GitHub yet.' : '' });
     return;
   }
   if (!manual) { // the light bulb shows it (no Windows/Mac notification)
@@ -1647,12 +1686,12 @@ const versionsDir = () => path.join(app.getPath('userData'), 'versions');
 async function goBackTo(v) {
   if (updating) return;
   const r = await dialog.showMessageBox(win, { type: 'question', buttons: [`Go back to ${v}`, 'Cancel'], defaultId: 1, cancelId: 1,
-    message: `Go back to Minapp ${v}?`, detail: `You have ${app.getVersion()}, which is saved too, so you can return to it the same way. Settings, skins and the library are kept. Minapp restarts.` });
+    message: `Go back to Minapp ${v}?`, detail: `You have ${appVersion()}, which is saved too, so you can return to it the same way. Settings, skins and the library are kept. Minapp restarts.` });
   if (r.response !== 0) return;
   updating = true;
   try {
     await stopHelper();
-    await updater.restore(v, app.getVersion(), __dirname, versionsDir());
+    await updater.restore(v, appVersion(), codeDir(), versionsDir()); stampExt();
     log('went back to ' + v);
     app.relaunch(); app.exit(0);
   } catch (e) {
@@ -1671,7 +1710,7 @@ async function installUpdate() {
   await stopHelper();
   const note = (m) => { log('[update] ' + m); try { win.setTitle(m); tray && tray.setToolTip(m); } catch {} lastTitle = ''; };
   try {
-    const v = await updater.install(info, __dirname, note, fetch, versionsDir());
+    const v = await updater.install(info, codeDir(), note, fetch, versionsDir()); stampExt();
     log('updated to ' + v);
     await dialog.showMessageBox(win, { message: `Updated to version ${v}`, detail: 'Minapp restarts now.' });
     app.relaunch(); app.exit(0);
@@ -1684,7 +1723,7 @@ async function installUpdate() {
 
 // After an update (or the first start of a newer version), show what changed since the version that ran last.
 function whatsNew() {
-  const cfg0 = readCfg(), cur = app.getVersion();
+  const cfg0 = readCfg(), cur = appVersion();
   // versions before 1.8.8 did not record which version ran last: an existing setup (it has settings) then gets the whole
   // history, so nothing is missed when coming from an old version
   const existing = Object.keys(cfg0).some((k) => k !== 'lastVersion');
@@ -2009,7 +2048,7 @@ ipcMain.handle('info:mention', async (_e, name, artist) => {
 });
 ipcMain.on('album:state', (_e, st) => { if (st && typeof st === 'object') { albumUi = { look: String(st.look || 'case'), spin: !!st.spin, open: !!st.open, filter: String(st.filter || 'dots32'), big: !!st.big }; buildMenu(); } });
 ipcMain.on('app:quit', () => app.quit());
-ipcMain.handle('app:version', () => app.getVersion());
+ipcMain.handle('app:version', () => appVersion());
 // the bulb in the player's corner
 ipcMain.handle('update:get', () => (updateInfo ? updateInfo.latest : null));
 ipcMain.on('update:install', () => { installUpdate(); });
@@ -2219,7 +2258,7 @@ function menuItems() {
         click: (mi) => { try { app.setLoginItemSettings({ openAtLogin: mi.checked, path: process.execPath, args: [app.getAppPath()] }); } catch (e) { log('login item failed: ' + e.message); } buildMenu(); } }] : []),
       { type: 'separator' },
       { label: 'Go back to an earlier version', submenu: (() => {
-        const vs = updater.savedVersions(versionsDir()).filter((v) => v !== app.getVersion());
+        const vs = updater.savedVersions(versionsDir()).filter((v) => v !== appVersion());
         return vs.length ? vs.map((v) => ({ label: `Minapp ${v}`, click: () => goBackTo(v) })) : [{ label: 'None saved yet (kept from the next update on)', enabled: false }];
       })() },
       { label: 'Open data folder', click: () => shell.openPath(app.getPath('userData')) },
@@ -2294,7 +2333,6 @@ app.on('second-instance', () => { if (win) { if (!win.isVisible()) win.show(); i
 function macArm64Switch() {
   let script;
   try {
-    const os = require('os');
     script = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'minapp-arm64-')), 'mac-arm64-switch.sh');
     fs.copyFileSync(path.join(__dirname, 'mac-arm64-switch.sh'), script);
   } catch (e) { log('arm64 switch: could not stage the script: ' + e.message); return; }
@@ -2344,6 +2382,7 @@ app.whenReady().then(() => {
   win.setVisibleOnAllWorkspaces(true);
   win.loadFile('index.html');
   win.webContents.on('did-finish-load', () => {
+    if (global.__minappExt) { try { fs.rmSync(global.__minappExt, { force: true }); } catch {} }
     applySize();
     setTimeout(applyAudio, 1200); // start the visualizer / restore the equalizer once the page is up
   });
