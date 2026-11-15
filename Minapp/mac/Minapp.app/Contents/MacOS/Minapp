@@ -10,7 +10,8 @@ ENGINE="$ENGINE_DIR/Minapp.app"
 CACHE="$SUP/downloads"
 ELECTRON_VERSION="44.7.0"; WEBAMP_VERSION="2.3.1"
 WANT="$(cat "$RES/VERSION" 2>/dev/null || echo 0)"
-case "$(uname -m)" in arm64) ARCH=arm64;; *) ARCH=x64;; esac
+# uname -m answers x86_64 when macOS runs this script under Rosetta, so ask the hardware instead
+if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ]; then ARCH=arm64; else ARCH=x64; fi
 mkdir -p "$SUP" "$CACHE"
 
 say() { osascript -e "display dialog \"$1\" with title \"Minapp\" buttons {\"OK\"} default button 1 with icon caution" >/dev/null 2>&1; }
@@ -86,7 +87,18 @@ build_engine() {
   stop_wait
 }
 
-if [ ! -d "$ENGINE" ] || [ "$(cat "$ENGINE_DIR/.version" 2>/dev/null)" != "$WANT" ]; then
+# an engine built for the wrong chip (Intel code on an Apple chip runs slowly under Rosetta) is rebuilt
+wrong_chip() {
+  [ "$ARCH" = "arm64" ] || return 1
+  local bin="$ENGINE/Contents/MacOS/Electron" a
+  [ -f "$bin" ] || return 1
+  a="$(lipo -archs "$bin" 2>/dev/null)"
+  [ -z "$a" ] && a="$(file "$bin" 2>/dev/null)"
+  [ -z "$a" ] && return 1
+  case "$a" in *arm64*) return 1;; *) return 0;; esac
+}
+
+if [ ! -d "$ENGINE" ] || [ "$(cat "$ENGINE_DIR/.version" 2>/dev/null)" != "$WANT" ] || wrong_chip; then
   build_engine
 fi
 

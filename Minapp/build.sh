@@ -12,7 +12,7 @@ T=$(mktemp -d)
 
 # ---- Windows: folder with Minapp.exe, the app and the first-run setup
 D="$T/Minapp-Windows"; mkdir -p "$D/app"
-cp -R app/. "$D/app/"; rm -rf "$D/app/node_modules" "$D/app/data"
+cp -R app/. "$D/app/"; rm -rf "$D/app/node_modules" "$D/app/data" "$D/app/mac-arm64-switch.sh"
 cp -R windows/. "$D"/; rm -f "$D/Launcher.cs"
 Z="$OUT/Minapp-Windows-v$V.zip"; rm -f "$Z"; (cd "$T" && zip -qrX "$Z" "Minapp-Windows"); echo "built $Z"
 
@@ -22,6 +22,7 @@ cp -R mac/. "$D"/
 R="$D/Minapp.app/Contents/Resources"
 mkdir -p "$R/app" && cp -R app/. "$R/app/"
 rm -rf "$R/app/node_modules" "$R/app/data" "$R/app/smtc.ps1" "$R/app/skinvol.dll" "$R/app/icon.ico"
+cp "mac/Minapp.app/Contents/MacOS/Minapp" "$R/app/mac-launcher.sh"
 echo "$V" > "$R/VERSION"
 cp "mac/Uninstall Minapp.command" "$R/Uninstall Minapp.command"
 chmod +x "$D/Minapp.app/Contents/MacOS/Minapp" "$D/Uninstall Minapp.command" "$R/Uninstall Minapp.command"

@@ -11,6 +11,7 @@
   <key>CFBundleVersion</key><string>1</string>
   <key>CFBundleShortVersionString</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>LSArchitecturePriority</key><array><string>arm64</string><string>x86_64</string></array>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSHumanReadableCopyright</key><string>Minapp</string>

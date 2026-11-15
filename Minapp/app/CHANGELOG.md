@@ -1,5 +1,11 @@
 # What's new in Minapp
 
+## 1.9.38
+- Mac: Minapp now runs natively on Apple chips (M1 and later). It was running in Intel compatibility mode, which made it slow and jumpy. About 20 seconds after you open this version it prepares the right engine (no download if it is already there) and offers to restart; say yes once.
+- Mac: after that restart, macOS may ask again whether Minapp may control Spotify, and the visualizer may need allowing again under Screen & System Audio Recording.
+- Mac: the MP3 converter for downloads is also the Apple chip version now.
+- Fixed a visualizer error when the player window was closing, and made dragging the player lighter.
+
 ## 1.9.37
 - The ARTIST page no longer says "Could not reach Wikipedia" when only the last lookup fails: it shows the page it did find. Busy or briefly unavailable Wikipedia answers are retried once, and Minapp identifies itself to Wikipedia with a descriptive client name.
 
