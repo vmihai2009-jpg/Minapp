@@ -1761,7 +1761,7 @@ async function downloadCurrentYouTube() {
   downloading = true; buildMenu();
   win.webContents.send('download:state', true);
   // a playlist opened from the account (or a saved list / search results) is a list of videos Minapp already has
-  const url = t.ids ? { ids: t.ids.filter((id) => /^[\w-]{11}$/.test(id)), name: t.name || 'YouTube' } : t.list ? 'https://www.youtube.com/playlist?list=' + encodeURIComponent(t.list) : 'https://www.youtube.com/watch?v=' + encodeURIComponent(t.v);
+  let url = t.ids ? { ids: t.ids.filter((id) => /^[\w-]{11}$/.test(id)), name: t.name || 'YouTube' } : t.list ? 'https://www.youtube.com/playlist?list=' + encodeURIComponent(t.list) : 'https://www.youtube.com/watch?v=' + encodeURIComponent(t.v);
   let lastLog = '';
   const note = (m, info) => {
     const phase = info ? info.phase : '';
@@ -1770,6 +1770,21 @@ async function downloadCurrentYouTube() {
     if (info && win && !win.isDestroyed()) win.webContents.send('download:progress', { ...info, paused: library.isPaused() });
   };
   try {
+    // a list downloaded before: only fetch what is new (or missing) in its folder
+    if (t.ids || t.list) {
+      note('Checking what you already have…', { phase: 'preparing', i: 0, n: 0, title: 'Checking what you already have…', pct: 0 });
+      const plan = await library.prepare(url).catch((e) => { log('[download] check failed: ' + e.message); return null; });
+      if (plan) {
+        url = { ids: plan.ids, name: plan.name };
+        const missing = plan.total - plan.have;
+        if (plan.have && !missing) { dialog.showMessageBox(win, { message: `"${plan.name}" is up to date`, detail: `All ${plan.total} songs are already in your local library.` }); return; }
+        if (plan.have) {
+          const r = await dialog.showMessageBox(win, { type: 'question', buttons: ['Update', 'Cancel'], defaultId: 0, cancelId: 1,
+            message: `Update "${plan.name}"?`, detail: `You already have ${plan.have} of its ${plan.total} songs. Minapp downloads only the ${missing} new or missing ${missing === 1 ? 'one' : 'ones'} into the same folder.` });
+          if (r.response !== 0) return;
+        }
+      }
+    }
     const mp3 = cfgOn('dlMp3', true);
     let res = await library.download(url, !!(t.list || t.ids), note, false, mp3, readCfg().dlSpeed);
     if (!res.ok && !res.rateLimited) { note('Updating yt-dlp…'); res = await library.download(url, !!(t.list || t.ids), note, true, mp3, readCfg().dlSpeed); } // YouTube changes often: a newer yt-dlp usually fixes it
