@@ -1747,12 +1747,15 @@ let downloading = false;
 async function downloadCurrentYouTube() {
   const t = readCfg().yt;
   if (!t) { dialog.showMessageBox(win, { message: 'Open a YouTube link first (menu > YouTube link…)' }); return; }
-  if (t.ids && !t.ids.length) { dialog.showMessageBox(win, { message: 'This list has no videos to download' }); return; }
+  // the record button saves the whole list, or only the song that is playing (menu > Local library > Record button saves)
+  const vid = /^[\w-]{11}$/.test(ytState.id || '') ? ytState.id : /^[\w-]{11}$/.test(t.v || '') ? t.v : '';
+  const oneSong = readCfg().dlWhat === 'song' && !!vid;
+  if (!oneSong && t.ids && !t.ids.length) { dialog.showMessageBox(win, { message: 'This list has no videos to download' }); return; }
   if (downloading) return;
   if (!library.haveBin() || !readCfg().dlOk) {
     const r = await dialog.showMessageBox(win, {
       type: 'question', buttons: ['Download', 'Cancel'], defaultId: 1, cancelId: 1,
-      message: 'Download this ' + (t.ids ? `playlist (${t.ids.length} songs)` : t.list ? 'playlist' : 'video') + ' as audio files?',
+      message: 'Download this ' + (oneSong ? 'song' : t.ids ? `playlist (${t.ids.length} songs)` : t.list ? 'playlist' : 'video') + ' as audio files?',
       detail: 'For your personal use only. YouTube\'s terms do not allow downloading, and most music is copyrighted: only keep what you have the right to keep.\n\nThe first time, Minapp fetches the free yt-dlp tool (about 20 MB) into its data folder, plus the free ffmpeg converter (about 25 MB) when "Save downloads as MP3" is on. Songs land in the local library and play from menu > Local playlists.',
     });
     if (r.response !== 0) return;
@@ -1761,7 +1764,7 @@ async function downloadCurrentYouTube() {
   downloading = true; buildMenu();
   win.webContents.send('download:state', true);
   // a playlist opened from the account (or a saved list / search results) is a list of videos Minapp already has
-  let url = t.ids ? { ids: t.ids.filter((id) => /^[\w-]{11}$/.test(id)), name: t.name || 'YouTube' } : t.list ? 'https://www.youtube.com/playlist?list=' + encodeURIComponent(t.list) : 'https://www.youtube.com/watch?v=' + encodeURIComponent(t.v);
+  let url = oneSong ? 'https://www.youtube.com/watch?v=' + vid : t.ids ? { ids: t.ids.filter((id) => /^[\w-]{11}$/.test(id)), name: t.name || 'YouTube' } : t.list ? 'https://www.youtube.com/playlist?list=' + encodeURIComponent(t.list) : 'https://www.youtube.com/watch?v=' + encodeURIComponent(t.v);
   let lastLog = '';
   const note = (m, info) => {
     const phase = info ? info.phase : '';
@@ -1771,7 +1774,7 @@ async function downloadCurrentYouTube() {
   };
   try {
     // a list downloaded before: only fetch what is new (or missing) in its folder
-    if (t.ids || t.list) {
+    if (!oneSong && (t.ids || t.list)) {
       note('Checking what you already have…', { phase: 'preparing', i: 0, n: 0, title: 'Checking what you already have…', pct: 0 });
       const plan = await library.prepare(url).catch((e) => { log('[download] check failed: ' + e.message); return null; });
       if (plan) {
@@ -1786,8 +1789,8 @@ async function downloadCurrentYouTube() {
       }
     }
     const mp3 = cfgOn('dlMp3', true);
-    let res = await library.download(url, !!(t.list || t.ids), note, false, mp3, readCfg().dlSpeed);
-    if (!res.ok && !res.rateLimited) { note('Updating yt-dlp…'); res = await library.download(url, !!(t.list || t.ids), note, true, mp3, readCfg().dlSpeed); } // YouTube changes often: a newer yt-dlp usually fixes it
+    let res = await library.download(url, !oneSong && !!(t.list || t.ids), note, false, mp3, readCfg().dlSpeed);
+    if (!res.ok && !res.rateLimited) { note('Updating yt-dlp…'); res = await library.download(url, !oneSong && !!(t.list || t.ids), note, true, mp3, readCfg().dlSpeed); } // YouTube changes often: a newer yt-dlp usually fixes it
     const n = res.files.length, plural = (k) => `${k} song${k === 1 ? '' : 's'}`;
     const folder = n ? path.dirname(res.files[0]) : null;
     const have = folder ? library.tracks(path.basename(folder)).length : 0;
@@ -2232,6 +2235,9 @@ function menuItems() {
         : source === 'youtube' ? [{ label: 'Download current YouTube link (personal use)…', click: downloadCurrentYouTube }] : []),
       ...(!downloading ? [{ label: 'Get missing covers…', click: fillMissingCovers }] : []),
       { label: 'Save downloads as MP3 320 (works in every DJ app)', type: 'checkbox', checked: cfgOn('dlMp3', true), click: toggleCfg('dlMp3', true) },
+      { label: 'Record button saves', submenu: [['list', 'The whole playlist'], ['song', 'Only the song that is playing']].map(([k, label]) => ({
+        label, type: 'radio', checked: (readCfg().dlWhat || 'list') === k, click: () => { writeCfg({ dlWhat: k }); buildMenu(); },
+      })) },
       { label: 'Download speed', submenu: [['slow', 'Slow (safest for very long playlists)'], ['normal', 'Normal'], ['fast', 'Fast (YouTube may ask Minapp to slow down)']].map(([k, label]) => ({
         label, type: 'radio', checked: (readCfg().dlSpeed || 'normal') === k, click: () => { writeCfg({ dlSpeed: k }); buildMenu(); },
       })) },
