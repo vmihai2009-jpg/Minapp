@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.42
+- Downloading a playlist you already downloaded now updates it: Minapp checks what is already in its folder, tells you how many songs are new, and fetches only those into the same folder. If nothing is new it says the playlist is up to date. This also works for playlists saved by older versions.
+
 ## 1.9.41
 - Download speed: menu > Local library > Download speed has Slow, Normal and Fast. Normal (the default) is about twice as quick as before; Fast is quicker still. If YouTube asks Minapp to slow down, it switches to Slow by itself for the rest of that download, and carries on.
 

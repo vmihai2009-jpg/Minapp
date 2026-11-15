@@ -58,7 +58,7 @@ function create({ dir, binDir, log }) {
     const info = base(file) + '.info.json';
     try {
       const j = JSON.parse(fs.readFileSync(info, 'utf8'));
-      fs.writeFileSync(base(file) + '.minapp.json', JSON.stringify({ album: j.album || '', artist: j.artist || j.creator || j.uploader || '', title: j.track || j.title || '' }));
+      fs.writeFileSync(base(file) + '.minapp.json', JSON.stringify({ id: j.id || '', album: j.album || '', artist: j.artist || j.creator || j.uploader || '', title: j.track || j.title || '' }));
     } catch {}
     try { fs.unlinkSync(info); } catch {}
   }
@@ -141,7 +141,7 @@ function create({ dir, binDir, log }) {
     return new Promise((resolve) => {
       const known = url && typeof url === 'object';
       let src = ['--', url];
-      if (known) { const f = archive.replace(/\.txt$/, '-list.txt'); fs.writeFileSync(f, url.ids.map((id) => 'https://www.youtube.com/watch?v=' + id).join('\n') + '\n'); src = ['--batch-file', f]; }
+      if (known) { const f = path.join(binDir, 'batch-' + crypto.createHash('sha1').update(archive).digest('hex').slice(0, 12) + '.txt'); fs.writeFileSync(f, url.ids.map((id) => 'https://www.youtube.com/watch?v=' + id).join('\n') + '\n'); src = ['--batch-file', f]; }
       const out = known ? folderName(url.name).replace(/%/g, '%%') + '/%(title)s.%(ext)s'
         : isList ? '%(playlist_title)s/%(playlist_index)03d - %(title)s.%(ext)s' : 'Singles/%(title)s.%(ext)s';
       const args = ['-f', 'bestaudio[ext=m4a]/bestaudio', isList ? '--yes-playlist' : '--no-playlist', '--ignore-errors', '--no-overwrites',
@@ -207,8 +207,11 @@ function create({ dir, binDir, log }) {
     if (mp3 && !haveFf()) { onProgress('Fetching the MP3 converter…', { phase: 'preparing', ...cur, title: 'Fetching the MP3 converter...' }); await fetchFf(); }
     onProgress('Reading the playlist…', { phase: 'preparing', ...cur, title: isList ? 'Reading the playlist…' : 'Reading the video…' });
     fs.mkdirSync(binDir, { recursive: true });
-    const key = url && typeof url === 'object' ? 'ids:' + url.name + ':' + [...url.ids].sort().join(',') : url;
-    const archive = path.join(binDir, 'archive-' + crypto.createHash('sha1').update(key + (mp3 ? '#mp3' : '')).digest('hex').slice(0, 12) + '.txt');
+    // a known list keeps its done-list inside its own folder for good, so downloading it again later only fetches new songs
+    const known = url && typeof url === 'object';
+    if (known) fs.mkdirSync(path.join(dir, folderName(url.name)), { recursive: true });
+    const archive = known ? path.join(dir, folderName(url.name), DONE)
+      : path.join(binDir, 'archive-' + crypto.createHash('sha1').update(url + (mp3 ? '#mp3' : '')).digest('hex').slice(0, 12) + '.txt');
     const files = []; let total = 0, res;
     const stopped = () => ({ ok: files.length > 0, files, error: 'Stopped.', rateLimited: true, total, cancelled: true });
     let slowDown = false;
@@ -220,7 +223,7 @@ function create({ dir, binDir, log }) {
       files.push(...res.files); total = res.total || total;
       if (cancelled) return stopped();
       if (paused) continue; // stopped by Pause, not by YouTube: wait above, then carry on in the same round
-      if (!res.rateLimited) { try { fs.unlinkSync(archive); } catch {} try { fs.unlinkSync(archive.replace(/\.txt$/, '-list.txt')); } catch {} break; } // finished: forget the resume list
+      if (!res.rateLimited) { if (!known) { try { fs.unlinkSync(archive); } catch {} } try { fs.unlinkSync(path.join(binDir, 'batch-' + crypto.createHash('sha1').update(archive).digest('hex').slice(0, 12) + '.txt')); } catch {} break; } // finished: forget the resume list
       if (round >= WAITS.length) break;
       const end = Date.now() + WAITS[round++] * 60000;
       while (Date.now() < end && !cancelled) {
@@ -287,10 +290,50 @@ function create({ dir, binDir, log }) {
     const out = await ytRun(['--flat-playlist', '--print', '%(id)s\t%(title)s\t%(channel,uploader)s', '--', url], 180000);
     return out.split(/\r?\n/).map((l) => l.split('\t')).filter((x) => /^[\w-]{11}$/.test(x[0])).map(([id, title, channel]) => ({ id, title: title || '', channel: channel === 'NA' ? '' : channel || '' }));
   }
+  // ----- downloading a list again = bringing that local playlist up to date -----
+  // Works out which songs of a list are already in its folder: from the folder's done-list, the video ids saved with each
+  // song, done-lists of earlier unfinished runs, and (for songs saved by older versions) matching titles.
+  // url: a pasted playlist link, or { ids, name }. Resolves { ids, name, have, total } (name = the folder) or null.
+  const DONE = '.minapp-done.txt';
+  const norm = (t) => String(t || '').toLowerCase().replace(/\.(mp3|m4a|aac|opus|ogg|oga|webm|wav|flac)$/, '').replace(/^\d{1,3} - /, '').replace(/[^\p{L}\p{N}]+/gu, '');
+  async function prepare(url) {
+    let ids, name, titles = new Map();
+    if (url && typeof url === 'object') { ids = url.ids; name = url.name; }
+    else {
+      await ensureBin();
+      const out = await ytRun(['--flat-playlist', '--print', 'playlist:MINAPP_NAME %(title)s', '--print', '%(id)s\t%(title)s', '--', url], 180000);
+      ids = [];
+      for (const l of out.split(/\r?\n/)) {
+        if (l.startsWith('MINAPP_NAME ')) { name = name || l.slice(12).trim(); continue; }
+        const [id, title] = l.split('\t');
+        if (/^[\w-]{11}$/.test(id)) { ids.push(id); titles.set(id, title || ''); }
+      }
+      if (!ids.length) return null;
+    }
+    // the folder: one an older version made under the same name if there is one, else the cleaned name
+    const raw = String(name || 'YouTube');
+    const folder = [raw, raw.replace(/[\\/:*?"<>|]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0xfee0))].find((n) => { try { return fs.statSync(path.join(dir, n)).isDirectory() && n === folderName(n); } catch { return false; } }) || folderName(raw);
+    const fdir = path.join(dir, folder);
+    const done = new Set();
+    const readIds = (f) => { try { for (const l of fs.readFileSync(f, 'utf8').split(/\r?\n/)) { const m = /^youtube ([\w-]{11})$/.exec(l.trim()); if (m) done.add(m[1]); } } catch {} };
+    readIds(path.join(fdir, DONE));
+    const want = new Set(ids);
+    try { for (const f of fs.readdirSync(binDir)) if (/^archive-.*\.txt$/.test(f)) { const before = new Set(done); readIds(path.join(binDir, f)); for (const id of done) if (!before.has(id) && !want.has(id)) done.delete(id); } } catch {}
+    const files = audioIn(fdir);
+    // more songs marked done than there are files: some were deleted, so only trust what the files themselves prove
+    if ([...done].filter((id) => want.has(id)).length > files.length) done.clear();
+    const haveTitles = new Set();
+    for (const f of files) { const d = detailsFor(f); if (d.id) done.add(d.id); haveTitles.add(norm(path.basename(f))); if (d.title) haveTitles.add(norm(d.title)); }
+    for (const [id, t] of titles) if (t && haveTitles.has(norm(t))) done.add(id);
+    if (!files.length) { done.clear(); try { fs.unlinkSync(path.join(fdir, DONE)); } catch {} }
+    if (files.length) { fs.mkdirSync(fdir, { recursive: true }); fs.writeFileSync(path.join(fdir, DONE), [...done].map((id) => 'youtube ' + id).join('\n') + '\n'); }
+    const have = ids.filter((id) => done.has(id)).length;
+    return { ids, name: folder, have, total: ids.length };
+  }
   const cancel = () => { cancelled = true; paused = false; try { child && killTree(child); } catch {} if (wake) wake(); };
   // pause(true) stops yt-dlp until pause(false); a pause during a rate-limit wait is just shown, the wait keeps counting
   const pause = (on) => { paused = !!on; if (paused) { try { child && killTree(child); } catch {} } else if (wake) wake(); };
   const isPaused = () => paused;
-  return { dir, playlists, tracks, importFiles, audioIn, download, cancel, pause, isPaused, haveBin, haveFf, safeName, artFor, detailsFor, withoutCover, fillCovers, ytFind, ytEntries };
+  return { dir, playlists, tracks, importFiles, audioIn, download, cancel, pause, isPaused, haveBin, haveFf, safeName, artFor, detailsFor, withoutCover, fillCovers, ytFind, ytEntries, prepare };
 }
 module.exports = { create, AUDIO };
