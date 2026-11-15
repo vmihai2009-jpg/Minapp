@@ -9,12 +9,14 @@ CACHE="$SUP/downloads"
 NEW="$SUP/engine.arm64"
 LOG() { mkdir -p "$SUP"; echo "$(date '+%Y-%m-%d %H:%M:%S') [arm64-switch] $*" >> "$SUP/bridge.log"; }
 
-has_arm64() { lipo -archs "$1" 2>/dev/null | grep -q arm64; }
+has_arm64() { file -b "$1" 2>/dev/null | grep -q arm64; }
+# true on an Apple chip, also when this script itself is being run through Rosetta
+apple_chip() { [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ] || [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = "1" ]; }
 
 build() {
   VER="$1"
   [ -n "$VER" ] || { LOG "no Electron version given"; exit 1; }
-  if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" != "1" ] || has_arm64 "$ENGINE/Contents/MacOS/Electron"; then
+  if ! apple_chip || has_arm64 "$ENGINE/Contents/MacOS/Electron"; then
     echo skip; exit 0
   fi
   mkdir -p "$CACHE"

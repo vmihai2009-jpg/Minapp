@@ -86,7 +86,7 @@ function create({ dir, binDir, log }) {
   const macArm = () => {
     if (macArmCache === undefined) {
       try { macArmCache = require('child_process').execFileSync('sysctl', ['-n', 'hw.optional.arm64']).toString().trim() === '1'; }
-      catch { macArmCache = process.arch === 'arm64'; }
+      catch { macArmCache = process.arch === 'arm64' || !!(process.versions.electron && require('electron').app.runningUnderARM64Translation); }
     }
     return macArmCache;
   };
