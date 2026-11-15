@@ -81,9 +81,23 @@ function create({ dir, binDir, log }) {
 
   // ----- ffmpeg (only for "Save as MP3"): a static build from the npm registry, checked against its published hash -----
   const ffBin = () => path.join(binDir, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
-  const haveFf = () => fs.existsSync(ffBin());
+  // process.arch lies on an Apple chip when the app runs under Rosetta, so the Mac build is chosen from the hardware
+  let macArmCache;
+  const macArm = () => {
+    if (macArmCache === undefined) {
+      try { macArmCache = require('child_process').execFileSync('sysctl', ['-n', 'hw.optional.arm64']).toString().trim() === '1'; }
+      catch { macArmCache = process.arch === 'arm64' || !!(process.versions.electron && require('electron').app.runningUnderARM64Translation); }
+    }
+    return macArmCache;
+  };
   const ffPkg = () => '@ffmpeg-installer/' + (process.platform === 'win32' ? 'win32-x64'
-    : process.platform === 'darwin' ? (process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64') : 'linux-x64');
+    : process.platform === 'darwin' ? (macArm() ? 'darwin-arm64' : 'darwin-x64') : 'linux-x64');
+  const ffMarker = () => path.join(binDir, 'ffmpeg.pkg');
+  const haveFf = () => {
+    if (!fs.existsSync(ffBin())) return false;
+    if (process.platform !== 'darwin') return true;
+    try { return fs.readFileSync(ffMarker(), 'utf8').trim() === ffPkg(); } catch { return false; }
+  };
   async function fetchFf() {
     fs.mkdirSync(binDir, { recursive: true });
     const meta = await (await fetch('https://registry.npmjs.org/' + ffPkg() + '/latest')).json();
@@ -103,6 +117,7 @@ function create({ dir, binDir, log }) {
       const got = path.join(tmp, name);
       fs.chmodSync(got, 0o755);
       fs.renameSync(got, ffBin());
+      try { fs.writeFileSync(ffMarker(), ffPkg()); } catch {}
     } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
   }
 

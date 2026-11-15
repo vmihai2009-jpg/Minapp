@@ -469,6 +469,7 @@ function installCaptureHandler() {
 }
 
 async function runCapture(mode) {
+  if (!win || win.isDestroyed()) return null;
   capMode = mode;
   // executeJavaScript(..., true) counts as a user gesture, which getDisplayMedia needs
   return win.webContents.executeJavaScript(`window.__audioApply ? window.__audioApply(${JSON.stringify(mode)}) : 'not ready'`, true);
@@ -503,7 +504,7 @@ async function capWatchdog() {
 ipcMain.on('cap:lost', (_e, why) => { log('audio capture lost: ' + why); capRetries = Math.max(0, capRetries - 1); setTimeout(capWatchdog, 500); });
 
 async function applyAudio() {
-  if (!win) return;
+  if (!win || win.isDestroyed()) return;
   writeApo();
   let mode = desiredMode();
   try { await runCapture(mode); }
@@ -1962,7 +1963,7 @@ ipcMain.on('win:dragstart', () => {
     const c = screen.getCursorScreenPoint();
     const [x, y] = snapPos(b0.x + c.x - c0.x, b0.y + c.y - c0.y, b0.width, b0.height);
     win.setBounds({ x, y, width: b0.width, height: b0.height });
-  }, 8);
+  }, 16);
 });
 ipcMain.on('win:dragend', () => { if (dragTimer) { clearInterval(dragTimer); dragTimer = null; savePos(); } });
 let albumUi = { look: 'case', spin: false, open: false, filter: 'dots32', big: false }; // what the album panel shows, for the menu's ticks
@@ -2289,7 +2290,33 @@ function restorePos(pos) {
 app.on('activate', () => { if (win && !win.isVisible()) { win.show(); win.focus(); } });
 app.on('second-instance', () => { if (win) { if (!win.isVisible()) win.show(); if (win.isMinimized()) win.restore(); win.focus(); } });
 
+// Mac: an Intel engine running under Rosetta on an Apple chip is slow. Prepare the native engine and offer to switch.
+function macArm64Switch() {
+  let script;
+  try {
+    const os = require('os');
+    script = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'minapp-arm64-')), 'mac-arm64-switch.sh');
+    fs.copyFileSync(path.join(__dirname, 'mac-arm64-switch.sh'), script);
+  } catch (e) { log('arm64 switch: could not stage the script: ' + e.message); return; }
+  execFile('/bin/bash', [script, 'build', process.versions.electron], { timeout: 20 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 }, async (err, stdout) => {
+    if (err || !String(stdout).includes('ready')) { if (err) log('arm64 switch: build failed: ' + err.message); return; }
+    log('arm64 switch: native engine ready');
+    const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
+      type: 'info', buttons: ['Restart now', 'Later'], defaultId: 0, cancelId: 1,
+      message: 'Minapp can now run at full speed on this Mac',
+      detail: "Minapp was running in Intel compatibility mode, which made it slow. The version made for your Mac's Apple chip is ready. Restart Minapp to switch.\n\nAfter the restart macOS may ask once more whether Minapp may control Spotify, and the visualizer may need allowing again under System Settings > Privacy & Security > Screen & System Audio Recording."
+    });
+    const run = (mode) => { try { spawn('/bin/bash', [script, 'swap', String(process.pid), mode], { detached: true, stdio: 'ignore' }).unref(); } catch (e) { log('arm64 switch: ' + e.message); } };
+    if (r.response === 0) { run('open'); app.quit(); }
+    else app.once('will-quit', () => run('noopen'));
+  });
+}
+
 app.whenReady().then(() => {
+  if (isMac) {
+    log('engine: ' + process.arch + (app.runningUnderARM64Translation ? ' (translated by Rosetta: slow)' : ' (native)') + ', Electron ' + process.versions.electron);
+    if (inMacBundle && app.runningUnderARM64Translation && !process.env.SKIN_FAKE) setTimeout(macArm64Switch, 20000);
+  }
   // start the Spotify helper right now, in parallel with the window loading, instead of on the first poll
   if (isWin && !process.env.SKIN_FAKE) { try { psStart(); } catch (e) { log('helper pre-start failed: ' + e.message); } }
   const cfg = readCfg();
