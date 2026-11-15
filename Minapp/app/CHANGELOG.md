@@ -1,5 +1,9 @@
 # What's new in Minapp
 
+## 1.9.39
+- Mac: updates no longer make macOS ask for permissions again (controlling Spotify, the visualizer). Updates are now kept next to the player instead of inside it, so the player itself stays exactly as macOS approved it. Installing this version asks one last time.
+- Spotify stays in the background when you pick a playlist, album or song. With Spotify connected, Minapp starts the music through your Spotify account instead of through the Spotify window.
+
 ## 1.9.38
 - Mac: Minapp now runs natively on Apple chips (M1 and later). It was running in Intel compatibility mode, which made it slow and jumpy. About 20 seconds after you open this version it prepares the right engine (no download if it is already there) and offers to restart; say yes once.
 - Mac: after that restart, macOS may ask again whether Minapp may control Spotify, and the visualizer may need allowing again under Screen & System Audio Recording.
