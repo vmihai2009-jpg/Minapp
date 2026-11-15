@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.41
+- Download speed: menu > Local library > Download speed has Slow, Normal and Fast. Normal (the default) is about twice as quick as before; Fast is quicker still. If YouTube asks Minapp to slow down, it switches to Slow by itself for the rest of that download, and carries on.
+
 ## 1.9.40
 - Playlists opened from your YouTube account can now be downloaded with the record button, like a pasted link. Saved lists and search results can be downloaded too. Each one gets its own folder in the local library, named after the playlist.
 
