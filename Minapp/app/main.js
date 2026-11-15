@@ -1771,8 +1771,8 @@ async function downloadCurrentYouTube() {
   };
   try {
     const mp3 = cfgOn('dlMp3', true);
-    let res = await library.download(url, !!(t.list || t.ids), note, false, mp3);
-    if (!res.ok && !res.rateLimited) { note('Updating yt-dlp…'); res = await library.download(url, !!(t.list || t.ids), note, true, mp3); } // YouTube changes often: a newer yt-dlp usually fixes it
+    let res = await library.download(url, !!(t.list || t.ids), note, false, mp3, readCfg().dlSpeed);
+    if (!res.ok && !res.rateLimited) { note('Updating yt-dlp…'); res = await library.download(url, !!(t.list || t.ids), note, true, mp3, readCfg().dlSpeed); } // YouTube changes often: a newer yt-dlp usually fixes it
     const n = res.files.length, plural = (k) => `${k} song${k === 1 ? '' : 's'}`;
     const folder = n ? path.dirname(res.files[0]) : null;
     const have = folder ? library.tracks(path.basename(folder)).length : 0;
@@ -2217,6 +2217,9 @@ function menuItems() {
         : source === 'youtube' ? [{ label: 'Download current YouTube link (personal use)…', click: downloadCurrentYouTube }] : []),
       ...(!downloading ? [{ label: 'Get missing covers…', click: fillMissingCovers }] : []),
       { label: 'Save downloads as MP3 320 (works in every DJ app)', type: 'checkbox', checked: cfgOn('dlMp3', true), click: toggleCfg('dlMp3', true) },
+      { label: 'Download speed', submenu: [['slow', 'Slow (safest for very long playlists)'], ['normal', 'Normal'], ['fast', 'Fast (YouTube may ask Minapp to slow down)']].map(([k, label]) => ({
+        label, type: 'radio', checked: (readCfg().dlSpeed || 'normal') === k, click: () => { writeCfg({ dlSpeed: k }); buildMenu(); },
+      })) },
       { label: 'Open library folder', click: () => { fs.mkdirSync(library.dir, { recursive: true }); shell.openPath(library.dir); } },
     ] },
     { label: 'Open Spotify', click: () => shell.openExternal('spotify:') },

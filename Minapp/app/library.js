@@ -131,7 +131,13 @@ function create({ dir, binDir, log }) {
   // url is a link, or { ids, name } for a list of videos Minapp already knows (a playlist opened from the YouTube account,
   // a saved list, search results): those are handed to yt-dlp one video each, so no link or sign-in is needed
   const folderName = (n) => String(n || 'YouTube').replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ').replace(/^[.\s]+|[.\s]+$/g, '').replace(/\s+/g, ' ').slice(0, 80) || 'YouTube';
-  function runYtDlp(url, isList, onProgress, archive, mp3) {
+  const PACE = {
+    slow: ['--sleep-requests', '1.5', '--sleep-interval', '2', '--max-sleep-interval', '6', '--concurrent-fragments', '1'],
+    normal: ['--sleep-requests', '0.75', '--sleep-interval', '1', '--max-sleep-interval', '2', '--concurrent-fragments', '2'],
+    fast: ['--sleep-requests', '0.3', '--concurrent-fragments', '4'],
+  };
+  let speed = 'normal';
+  function runYtDlp(url, isList, onProgress, archive, mp3, gentle) {
     return new Promise((resolve) => {
       const known = url && typeof url === 'object';
       let src = ['--', url];
@@ -141,7 +147,9 @@ function create({ dir, binDir, log }) {
       const args = ['-f', 'bestaudio[ext=m4a]/bestaudio', isList ? '--yes-playlist' : '--no-playlist', '--ignore-errors', '--no-overwrites',
         '--windows-filenames', '--no-mtime', '--newline', '--no-colors',
         // be gentle with YouTube: pause between video lookups and downloads, and retry flaky requests
-        '--sleep-requests', '1.5', '--sleep-interval', '2', '--max-sleep-interval', '6',
+        // pace (menu > Local library > Download speed): slow waits a few seconds between songs, normal a little, fast
+        // hardly at all. Once YouTube has asked to slow down, the rest of the run goes at the slow pace.
+        ...(PACE[gentle ? 'slow' : speed] || PACE.normal),
         '--retries', '5', '--extractor-retries', '3', '--retry-sleep', 'http:exp=1:30', '--retry-sleep', 'extractor:exp=2:60',
         // remembers finished videos, so a resumed run does not look every one of them up again
         '--download-archive', archive,
@@ -192,7 +200,8 @@ function create({ dir, binDir, log }) {
   // Resolves { ok, files (saved by this call), error, rateLimited (true: ended before the playlist was complete), total }.
   const WAITS = [5, 15, 30];
   const sleep = (ms) => new Promise((r) => { wake = r; setTimeout(r, ms); });
-  async function download(url, isList, onProgress, fresh, mp3) {
+  async function download(url, isList, onProgress, fresh, mp3, pace) {
+    speed = PACE[pace] ? pace : 'normal';
     cancelled = false; paused = false; Object.assign(cur, { i: 0, n: 0, title: '', pct: 0, saved: 0 });
     if (!haveBin() || fresh) { onProgress('Fetching yt-dlp…', { phase: 'preparing', ...cur, title: 'Fetching yt-dlp…' }); await fetchBin(); }
     if (mp3 && !haveFf()) { onProgress('Fetching the MP3 converter…', { phase: 'preparing', ...cur, title: 'Fetching the MP3 converter...' }); await fetchFf(); }
@@ -202,10 +211,12 @@ function create({ dir, binDir, log }) {
     const archive = path.join(binDir, 'archive-' + crypto.createHash('sha1').update(key + (mp3 ? '#mp3' : '')).digest('hex').slice(0, 12) + '.txt');
     const files = []; let total = 0, res;
     const stopped = () => ({ ok: files.length > 0, files, error: 'Stopped.', rateLimited: true, total, cancelled: true });
+    let slowDown = false;
     for (let round = 0; ; ) {
       while (paused && !cancelled) { onProgress('Download paused', { phase: 'paused', ...cur }); await sleep(1000); }
       if (cancelled) return stopped();
-      res = await runYtDlp(url, isList, onProgress, archive, mp3);
+      res = await runYtDlp(url, isList, onProgress, archive, mp3, round > 0 || slowDown);
+      if (res.rateLimited) slowDown = true;
       files.push(...res.files); total = res.total || total;
       if (cancelled) return stopped();
       if (paused) continue; // stopped by Pause, not by YouTube: wait above, then carry on in the same round
