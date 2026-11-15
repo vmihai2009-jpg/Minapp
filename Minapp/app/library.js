@@ -128,9 +128,16 @@ function create({ dir, binDir, log }) {
   const RATE = /rate-limited|HTTP Error 429|Too Many Requests/i;
   let child = null, cancelled = false, paused = false, wake = null;
   const cur = { i: 0, n: 0, title: '', pct: 0, saved: 0 }; // what the progress bar shows
+  // url is a link, or { ids, name } for a list of videos Minapp already knows (a playlist opened from the YouTube account,
+  // a saved list, search results): those are handed to yt-dlp one video each, so no link or sign-in is needed
+  const folderName = (n) => String(n || 'YouTube').replace(/[\\/:*?"<>|\x00-\x1f]/g, ' ').replace(/^[.\s]+|[.\s]+$/g, '').replace(/\s+/g, ' ').slice(0, 80) || 'YouTube';
   function runYtDlp(url, isList, onProgress, archive, mp3) {
     return new Promise((resolve) => {
-      const out = isList ? '%(playlist_title)s/%(playlist_index)03d - %(title)s.%(ext)s' : 'Singles/%(title)s.%(ext)s';
+      const known = url && typeof url === 'object';
+      let src = ['--', url];
+      if (known) { const f = archive.replace(/\.txt$/, '-list.txt'); fs.writeFileSync(f, url.ids.map((id) => 'https://www.youtube.com/watch?v=' + id).join('\n') + '\n'); src = ['--batch-file', f]; }
+      const out = known ? folderName(url.name).replace(/%/g, '%%') + '/%(title)s.%(ext)s'
+        : isList ? '%(playlist_title)s/%(playlist_index)03d - %(title)s.%(ext)s' : 'Singles/%(title)s.%(ext)s';
       const args = ['-f', 'bestaudio[ext=m4a]/bestaudio', isList ? '--yes-playlist' : '--no-playlist', '--ignore-errors', '--no-overwrites',
         '--windows-filenames', '--no-mtime', '--newline', '--no-colors',
         // be gentle with YouTube: pause between video lookups and downloads, and retry flaky requests
@@ -140,14 +147,14 @@ function create({ dir, binDir, log }) {
         '--download-archive', archive,
         // machine-readable lines for the progress bar: which song (n of total) and how far into it
         '--progress', '--progress-template', 'download:MINAPP_PCT %(progress._percent_str)s',
-        '--print', 'before_dl:MINAPP_ITEM %(playlist_index|1)s/%(n_entries|1)s %(title)s',
+        '--print', known ? `before_dl:MINAPP_ITEM %(autonumber)s/${url.ids.length} %(title)s` : 'before_dl:MINAPP_ITEM %(playlist_index|1)s/%(n_entries|1)s %(title)s',
         // MP3 320 kbps constant bit rate with title/artist tags: plays in every DJ app and keeps beat grids stable
         ...(mp3 ? ['-x', '--audio-format', 'mp3', '--audio-quality', '320K', '--embed-metadata', '--ffmpeg-location', ffBin()] : []),
         // the cover (YouTube thumbnail) saved next to each song, plus its details (album, artist) for the album panel;
         // MP3s also get the cover embedded, so DJ apps and Finder / Explorer show it too
         '--write-thumbnail', '--write-info-json', '--no-write-playlist-metafiles',
         ...(mp3 ? ['--convert-thumbnails', 'jpg', '--embed-thumbnail'] : []),
-        '--print', 'after_move:filepath', '-o', out, '-P', dir, '--', url];
+        '--print', 'after_move:filepath', '-o', out, '-P', dir, ...src];
       // own process group off Windows, so a stop can take down yt-dlp and everything it started
       const p = spawn(bin(), args, { windowsHide: true, detached: process.platform !== 'win32' });
       child = p;
@@ -191,7 +198,8 @@ function create({ dir, binDir, log }) {
     if (mp3 && !haveFf()) { onProgress('Fetching the MP3 converter…', { phase: 'preparing', ...cur, title: 'Fetching the MP3 converter...' }); await fetchFf(); }
     onProgress('Reading the playlist…', { phase: 'preparing', ...cur, title: isList ? 'Reading the playlist…' : 'Reading the video…' });
     fs.mkdirSync(binDir, { recursive: true });
-    const archive = path.join(binDir, 'archive-' + crypto.createHash('sha1').update(url + (mp3 ? '#mp3' : '')).digest('hex').slice(0, 12) + '.txt');
+    const key = url && typeof url === 'object' ? 'ids:' + url.name + ':' + [...url.ids].sort().join(',') : url;
+    const archive = path.join(binDir, 'archive-' + crypto.createHash('sha1').update(key + (mp3 ? '#mp3' : '')).digest('hex').slice(0, 12) + '.txt');
     const files = []; let total = 0, res;
     const stopped = () => ({ ok: files.length > 0, files, error: 'Stopped.', rateLimited: true, total, cancelled: true });
     for (let round = 0; ; ) {
@@ -201,7 +209,7 @@ function create({ dir, binDir, log }) {
       files.push(...res.files); total = res.total || total;
       if (cancelled) return stopped();
       if (paused) continue; // stopped by Pause, not by YouTube: wait above, then carry on in the same round
-      if (!res.rateLimited) { try { fs.unlinkSync(archive); } catch {} break; } // finished: forget the resume list
+      if (!res.rateLimited) { try { fs.unlinkSync(archive); } catch {} try { fs.unlinkSync(archive.replace(/\.txt$/, '-list.txt')); } catch {} break; } // finished: forget the resume list
       if (round >= WAITS.length) break;
       const end = Date.now() + WAITS[round++] * 60000;
       while (Date.now() < end && !cancelled) {

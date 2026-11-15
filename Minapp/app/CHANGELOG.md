@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.40
+- Playlists opened from your YouTube account can now be downloaded with the record button, like a pasted link. Saved lists and search results can be downloaded too. Each one gets its own folder in the local library, named after the playlist.
+
 ## 1.9.39
 - Mac: updates no longer make macOS ask for permissions again (controlling Spotify, the visualizer). Updates are now kept next to the player instead of inside it, so the player itself stays exactly as macOS approved it. Installing this version asks one last time.
 - Spotify stays in the background when you pick a playlist, album or song. With Spotify connected, Minapp starts the music through your Spotify account instead of through the Spotify window.
