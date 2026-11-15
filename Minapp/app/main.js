@@ -1747,12 +1747,12 @@ let downloading = false;
 async function downloadCurrentYouTube() {
   const t = readCfg().yt;
   if (!t) { dialog.showMessageBox(win, { message: 'Open a YouTube link first (menu > YouTube link…)' }); return; }
-  if (t.ids) { dialog.showMessageBox(win, { message: 'Downloading needs a pasted link', detail: 'Playlists opened from your account can be played but not downloaded. Paste a playlist or video link (menu > YouTube link…) to download it.' }); return; }
+  if (t.ids && !t.ids.length) { dialog.showMessageBox(win, { message: 'This list has no videos to download' }); return; }
   if (downloading) return;
   if (!library.haveBin() || !readCfg().dlOk) {
     const r = await dialog.showMessageBox(win, {
       type: 'question', buttons: ['Download', 'Cancel'], defaultId: 1, cancelId: 1,
-      message: 'Download this ' + (t.list ? 'playlist' : 'video') + ' as audio files?',
+      message: 'Download this ' + (t.ids ? `playlist (${t.ids.length} songs)` : t.list ? 'playlist' : 'video') + ' as audio files?',
       detail: 'For your personal use only. YouTube\'s terms do not allow downloading, and most music is copyrighted: only keep what you have the right to keep.\n\nThe first time, Minapp fetches the free yt-dlp tool (about 20 MB) into its data folder, plus the free ffmpeg converter (about 25 MB) when "Save downloads as MP3" is on. Songs land in the local library and play from menu > Local playlists.',
     });
     if (r.response !== 0) return;
@@ -1760,7 +1760,8 @@ async function downloadCurrentYouTube() {
   }
   downloading = true; buildMenu();
   win.webContents.send('download:state', true);
-  const url = t.list ? 'https://www.youtube.com/playlist?list=' + encodeURIComponent(t.list) : 'https://www.youtube.com/watch?v=' + encodeURIComponent(t.v);
+  // a playlist opened from the account (or a saved list / search results) is a list of videos Minapp already has
+  const url = t.ids ? { ids: t.ids.filter((id) => /^[\w-]{11}$/.test(id)), name: t.name || 'YouTube' } : t.list ? 'https://www.youtube.com/playlist?list=' + encodeURIComponent(t.list) : 'https://www.youtube.com/watch?v=' + encodeURIComponent(t.v);
   let lastLog = '';
   const note = (m, info) => {
     const phase = info ? info.phase : '';
@@ -1770,8 +1771,8 @@ async function downloadCurrentYouTube() {
   };
   try {
     const mp3 = cfgOn('dlMp3', true);
-    let res = await library.download(url, !!t.list, note, false, mp3);
-    if (!res.ok && !res.rateLimited) { note('Updating yt-dlp…'); res = await library.download(url, !!t.list, note, true, mp3); } // YouTube changes often: a newer yt-dlp usually fixes it
+    let res = await library.download(url, !!(t.list || t.ids), note, false, mp3);
+    if (!res.ok && !res.rateLimited) { note('Updating yt-dlp…'); res = await library.download(url, !!(t.list || t.ids), note, true, mp3); } // YouTube changes often: a newer yt-dlp usually fixes it
     const n = res.files.length, plural = (k) => `${k} song${k === 1 ? '' : 's'}`;
     const folder = n ? path.dirname(res.files[0]) : null;
     const have = folder ? library.tracks(path.basename(folder)).length : 0;
