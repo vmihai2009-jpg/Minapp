@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.43
+- Choose what the record button saves: menu > Local library > Record button saves > The whole playlist, or Only the song that is playing. Single songs go into the Singles folder.
+
 ## 1.9.42
 - Downloading a playlist you already downloaded now updates it: Minapp checks what is already in its folder, tells you how many songs are new, and fetches only those into the same folder. If nothing is new it says the playlist is up to date. This also works for playlists saved by older versions.
 
