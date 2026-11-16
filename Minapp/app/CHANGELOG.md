@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.46
+- SoundCloud sign-in no longer says "You have been blocked": Minapp now introduces itself to SoundCloud as the browser of your own computer (it said Mac on Windows). If the page still blocks you, SoundCloud menu > "Sign in with a token" signs you in with a token copied from your normal browser.
+
 ## 1.9.45
 - SoundCloud is here. In the playlist panel a new SOUNDCLOUD folder lists your playlists and likes (sign in once from the folder or the SoundCloud menu), and you can paste any public playlist, album or profile link. Double-click to play, FIND searches SoundCloud.
 - Right-click any playlist (Spotify, YouTube, SoundCloud) to copy it to either of the other two services.
