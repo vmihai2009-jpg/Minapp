@@ -1769,9 +1769,15 @@ async function downloadCurrentYouTube() {
   const note = (m, info) => {
     const phase = info ? info.phase : '';
     if (phase !== 'downloading' || m.split(':')[0] !== lastLog) { lastLog = m.split(':')[0]; log('[download] ' + m); } // not every percent
-    try { tray && tray.setToolTip(m.slice(0, 120)); win.setTitle(m); } catch {} lastTitle = '';
+    // at most 4 updates a second (a fast download reports dozens), and the window title only when the song changes:
+    // the flood kept the app busy enough to make the whole player jitter
+    const now = Date.now(), head = m.split(':')[0];
+    if (head !== lastHead) { lastHead = head; try { tray && tray.setToolTip(m.slice(0, 120)); win.setTitle(m); } catch {} lastTitle = ''; }
+    if (phase === 'downloading' && info && info.pct < 100 && now - lastSent < 250) return;
+    lastSent = now;
     if (info && win && !win.isDestroyed()) win.webContents.send('download:progress', { ...info, paused: library.isPaused() });
   };
+  let lastSent = 0, lastHead = '';
   try {
     // a list downloaded before: only fetch what is new (or missing) in its folder
     if (!oneSong && (t.ids || t.list)) {
@@ -1960,12 +1966,14 @@ ipcMain.handle('spotify:cmd', (_e, cmd, arg) => doCmd(cmd, arg));
 // ---------- window + skins ----------
 function applySize() {
   if (!win) return;
+  sizedZoom = zoom;
   win.webContents.setZoomFactor(zoom);
   win.setContentSize(Math.round(lastSize.w * zoom), Math.round(lastSize.h * zoom));
 }
 // off = width of the album tab on the player's left: the window grows leftwards so the player itself stays where it is
 let artOff = 0;
 ipcMain.on('win:size', (_e, w, h, off = 0) => {
+  const same = lastSize.w === w && lastSize.h === h && sizedZoom === zoom;
   lastSize = { w, h };
   off = Math.max(0, Math.min(200, Math.round(Number(off) || 0)));
   if (win && !win.isDestroyed() && off !== artOff) {
@@ -1973,8 +1981,9 @@ ipcMain.on('win:size', (_e, w, h, off = 0) => {
     win.setBounds({ x: b.x - Math.round((off - artOff) * zoom), y: b.y, width: b.width, height: b.height });
     artOff = off;
   }
-  applySize();
+  if (!same) applySize(); // nothing changed: leave the window alone (re-applying it made it shiver on a busy Mac)
 });
+let sizedZoom = null;
 ipcMain.handle('art:get', async (_e, url) => {
   url = String(url || '');
   if (url.startsWith('thumb:')) return thumbCache.get(url) || null; // Windows media-controls picture
