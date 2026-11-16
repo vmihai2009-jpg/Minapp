@@ -1057,7 +1057,8 @@ async function scSignIn() {
 async function scSignInToken() {
   const t = await askText({ title: 'SoundCloud sign-in token', label: 'In your normal browser, signed in on soundcloud.com: press F12 > Application > Cookies > soundcloud.com, copy the value of "oauth_token", and paste it here:', placeholder: '2-123456-...', button: 'Sign in' });
   const v = String(t || '').trim().replace(/^OAuth\s+/i, '');
-  if (!/^[\w.~-]{10,200}$/.test(v)) return false;
+  if (!v) return false;
+  if (!/^[\w.~%-]{10,4000}$/.test(v)) { dialog.showMessageBox(win, { type: 'error', message: 'That does not look like a SoundCloud token', detail: 'Paste only the value of "oauth_token" (letters, numbers, dots and dashes, no spaces or quotes).' }); return false; }
   writeCfg({ scToken: v }); sc.forget(); scListsCache = null;
   try { const u = await sc.whoAmI(); log('soundcloud: signed in as ' + (u && u.username)); buildMenu(); return true; }
   catch (e) { writeCfg({ scToken: null }); sc.forget(); dialog.showMessageBox(win, { type: 'error', message: 'SoundCloud did not accept that token', detail: e.message }); return false; }
