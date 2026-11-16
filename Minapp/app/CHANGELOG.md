@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.47
+- SoundCloud "Sign in with a token" now accepts SoundCloud's newer, longer tokens (it silently ignored them), and says so when what you pasted is not a token.
+
 ## 1.9.46
 - SoundCloud sign-in no longer says "You have been blocked": Minapp now introduces itself to SoundCloud as the browser of your own computer (it said Mac on Windows). If the page still blocks you, SoundCloud menu > "Sign in with a token" signs you in with a token copied from your normal browser.
 
