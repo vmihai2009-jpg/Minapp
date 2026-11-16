@@ -1029,7 +1029,23 @@ async function copyToSpotify(kind, id, name) {
 }
 
 // ---------- SoundCloud ----------
-const sc = require('./soundcloud').create({ log, getToken: () => readCfg().scToken || '' });
+// SoundCloud is asked from inside a hidden real soundcloud.com page (with the sign-in token set as its cookie): its bot filter
+// blocked plain background requests, and the page itself is what it expects to hear from
+let scPageWin = null, scPageToken = '';
+async function scPageRun(code) {
+  const tok = readCfg().scToken || '';
+  if (scPageWin && !scPageWin.isDestroyed() && scPageToken !== tok) { scPageWin.destroy(); scPageWin = null; }
+  if (!scPageWin || scPageWin.isDestroyed()) {
+    scPageWin = new BrowserWindow({ show: false, width: 900, height: 700, webPreferences: { partition: 'persist:minapp-soundcloud', contextIsolation: true, backgroundThrottling: false } });
+    scPageWin.webContents.setUserAgent(require('./soundcloud').UA);
+    scPageToken = tok;
+    const ses = scPageWin.webContents.session;
+    if (tok) await ses.cookies.set({ url: 'https://soundcloud.com', name: 'oauth_token', value: tok, domain: '.soundcloud.com', path: '/', secure: true }).catch((e) => log('soundcloud cookie: ' + e.message));
+    await Promise.race([scPageWin.loadURL('https://soundcloud.com/').catch(() => {}), new Promise((r) => setTimeout(r, 20000))]);
+  }
+  return scPageWin.webContents.executeJavaScript(code, true);
+}
+const sc = require('./soundcloud').create({ log, getToken: () => readCfg().scToken || '', page: { run: scPageRun } });
 let scListsCache = null, scListsAt = 0, scNow = null; // scNow: the SoundCloud list playing (it plays through the local player)
 const SC_UA = require('./soundcloud').UA;
 // Sign in on soundcloud.com in a window of its own: Minapp only keeps the sign-in token that page sets, never the password
@@ -1089,7 +1105,7 @@ async function scListsData(force) {
     return { ...r, links };
   } catch (e) {
     log('soundcloud lists: ' + e.message);
-    if (e.auth) { writeCfg({ scToken: null }); sc.forget(); return { signedIn: false, items: [], links, expired: true }; }
+    if (e.auth) { writeCfg({ scToken: null }); sc.forget(); return { signedIn: false, items: [], links, expired: true }; } // only a real 401: a 403 (bot filter) keeps the sign-in
     return { ...(scListsCache || { signedIn: true, items: [] }), links, error: e.message };
   }
 }
@@ -1152,7 +1168,7 @@ async function copyToSoundCloud(kind, id, name) {
     await reportDialog({ message: `Made "${name}" on SoundCloud with ${r.added} of ${tracks.length} songs`, detail: 'It is a private playlist on your account, and under SOUNDCLOUD in the playlist panel.', failed, logName: 'copy-to-soundcloud-' + name, what: 'found' });
   } catch (e) {
     if (e && e.auth) { writeCfg({ scToken: null }); sc.forget(); }
-    dialog.showMessageBox(win, { type: 'error', message: 'Could not copy the playlist', detail: e && e.auth ? 'SoundCloud did not allow it. Choose the SOUNDCLOUD folder and sign in again, then retry.' : String((e && e.message) || e) });
+    dialog.showMessageBox(win, { type: 'error', message: 'Could not copy the playlist', detail: e && e.auth ? 'Your SoundCloud sign-in has expired. Sign in again (SoundCloud menu), then retry.' : e && e.blocked ? 'SoundCloud refused Minapp\'s request (its bot protection, or a token that no longer works). Your sign-in was kept. Try again in a minute; if it keeps happening, paste a fresh token (SoundCloud menu).' : String((e && e.message) || e) });
   } finally { await copyBar(false); }
 }
 // play a SoundCloud list (or the given tracks) through the local player; each song's stream address is looked up when it starts

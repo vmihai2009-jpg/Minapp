@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.48
+- SoundCloud: Minapp now talks to SoundCloud from inside a hidden real soundcloud.com page that carries your sign-in, so SoundCloud's bot filter no longer refuses its requests (copying a playlist to SoundCloud failed with "SoundCloud did not allow it"). A refusal is now told apart from an expired sign-in, and a refusal no longer signs you out.
+
 ## 1.9.47
 - SoundCloud "Sign in with a token" now accepts SoundCloud's newer, longer tokens (it silently ignored them), and says so when what you pasted is not a token.
 
