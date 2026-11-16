@@ -2,7 +2,9 @@
 // No developer key is needed: the public "client id" is read from the site itself, like other free tools do.
 // A signed-in account adds the user's own playlists, likes, and the better stream a paid (Go+) account gets.
 const API = 'https://api-v2.soundcloud.com';
-const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
+// a browser name that matches this computer: SoundCloud's bot filter blocks a Mac name on Windows and any "Electron" tag
+const OS = process.platform === 'win32' ? 'Windows NT 10.0; Win64; x64' : process.platform === 'darwin' ? 'Macintosh; Intel Mac OS X 10_15_7' : 'X11; Linux x86_64';
+const UA = `Mozilla/5.0 (${OS}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${(process.versions.chrome || '126.0.0.0')} Safari/537.36`;
 
 function create({ log, getToken }) {
   let cid = '', cidAt = 0;
@@ -125,4 +127,4 @@ function create({ log, getToken }) {
   }
   return { clientId, api, playlists, tracksOf, describeLink, search, stream, makePlaylist, whoAmI, forget, track };
 }
-module.exports = { create };
+module.exports = { create, UA };

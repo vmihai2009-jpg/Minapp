@@ -62,7 +62,7 @@ export function initPlaylistView(webamp, api) {
     if (sk) {
       for (const p of sk.items || []) skl.push({ t: p.name, kind: 'soundcloud', id: p.id });
       for (const p of sk.links || []) skl.push({ t: p.name, kind: 'soundcloud', id: p.id });
-      if (!sk.signedIn) skl.push({ t: '[ Sign in ]', kind: 'scsignin', act: true });
+      if (!sk.signedIn) { skl.push({ t: '[ Sign in ]', kind: 'scsignin', act: true }); skl.push({ t: '[ Sign in with a token ]', kind: 'scsignintoken', act: true }); }
       skl.push({ t: '[ Add a playlist link ]', kind: 'scaddlink', act: true });
     }
     folder('soundcloud', 'SOUNDCLOUD', skl, 'No playlists');

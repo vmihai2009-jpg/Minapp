@@ -1031,7 +1031,7 @@ async function copyToSpotify(kind, id, name) {
 // ---------- SoundCloud ----------
 const sc = require('./soundcloud').create({ log, getToken: () => readCfg().scToken || '' });
 let scListsCache = null, scListsAt = 0, scNow = null; // scNow: the SoundCloud list playing (it plays through the local player)
-const SC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
+const SC_UA = require('./soundcloud').UA;
 // Sign in on soundcloud.com in a window of its own: Minapp only keeps the sign-in token that page sets, never the password
 async function scSignIn() {
   const w = new BrowserWindow({ width: 500, height: 740, title: 'Sign in to SoundCloud', autoHideMenuBar: true, parent: win, webPreferences: { partition: 'persist:minapp-soundcloud', contextIsolation: true } });
@@ -1052,6 +1052,15 @@ async function scSignIn() {
   sc.forget(); scListsCache = null;
   if (ok) { try { const u = await sc.whoAmI(); log('soundcloud: signed in as ' + (u && u.username)); } catch (e) { log('soundcloud sign-in check: ' + e.message); } buildMenu(); }
   return ok;
+}
+// Backup when SoundCloud's page blocks the sign-in window: paste the sign-in token from a browser that is already signed in
+async function scSignInToken() {
+  const t = await askText({ title: 'SoundCloud sign-in token', label: 'In your normal browser, signed in on soundcloud.com: press F12 > Application > Cookies > soundcloud.com, copy the value of "oauth_token", and paste it here:', placeholder: '2-123456-...', button: 'Sign in' });
+  const v = String(t || '').trim().replace(/^OAuth\s+/i, '');
+  if (!/^[\w.~-]{10,200}$/.test(v)) return false;
+  writeCfg({ scToken: v }); sc.forget(); scListsCache = null;
+  try { const u = await sc.whoAmI(); log('soundcloud: signed in as ' + (u && u.username)); buildMenu(); return true; }
+  catch (e) { writeCfg({ scToken: null }); sc.forget(); dialog.showMessageBox(win, { type: 'error', message: 'SoundCloud did not accept that token', detail: e.message }); return false; }
 }
 function scSignOut() {
   writeCfg({ scToken: null }); sc.forget(); scListsCache = null;
@@ -1457,6 +1466,7 @@ ipcMain.handle('lists:play', async (_e, kind, id, name) => {
   }
   if (kind === 'soundcloud') return playSoundCloud(String(id || ''), String(name || 'SoundCloud'));
   if (kind === 'scsignin') return scSignIn();
+  if (kind === 'scsignintoken') return scSignInToken();
   if (kind === 'scaddlink') return scAddLink();
   if (kind === 'ytsaved') { const l = (readCfg().ytLists || []).find((x) => x.name === id); if (l) { writeCfg({ yt: { ids: l.ids, list: null, v: null, name: l.name } }); await setSource('youtube'); } return; }
   if (kind === 'spotify') return playSpotifyContext(String(id || ''));
@@ -2452,6 +2462,7 @@ function menuItems() {
     { label: 'YouTube account', submenu: accountMenu() },
     { label: 'SoundCloud', submenu: [
       readCfg().scToken ? { label: 'Sign out of SoundCloud', click: scSignOut } : { label: 'Sign in to SoundCloud…', click: scSignIn },
+      ...(readCfg().scToken ? [] : [{ label: 'Sign in with a token (if the page says "blocked")…', click: scSignInToken }]),
       { label: 'Add a playlist link…', click: scAddLink },
       { label: 'Open the SOUNDCLOUD folder in the playlist panel to play, copy or download', enabled: false },
     ] },
