@@ -18,6 +18,14 @@
     const my = hlsToken, live = () => my === hlsToken && idx === i;
     const pl = await window.localBridge.hls(r.url);
     if (!pl.segs.length) throw new Error('the stream has no pieces');
+    if (!MediaSource.isTypeSupported(r.mime)) { // Opus (Ogg) cannot be joined live: load all the pieces, then play them as one file
+      const parts = [];
+      for (const u of pl.segs) { if (!live()) return; parts.push(await window.localBridge.seg(u)); }
+      if (!live()) return;
+      a.src = URL.createObjectURL(new Blob(parts, { type: 'audio/ogg' }));
+      if (play !== false) a.play().catch(() => {}); push();
+      return;
+    }
     const ms = new MediaSource();
     a.src = URL.createObjectURL(ms);
     await new Promise((ok) => ms.addEventListener('sourceopen', ok, { once: true }));
