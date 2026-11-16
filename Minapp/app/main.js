@@ -1514,11 +1514,16 @@ ipcMain.handle('lists:play', async (_e, kind, id, name) => {
     const what = kind.slice(5), nm = String(name || 'Playlist').slice(0, 100);
     // where to: every service except the one the list comes from
     const group = what === 'spotify' ? 'spotify' : what === 'soundcloud' ? 'soundcloud' : 'youtube';
-    const labels = { spotify: 'Spotify', youtube: 'YouTube (and YT Music)', soundcloud: 'SoundCloud' };
-    const targets = Object.keys(labels).filter((x) => x !== group);
+    const labels = { spotify: 'Spotify', youtube: 'YouTube (and YT Music)', soundcloud: 'SoundCloud', download: 'Download to this computer (best quality)' };
+    const targets = Object.keys(labels).filter((x) => x !== group && (x !== 'download' || group === 'soundcloud'));
     const r = await dialog.showMessageBox(win, { type: 'question', message: `Copy "${nm}" to:`, detail: 'This makes a new playlist there. Nothing is deleted. Afterwards you get a list of every song that could not be found.', buttons: [...targets.map((x) => labels[x]), 'Cancel'], defaultId: 0, cancelId: targets.length });
     const to = targets[r.response];
     if (!to) return;
+    if (to === 'download') {
+      let tr;
+      try { tr = await scTracksCached(id); } catch (e) { return dialog.showMessageBox(win, { type: 'error', message: 'Could not read that SoundCloud list', detail: e.message }); }
+      return downloadSoundCloud({ name: nm, tracks: tr });
+    }
     const from = what === 'ytmusic' ? 'youtube' : what, fid = what === 'ytmusic' && id === 'LM' ? 'LL' : id;
     if (to === 'spotify') return copyToSpotify(from, fid, nm);
     if (to === 'youtube') return copyToYouTube(group === 'spotify' ? (/^spotify:user:/.test(id) ? 'liked' : String(id).split(':').pop()) : id, nm, group);
@@ -2064,13 +2069,14 @@ async function downloadCurrentYouTube() {
 }
 
 // Download the SoundCloud list that is playing (or only the playing song), at the best quality SoundCloud offers
-async function downloadSoundCloud() {
-  if (downloading || !scNow) return;
+async function downloadSoundCloud(list) { // list: { name, tracks } picked in the panel; none = the one that is playing
+  if (downloading || (!scNow && !list)) return;
   const cfg = readCfg();
-  const cur = localList[localState.index];
-  const oneSong = cfg.dlWhat === 'song' && cur && cur.scId;
-  let items = (oneSong ? [cur] : scNow.tracks.map((t) => ({ ...t, scId: t.id }))).filter((t) => t.url);
-  const folderOf = oneSong ? 'Singles' : scNow.name;
+  const cur = list ? null : localList[localState.index];
+  const oneSong = !list && cfg.dlWhat === 'song' && cur && cur.scId;
+  const src = list || scNow;
+  let items = (oneSong ? [cur] : src.tracks.map((t) => ({ ...t, scId: t.id }))).filter((t) => t.url);
+  const folderOf = oneSong ? 'Singles' : src.name;
   const head = oneSong ? 'this song' : `this playlist (${items.length} songs)`;
   const r = await dialog.showMessageBox(win, {
     type: 'question', buttons: ['Download', 'Cancel'], defaultId: 1, cancelId: 1, message: `Download ${head} from SoundCloud?`,
