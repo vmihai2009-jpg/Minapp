@@ -39,6 +39,7 @@ function create({ log, getToken, page }) {
   const authHeaders = () => { const t = getToken(); return t ? { Authorization: 'OAuth ' + t } : {}; };
 
   async function api(path, params = {}, opts = {}) {
+    let challenged = false;
     for (let k = 0; k < 2; k++) {
       const u = new URL(/^https?:/.test(path) ? path : API + path);
       for (const [a, b] of Object.entries(params)) u.searchParams.set(a, b);
@@ -52,6 +53,12 @@ function create({ log, getToken, page }) {
         r = { status: x.status, ok: x.status >= 200 && x.status < 300, json: async () => JSON.parse(x.text), _text: x.text };
         if (!x.status) throw new Error('SoundCloud page request failed: ' + String(x.text).slice(0, 100));
       } else r = await fetch(u, { method: opts.method || 'GET', headers: { 'User-Agent': UA, ...headers }, body, signal: AbortSignal.timeout(20000) });
+      // SoundCloud's security check ("prove you are human") on some actions: the person solves it in a window, then the request is repeated
+      if (r.status === 403 && page && page.challenge && !challenged && /captcha-delivery\.com/.test(r._text || '')) {
+        const m = /https:[^"'\s\\]+captcha-delivery\.com[^"'\s\\]*/.exec(String(r._text).replace(/\\u0026/g, '&').replace(/\\\//g, '/'));
+        challenged = true;
+        if (m) { await page.challenge(m[0]); k--; continue; }
+      }
       if ((r.status === 401 || r.status === 403) && k === 0 && !opts.noRetry) continue; // the access key may have rotated: read it again
       const where = `${opts.method || 'GET'} ${u.pathname}`, snip = String(r._text || '').replace(/\s+/g, ' ').slice(0, 160);
       if (r.status === 401) { const e = new Error(`SoundCloud says the sign-in has expired (${where}: HTTP 401 ${snip})`); e.auth = true; throw e; }

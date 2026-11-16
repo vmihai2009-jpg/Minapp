@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.50
+- Copying a playlist to SoundCloud: SoundCloud asks for a "prove you are human" check before creating a playlist. Minapp now shows that check in a small window; solve it once and the copy carries on by itself.
+
 ## 1.9.49
 - SoundCloud: playlists are made the way SoundCloud's own website makes them, errors now name the exact step and SoundCloud's answer, and SoundCloud menu > Test connection checks each step.
 

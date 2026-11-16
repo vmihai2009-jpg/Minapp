@@ -1045,7 +1045,18 @@ async function scPageRun(code) {
   }
   return scPageWin.webContents.executeJavaScript(code, true);
 }
-const sc = require('./soundcloud').create({ log, getToken: () => readCfg().scToken || '', page: { run: scPageRun } });
+// SoundCloud's "prove you are human" check: shown in a small window; the person solves it, then the request is repeated
+async function scChallenge(url) {
+  await scPageRun('1');
+  const w = scPageWin; if (!w || w.isDestroyed()) return;
+  const ses = w.webContents.session, cookie = async () => (await ses.cookies.get({ name: 'datadome' })).map((c) => c.value).join('|');
+  const before = await cookie();
+  w.setTitle('SoundCloud security check: solve it and this window closes'); w.setSize(520, 680); w.center(); w.setAlwaysOnTop(true); w.show();
+  await w.webContents.executeJavaScript(`(() => { document.body.innerHTML = ''; const f = document.createElement('iframe'); f.src = ${JSON.stringify(url)}; f.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;background:#fff;z-index:99999'; document.body.appendChild(f); })()`, true).catch(() => {});
+  await new Promise((res) => { let n = 0; const t = setInterval(async () => { n++; let moved = false; try { moved = !w.isDestroyed() && (await cookie()) !== before; } catch {} if (w.isDestroyed() || !w.isVisible() || n > 240 || moved) { clearInterval(t); setTimeout(res, moved ? 1500 : 0); } }, 1000); });
+  if (!w.isDestroyed()) { w.setAlwaysOnTop(false); w.hide(); await Promise.race([w.loadURL('https://soundcloud.com/').catch(() => {}), new Promise((r) => setTimeout(r, 15000))]); }
+}
+const sc = require('./soundcloud').create({ log, getToken: () => readCfg().scToken || '', page: { run: scPageRun, challenge: scChallenge } });
 let scListsCache = null, scListsAt = 0, scNow = null; // scNow: the SoundCloud list playing (it plays through the local player)
 const SC_UA = require('./soundcloud').UA;
 // Sign in on soundcloud.com in a window of its own: Minapp only keeps the sign-in token that page sets, never the password
