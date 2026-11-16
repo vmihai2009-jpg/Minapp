@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.52
+- SoundCloud: songs that SoundCloud only offers as a chopped-up stream (most DJ mixes and many tracks) now play: Minapp joins the pieces as they arrive. Playing begins after the first piece; seeking far ahead waits for that part to load.
+
 ## 1.9.51
 - SoundCloud songs that cannot start now say why (preview-only, region-locked, refused stream) instead of staying silent, retry once with a fresh stream address, and SoundCloud menu > Test connection also checks that a stream can be read.
 
