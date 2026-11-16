@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.51
+- SoundCloud songs that cannot start now say why (preview-only, region-locked, refused stream) instead of staying silent, retry once with a fresh stream address, and SoundCloud menu > Test connection also checks that a stream can be read.
+
 ## 1.9.50
 - Copying a playlist to SoundCloud: SoundCloud asks for a "prove you are human" check before creating a playlist. Minapp now shows that check in a small window; solve it once and the copy carries on by itself.
 

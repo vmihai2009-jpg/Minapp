@@ -1193,7 +1193,15 @@ async function playSoundCloud(id, name, start = 0, given) {
 }
 
 // the playlist panel under the album picture: everything that can be played, by source
-ipcMain.handle('sc:stream', (_e, id) => sc.stream(id));
+ipcMain.handle('sc:stream', (_e, id, fresh) => sc.stream(id, fresh));
+// why a SoundCloud song would not play: shown once per minute, never a stream of pop-ups
+let scFailAt = 0;
+ipcMain.on('sc:fail', (_e, msg) => {
+  log('soundcloud play: ' + msg);
+  if (Date.now() - scFailAt < 60000) return;
+  scFailAt = Date.now();
+  dialog.showMessageBox(win, { type: 'warning', message: 'A SoundCloud song could not be played', detail: String(msg).slice(0, 400) + '\n\nMinapp skips to the next song. SoundCloud menu > Test connection checks the stream.' });
+});
 ipcMain.handle('lists:all', async (_e, force, wantYtm) => {
   let spotify;
   try { spotify = readCfg().spotRefresh ? await getSpotifyPlaylists(!!force) : { status: 'login' }; } catch (e) { spotify = { status: 'error', message: e.message }; }
@@ -2492,7 +2500,13 @@ function menuItems() {
       readCfg().scToken ? { label: 'Sign out of SoundCloud', click: scSignOut } : { label: 'Sign in to SoundCloud…', click: scSignIn },
       ...(readCfg().scToken ? [] : [{ label: 'Sign in with a token (if the page says "blocked")…', click: scSignInToken }]),
       { label: 'Add a playlist link…', click: scAddLink },
-      { label: 'Test connection…', click: async () => { const r = await sc.selfTest(); dialog.showMessageBox(win, { message: 'SoundCloud connection test', detail: r.map((x) => `${x.ok ? 'OK ' : 'FAILED '} ${x.step}: ${x.note}`).join('\n\n'), type: r.every((x) => x.ok) ? 'info' : 'warning' }); } },
+      { label: 'Test connection…', click: async () => { const r = await sc.selfTest();
+        try { // can a song's stream actually be read from this computer?
+          const t = (await sc.search('daft punk', 1))[0]; const u = await sc.stream(t.id, true);
+          const x = await fetch(u, { headers: { Range: 'bytes=0-1' }, signal: AbortSignal.timeout(15000) });
+          r.push({ step: 'Play a track', ok: x.status === 200 || x.status === 206, note: `${t.title}: stream answered HTTP ${x.status}` });
+        } catch (e) { r.push({ step: 'Play a track', ok: false, note: e.message }); }
+        dialog.showMessageBox(win, { message: 'SoundCloud connection test', detail: r.map((x) => `${x.ok ? 'OK ' : 'FAILED '} ${x.step}: ${x.note}`).join('\n\n'), type: r.every((x) => x.ok) ? 'info' : 'warning' }); } },
       { label: 'Open the SOUNDCLOUD folder in the playlist panel to play, copy or download', enabled: false },
     ] },
     { label: 'Local playlists', type: 'radio', checked: source === 'local', click: () => setSource('local') },

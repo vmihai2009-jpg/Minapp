@@ -136,12 +136,12 @@ function create({ log, getToken, page }) {
     return (j.collection || []).map(track).filter(Boolean);
   }
   // a stream the player can play directly (a plain MP3 address; the HLS and Opus streams do not play in a simple audio tag)
-  async function stream(id) {
+  async function stream(id, fresh) {
     const c = streams.get(id);
-    if (c && Date.now() - c.at < 15 * 60e3) return c.url;
+    if (c && !fresh && Date.now() - c.at < 15 * 60e3) return c.url;
     const t = await api('/tracks/' + id);
     const tc = ((t.media && t.media.transcodings) || []).find((x) => x.format && x.format.protocol === 'progressive');
-    if (!tc) { const e = new Error('SoundCloud offers no direct stream for this track'); e.noStream = true; throw e; }
+    if (!tc) { const e = new Error(`SoundCloud offers no direct stream for "${t.title}" (${t.policy || 'no policy'}; it may be a preview-only, region-locked or Go+ track)`); e.noStream = true; throw e; }
     const j = await api(tc.url, { track_authorization: t.track_authorization || '' });
     if (!j.url) throw new Error('SoundCloud gave no stream address');
     streams.set(id, { url: j.url, at: Date.now() });

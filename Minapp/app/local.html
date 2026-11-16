@@ -4,15 +4,16 @@
 <audio id="a"></audio>
 <script>
   const a = document.getElementById('a');
-  let list = [], idx = -1, shuffle = false, repeat = false, started = false;
+  let scTried = 0, list = [], idx = -1, shuffle = false, repeat = false, started = false;
   const url = (p) => encodeURI('file:///' + p.replace(/\\/g, '/').replace(/^\/+/, '')).replace(/#/g, '%23').replace(/\?/g, '%3F');
   function load(i, play) {
     if (i < 0 || i >= list.length) { a.pause(); return; }
     idx = i;
     if (list[i].scId) { // a SoundCloud song: its stream address is looked up when it starts
       a.pause(); a.removeAttribute('src'); push();
-      window.localBridge.stream(list[i].scId).then((u) => { if (idx !== i) return; a.src = u; if (play !== false) a.play().catch(() => {}); push(); })
-        .catch((e) => { window.localBridge.log('soundcloud stream: ' + (e && e.message)); if (idx === i) setTimeout(() => next(true), 300); });
+      scTried = 0;
+      window.localBridge.stream(list[i].scId, false).then((u) => { if (idx !== i) return; a.src = u; if (play !== false) a.play().catch(() => {}); push(); })
+        .catch((e) => { window.localBridge.log('soundcloud stream: ' + (e && e.message)); window.localBridge.fail((list[i].title || '') + ': ' + (e && e.message)); if (idx === i) setTimeout(() => next(true), 300); });
       return;
     }
     a.src = url(list[i].path);
@@ -27,7 +28,16 @@
     started = false; a.pause(); push();
   }
   a.addEventListener('ended', () => next(true));
-  a.addEventListener('error', () => { if (!a.getAttribute('src')) return; window.localBridge.log('cannot play ' + (list[idx] && list[idx].path)); setTimeout(() => next(true), 300); });
+  a.addEventListener('error', () => {
+    if (!a.getAttribute('src')) return;
+    const t = list[idx];
+    if (t && t.scId && !scTried) { // a stream address can be refused or out of date: ask for a fresh one once
+      scTried = 1; const i = idx, code = a.error ? a.error.code : 0;
+      window.localBridge.stream(t.scId, true).then((u) => { if (idx === i) { a.src = u; a.play().catch(() => {}); } }).catch((e) => window.localBridge.fail(t.title + ': ' + (e && e.message)));
+      window.localBridge.log('soundcloud audio error ' + code + ', trying a fresh address');
+      return;
+    }
+    if (t && t.scId) window.localBridge.fail((t.title || '') + ': the audio could not be played (SoundCloud refused the stream or it is not available here)'); window.localBridge.log('cannot play ' + (list[idx] && list[idx].path)); setTimeout(() => next(true), 300); });
   function push() {
     const t = list[idx];
     if (!t) return window.localBridge.state({ status: 'stopped' });
