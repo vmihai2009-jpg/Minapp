@@ -6,12 +6,19 @@ const API = 'https://api-v2.soundcloud.com';
 const OS = process.platform === 'win32' ? 'Windows NT 10.0; Win64; x64' : process.platform === 'darwin' ? 'Macintosh; Intel Mac OS X 10_15_7' : 'X11; Linux x86_64';
 const UA = `Mozilla/5.0 (${OS}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${(process.versions.chrome || '126.0.0.0')} Safari/537.36`;
 
-function create({ log, getToken }) {
+// page: { run(code) } runs code inside a real soundcloud.com page (the signed-in one): requests made there look like normal browsing
+function create({ log, getToken, page }) {
   let cid = '', cidAt = 0;
   const streams = new Map(); // track id -> { url, at }
 
   async function clientId(force) {
     if (cid && !force && Date.now() - cidAt < 6 * 3600e3) return cid;
+    if (page) { // the page itself carries the access key it uses
+      try {
+        const id = await page.run(`(() => { const h = (window.__sc_hydration || []).find((x) => x.hydratable === 'apiClient'); return h && h.data && h.data.id || ''; })()`);
+        if (/^[A-Za-z0-9]{20,40}$/.test(id || '')) { cid = id; cidAt = Date.now(); return cid; }
+      } catch (e) { log('soundcloud page key: ' + e.message); }
+    }
     const home = await (await fetch('https://soundcloud.com/', { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(15000) })).text();
     const scripts = [...home.matchAll(/<script[^>]+src="(https:\/\/[^"]+\.js)"/g)].map((m) => m[1]).reverse();
     for (const s of scripts.slice(0, 8)) {
@@ -30,9 +37,17 @@ function create({ log, getToken }) {
       const u = new URL(/^https?:/.test(path) ? path : API + path);
       for (const [a, b] of Object.entries(params)) u.searchParams.set(a, b);
       u.searchParams.set('client_id', await clientId(k > 0));
-      const r = await fetch(u, { method: opts.method || 'GET', headers: { 'User-Agent': UA, Accept: 'application/json', ...(opts.body ? { 'Content-Type': 'application/json' } : {}), ...authHeaders() }, body: opts.body ? JSON.stringify(opts.body) : undefined, signal: AbortSignal.timeout(20000) });
+      const headers = { Accept: 'application/json', ...(opts.body ? { 'Content-Type': 'application/json' } : {}), ...authHeaders() };
+      const body = opts.body ? JSON.stringify(opts.body) : undefined;
+      let r;
+      if (page) {
+        const x = await page.run(`fetch(${JSON.stringify(String(u))}, { method: ${JSON.stringify(opts.method || 'GET')}, headers: ${JSON.stringify(headers)}, body: ${JSON.stringify(body || null)}, credentials: 'include' }).then(async (r) => ({ status: r.status, text: await r.text() })).catch((e) => ({ status: 0, text: String(e) }))`);
+        r = { status: x.status, ok: x.status >= 200 && x.status < 300, json: async () => JSON.parse(x.text), _text: x.text };
+        if (!x.status) throw new Error('SoundCloud page request failed: ' + String(x.text).slice(0, 100));
+      } else r = await fetch(u, { method: opts.method || 'GET', headers: { 'User-Agent': UA, ...headers }, body, signal: AbortSignal.timeout(20000) });
       if ((r.status === 401 || r.status === 403) && k === 0 && !opts.noRetry) continue; // the access key may have rotated: read it again
-      if (r.status === 401 || r.status === 403) { const e = new Error('SoundCloud did not allow it (HTTP ' + r.status + ')'); e.auth = true; throw e; }
+      if (r.status === 401) { const e = new Error('SoundCloud says the sign-in has expired (HTTP 401)'); e.auth = true; throw e; }
+      if (r.status === 403) { const e = new Error('SoundCloud refused the request (HTTP 403): its bot protection or an expired sign-in'); e.blocked = true; throw e; }
       if (r.status === 404) { const e = new Error('Not found on SoundCloud'); e.notFound = true; throw e; }
       if (!r.ok) throw new Error('SoundCloud answered HTTP ' + r.status);
       return r.status === 204 ? {} : r.json();
