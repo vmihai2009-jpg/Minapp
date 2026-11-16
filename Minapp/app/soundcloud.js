@@ -6,6 +6,17 @@ const API = 'https://api-v2.soundcloud.com';
 const OS = process.platform === 'win32' ? 'Windows NT 10.0; Win64; x64' : process.platform === 'darwin' ? 'Macintosh; Intel Mac OS X 10_15_7' : 'X11; Linux x86_64';
 const UA = `Mozilla/5.0 (${OS}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${(process.versions.chrome || '126.0.0.0')} Safari/537.36`;
 
+// the pieces of a chopped-up stream: { init (AAC only), segs: [address...] }
+function parsePlaylist(text, base) {
+  const abs = (u) => new URL(u, base).toString();
+  const out = { init: '', segs: [] };
+  for (const l of String(text).split(/\r?\n/)) {
+    const m = /^#EXT-X-MAP:.*URI="([^"]+)"/.exec(l);
+    if (m) out.init = abs(m[1]); else if (l && !l.startsWith('#')) out.segs.push(abs(l.trim()));
+  }
+  return out;
+}
+
 // page: { run(code) } runs code inside a real soundcloud.com page (the signed-in one): requests made there look like normal browsing
 function create({ log, getToken, page }) {
   let cid = '', cidAt = 0;
@@ -135,17 +146,24 @@ function create({ log, getToken, page }) {
     const j = await api('/search/tracks', { q, limit });
     return (j.collection || []).map(track).filter(Boolean);
   }
-  // a stream the player can play directly (a plain MP3 address; the HLS and Opus streams do not play in a simple audio tag)
+  // a stream address: { url, hls (true: a playlist of small pieces, to be joined), mime }. A whole-file MP3 when SoundCloud has one,
+  // else the chopped-up stream (MP3 pieces, or AAC pieces); Opus is skipped (it does not play here)
   async function stream(id, fresh) {
     const c = streams.get(id);
-    if (c && !fresh && Date.now() - c.at < 15 * 60e3) return c.url;
+    if (c && !fresh && Date.now() - c.at < 15 * 60e3) return c.out;
     const t = await api('/tracks/' + id);
-    const tc = ((t.media && t.media.transcodings) || []).find((x) => x.format && x.format.protocol === 'progressive');
-    if (!tc) { const e = new Error(`SoundCloud offers no direct stream for "${t.title}" (${t.policy || 'no policy'}; it may be a preview-only, region-locked or Go+ track)`); e.noStream = true; throw e; }
+    const tcs = (t.media && t.media.transcodings) || [];
+    const proto = (x, p) => x.format && x.format.protocol === p;
+    const prog = tcs.find((x) => proto(x, 'progressive'));
+    const hlsMp3 = tcs.find((x) => proto(x, 'hls') && /mpeg/.test(x.format.mime_type || ''));
+    const hlsAac = tcs.find((x) => proto(x, 'hls') && /mp4/.test(x.format.mime_type || ''));
+    const tc = prog || hlsMp3 || hlsAac;
+    if (!tc) { const e = new Error(`SoundCloud offers no playable stream for "${t.title}" (${t.policy || 'no policy'}; it may be preview-only, region-locked or Go+ only)`); e.noStream = true; throw e; }
     const j = await api(tc.url, { track_authorization: t.track_authorization || '' });
     if (!j.url) throw new Error('SoundCloud gave no stream address');
-    streams.set(id, { url: j.url, at: Date.now() });
-    return j.url;
+    const out = { url: j.url, hls: tc !== prog, mime: tc === hlsAac ? 'audio/mp4; codecs="mp4a.40.2"' : 'audio/mpeg' };
+    streams.set(id, { out, at: Date.now() });
+    return out;
   }
   // make a private playlist on the account from track ids
   async function makePlaylist(title, ids) {
@@ -167,4 +185,4 @@ function create({ log, getToken, page }) {
   }
   return { selfTest, clientId, api, playlists, tracksOf, describeLink, search, stream, makePlaylist, whoAmI, forget, track };
 }
-module.exports = { create, UA };
+module.exports = { create, UA, parsePlaylist };

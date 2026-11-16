@@ -6,16 +6,45 @@
   const a = document.getElementById('a');
   let scTried = 0, list = [], idx = -1, shuffle = false, repeat = false, started = false;
   const url = (p) => encodeURI('file:///' + p.replace(/\\/g, '/').replace(/^\/+/, '')).replace(/#/g, '%23').replace(/\?/g, '%3F');
+  // SoundCloud: look up the stream when the song starts. A chopped-up stream is joined here piece by piece (MediaSource).
+  let hlsToken = 0;
+  function startSc(t, i, fresh, play) {
+    window.localBridge.stream(t.scId, fresh).then(async (r) => {
+      if (idx !== i) return;
+      if (r.hls) await playHls(r, t, i, play); else { a.src = r.url; if (play !== false) a.play().catch(() => {}); push(); }
+    }).catch((e) => { window.localBridge.log('soundcloud stream: ' + (e && e.message)); window.localBridge.fail((t.title || '') + ': ' + (e && e.message)); if (idx === i) setTimeout(() => next(true), 300); });
+  }
+  async function playHls(r, t, i, play) {
+    const my = hlsToken, live = () => my === hlsToken && idx === i;
+    const pl = await window.localBridge.hls(r.url);
+    if (!pl.segs.length) throw new Error('the stream has no pieces');
+    const ms = new MediaSource();
+    a.src = URL.createObjectURL(ms);
+    await new Promise((ok) => ms.addEventListener('sourceopen', ok, { once: true }));
+    if (!live()) return;
+    const sb = ms.addSourceBuffer(r.mime);
+    if (t.ms > 0) { try { ms.duration = t.ms / 1000; } catch {} }
+    const append = (buf) => new Promise((ok, bad) => { sb.addEventListener('updateend', ok, { once: true }); sb.addEventListener('error', () => bad(new Error('the player rejected the stream')), { once: true }); sb.appendBuffer(buf); });
+    const urls = [...(pl.init ? [pl.init] : []), ...pl.segs];
+    const got = new Map(), want = (n) => { for (let k = n; k < Math.min(urls.length, n + 3); k++) if (!got.has(k)) got.set(k, window.localBridge.seg(urls[k])); };
+    let started = false;
+    for (let n = 0; n < urls.length && live(); n++) {
+      want(n);
+      const buf = await got.get(n); got.delete(n);
+      if (!live()) return;
+      // keep about two minutes ahead and drop what was played long ago (the buffer has a size limit)
+      while (live() && a.buffered.length && a.buffered.end(a.buffered.length - 1) - a.currentTime > 120) await new Promise((z) => setTimeout(z, 1000));
+      if (!live()) return;
+      if (a.currentTime > 60 && sb.buffered.length && sb.buffered.start(0) < a.currentTime - 40) { try { sb.remove(0, a.currentTime - 30); await new Promise((ok) => sb.addEventListener('updateend', ok, { once: true })); } catch {} }
+      await append(buf);
+      if (!started) { started = true; if (play !== false) a.play().catch(() => {}); push(); }
+    }
+    if (live() && ms.readyState === 'open') { try { ms.endOfStream(); } catch {} }
+  }
   function load(i, play) {
     if (i < 0 || i >= list.length) { a.pause(); return; }
-    idx = i;
-    if (list[i].scId) { // a SoundCloud song: its stream address is looked up when it starts
-      a.pause(); a.removeAttribute('src'); push();
-      scTried = 0;
-      window.localBridge.stream(list[i].scId, false).then((u) => { if (idx !== i) return; a.src = u; if (play !== false) a.play().catch(() => {}); push(); })
-        .catch((e) => { window.localBridge.log('soundcloud stream: ' + (e && e.message)); window.localBridge.fail((list[i].title || '') + ': ' + (e && e.message)); if (idx === i) setTimeout(() => next(true), 300); });
-      return;
-    }
+    idx = i; hlsToken++;
+    if (list[i].scId) { a.pause(); a.removeAttribute('src'); push(); scTried = 0; startSc(list[i], i, false, play); return; }
     a.src = url(list[i].path);
     if (play !== false) a.play().catch(() => {});
     push();
@@ -33,7 +62,7 @@
     const t = list[idx];
     if (t && t.scId && !scTried) { // a stream address can be refused or out of date: ask for a fresh one once
       scTried = 1; const i = idx, code = a.error ? a.error.code : 0;
-      window.localBridge.stream(t.scId, true).then((u) => { if (idx === i) { a.src = u; a.play().catch(() => {}); } }).catch((e) => window.localBridge.fail(t.title + ': ' + (e && e.message)));
+      startSc(t, i, true, true);
       window.localBridge.log('soundcloud audio error ' + code + ', trying a fresh address');
       return;
     }

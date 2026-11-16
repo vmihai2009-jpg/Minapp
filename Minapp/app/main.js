@@ -1189,11 +1189,26 @@ async function playSoundCloud(id, name, start = 0, given) {
   let tracks;
   try { tracks = given || await scTracksCached(id); } catch (e) { dialog.showMessageBox(win, { type: 'error', message: 'Could not open that SoundCloud list', detail: e.message }); return; }
   if (!tracks.length) { dialog.showMessageBox(win, { message: `"${name}" has no songs` }); return; }
-  await startLocal(tracks.map((t) => ({ path: 'sc:' + t.id, scId: t.id, title: t.title, artist: t.artist, art: t.art, url: t.url })), name, start, { id, name, tracks });
+  await startLocal(tracks.map((t) => ({ path: 'sc:' + t.id, scId: t.id, title: t.title, artist: t.artist, art: t.art, url: t.url, ms: t.ms })), name, start, { id, name, tracks });
 }
 
 // the playlist panel under the album picture: everything that can be played, by source
 ipcMain.handle('sc:stream', (_e, id, fresh) => sc.stream(id, fresh));
+// the chopped-up stream: the player asks for the list of pieces, then for each piece (only SoundCloud's own media addresses)
+const scMediaOk = (u) => { try { const x = new URL(u); return x.protocol === 'https:' && /(^|\.)sndcdn\.com$/.test(x.hostname); } catch { return false; } };
+ipcMain.handle('sc:hls', async (_e, url) => {
+  if (!scMediaOk(url)) throw new Error('Not a SoundCloud address');
+  const r = await fetch(url, { signal: AbortSignal.timeout(20000) });
+  if (!r.ok) throw new Error('SoundCloud stream list answered HTTP ' + r.status);
+  return require('./soundcloud').parsePlaylist(await r.text(), url);
+});
+ipcMain.handle('sc:seg', async (_e, url) => {
+  if (!scMediaOk(url)) throw new Error('Not a SoundCloud address');
+  for (let k = 0; ; k++) {
+    try { const r = await fetch(url, { signal: AbortSignal.timeout(30000) }); if (!r.ok) throw new Error('HTTP ' + r.status); return Buffer.from(await r.arrayBuffer()); }
+    catch (e) { if (k >= 2) throw new Error('Could not load a piece of the stream: ' + e.message); await new Promise((r) => setTimeout(r, 800)); }
+  }
+});
 // why a SoundCloud song would not play: shown once per minute, never a stream of pop-ups
 let scFailAt = 0;
 ipcMain.on('sc:fail', (_e, msg) => {
@@ -2502,9 +2517,9 @@ function menuItems() {
       { label: 'Add a playlist link…', click: scAddLink },
       { label: 'Test connection…', click: async () => { const r = await sc.selfTest();
         try { // can a song's stream actually be read from this computer?
-          const t = (await sc.search('daft punk', 1))[0]; const u = await sc.stream(t.id, true);
+          const t = (await sc.search('daft punk', 1))[0]; const st = await sc.stream(t.id, true), u = st.url;
           const x = await fetch(u, { headers: { Range: 'bytes=0-1' }, signal: AbortSignal.timeout(15000) });
-          r.push({ step: 'Play a track', ok: x.status === 200 || x.status === 206, note: `${t.title}: stream answered HTTP ${x.status}` });
+          r.push({ step: 'Play a track', ok: x.status === 200 || x.status === 206, note: `${t.title}: ${st.hls ? 'chopped-up stream' : 'whole-file stream'} answered HTTP ${x.status}` });
         } catch (e) { r.push({ step: 'Play a track', ok: false, note: e.message }); }
         dialog.showMessageBox(win, { message: 'SoundCloud connection test', detail: r.map((x) => `${x.ok ? 'OK ' : 'FAILED '} ${x.step}: ${x.note}`).join('\n\n'), type: r.every((x) => x.ok) ? 'info' : 'warning' }); } },
       { label: 'Open the SOUNDCLOUD folder in the playlist panel to play, copy or download', enabled: false },
