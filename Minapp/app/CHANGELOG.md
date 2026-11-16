@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.44
+- The player no longer jitters while a fast download runs. Download progress now updates the player at most four times a second instead of dozens of times, and the window is only resized when its size really changes.
+
 ## 1.9.43
 - Choose what the record button saves: menu > Local library > Record button saves > The whole playlist, or Only the song that is playing. Single songs go into the Singles folder.
 
