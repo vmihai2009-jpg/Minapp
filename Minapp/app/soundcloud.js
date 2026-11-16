@@ -30,6 +30,12 @@ function create({ log, getToken, page }) {
     }
     throw new Error('Could not reach SoundCloud (no access key found on its site)');
   }
+  let appVer = '';
+  async function appVersion() {
+    if (appVer || !page) return appVer;
+    try { const j = JSON.parse(await page.run(`fetch('https://soundcloud.com/versions.json').then((r) => r.text()).catch(() => '')`)); appVer = String(j.app || ''); } catch {}
+    return appVer;
+  }
   const authHeaders = () => { const t = getToken(); return t ? { Authorization: 'OAuth ' + t } : {}; };
 
   async function api(path, params = {}, opts = {}) {
@@ -37,6 +43,7 @@ function create({ log, getToken, page }) {
       const u = new URL(/^https?:/.test(path) ? path : API + path);
       for (const [a, b] of Object.entries(params)) u.searchParams.set(a, b);
       u.searchParams.set('client_id', await clientId(k > 0));
+      if (page && !u.searchParams.has('app_version')) { const v = await appVersion(); if (v) u.searchParams.set('app_version', v); u.searchParams.set('app_locale', 'en'); }
       const headers = { Accept: 'application/json', ...(opts.body ? { 'Content-Type': 'application/json' } : {}), ...authHeaders() };
       const body = opts.body ? JSON.stringify(opts.body) : undefined;
       let r;
@@ -46,10 +53,11 @@ function create({ log, getToken, page }) {
         if (!x.status) throw new Error('SoundCloud page request failed: ' + String(x.text).slice(0, 100));
       } else r = await fetch(u, { method: opts.method || 'GET', headers: { 'User-Agent': UA, ...headers }, body, signal: AbortSignal.timeout(20000) });
       if ((r.status === 401 || r.status === 403) && k === 0 && !opts.noRetry) continue; // the access key may have rotated: read it again
-      if (r.status === 401) { const e = new Error('SoundCloud says the sign-in has expired (HTTP 401)'); e.auth = true; throw e; }
-      if (r.status === 403) { const e = new Error('SoundCloud refused the request (HTTP 403): its bot protection or an expired sign-in'); e.blocked = true; throw e; }
+      const where = `${opts.method || 'GET'} ${u.pathname}`, snip = String(r._text || '').replace(/\s+/g, ' ').slice(0, 160);
+      if (r.status === 401) { const e = new Error(`SoundCloud says the sign-in has expired (${where}: HTTP 401 ${snip})`); e.auth = true; throw e; }
+      if (r.status === 403) { const e = new Error(`SoundCloud refused the request (${where}: HTTP 403 ${snip})`); e.blocked = true; throw e; }
       if (r.status === 404) { const e = new Error('Not found on SoundCloud'); e.notFound = true; throw e; }
-      if (!r.ok) throw new Error('SoundCloud answered HTTP ' + r.status);
+      if (!r.ok) throw new Error(`SoundCloud answered HTTP ${r.status} (${where}) ${snip}`);
       return r.status === 204 ? {} : r.json();
     }
   }
@@ -137,9 +145,19 @@ function create({ log, getToken, page }) {
     const u = await whoAmI();
     if (!u) { const e = new Error('Sign in to SoundCloud first'); e.auth = true; throw e; }
     const first = ids.slice(0, 500);
-    const r = await api('/playlists', {}, { method: 'POST', body: { playlist: { title, sharing: 'private', tracks: first } } });
+    // the same body the website sends when it makes a playlist
+    const r = await api('/playlists', {}, { method: 'POST', body: { playlist: { _resource_id: 'f-' + Math.random().toString(36).slice(2, 10), _resource_type: 'playlist', title, sharing: 'private', tracks: first } } });
     return { id: r.id, added: first.length };
   }
-  return { clientId, api, playlists, tracksOf, describeLink, search, stream, makePlaylist, whoAmI, forget, track };
+  // a step-by-step check for the menu: [{ step, ok, note }]
+  async function selfTest() {
+    const out = [], t = async (step, f) => { try { out.push({ step, ok: true, note: String(await f()) }); } catch (e) { out.push({ step, ok: false, note: e.message }); } };
+    await t('Access key', async () => (await clientId(true)).slice(0, 4) + '…');
+    await t('Search (no sign-in needed)', async () => (await search('daft punk', 3)).length + ' results');
+    await t('Your account', async () => { me = null; const u = await whoAmI(); return u ? u.username : 'not signed in'; });
+    await t('Your playlists', async () => { const p = await playlists(); return p.signedIn ? p.items.length + ' lists' : 'not signed in'; });
+    return out;
+  }
+  return { selfTest, clientId, api, playlists, tracksOf, describeLink, search, stream, makePlaylist, whoAmI, forget, track };
 }
 module.exports = { create, UA };

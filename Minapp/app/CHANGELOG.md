@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.49
+- SoundCloud: playlists are made the way SoundCloud's own website makes them, errors now name the exact step and SoundCloud's answer, and SoundCloud menu > Test connection checks each step.
+
 ## 1.9.48
 - SoundCloud: Minapp now talks to SoundCloud from inside a hidden real soundcloud.com page that carries your sign-in, so SoundCloud's bot filter no longer refuses its requests (copying a playlist to SoundCloud failed with "SoundCloud did not allow it"). A refusal is now told apart from an expired sign-in, and a refusal no longer signs you out.
 
