@@ -188,6 +188,7 @@ function create({ log, getToken, page }) {
     await t('Your playlists', async () => { const p = await playlists(); return p.signedIn ? p.items.length + ' lists' : 'not signed in'; });
     return out;
   }
-  return { selfTest, clientId, api, playlists, tracksOf, describeLink, search, stream, makePlaylist, whoAmI, forget, track };
+  const tracksByIds = (ids) => fill(ids.map((id) => ({ id })));
+  return { tracksByIds, selfTest, clientId, api, playlists, tracksOf, describeLink, search, stream, makePlaylist, whoAmI, forget, track };
 }
 module.exports = { create, UA, parsePlaylist };

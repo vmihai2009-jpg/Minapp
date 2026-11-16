@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.54
+- Copying a playlist to SoundCloud: when SoundCloud's security check stops Minapp from creating the playlist on your account, the matched songs are saved as a playlist inside Minapp instead (under SOUNDCLOUD). It plays and downloads like any other, and you still get the list of songs that could not be found.
+
 ## 1.9.53
 - SoundCloud: tracks that only come as Opus streams now play (they load fully first), and when a song truly has no playable stream the message lists the formats SoundCloud offered for it.
 
