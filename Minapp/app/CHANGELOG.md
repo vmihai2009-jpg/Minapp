@@ -1,5 +1,11 @@
 # What's new in Minapp
 
+## 1.9.45
+- SoundCloud is here. In the playlist panel a new SOUNDCLOUD folder lists your playlists and likes (sign in once from the folder or the SoundCloud menu), and you can paste any public playlist, album or profile link. Double-click to play, FIND searches SoundCloud.
+- Right-click any playlist (Spotify, YouTube, SoundCloud) to copy it to either of the other two services.
+- The record button on a playing SoundCloud list downloads it at the best quality SoundCloud has: the original uploaded file (WAV, FLAC, AIFF...) when the artist allows downloads, otherwise SoundCloud's own stream (about 128 kbps, 256 kbps with Go+). Files are kept as they are, never re-encoded. Downloading again only fetches new songs.
+- After every copy between services and after every download you now get a list of the songs that could not be found or saved, with the reason (and, for SoundCloud downloads, which quality each song got). The full list is also saved as a text file: menu > Local library > Open logs folder.
+
 ## 1.9.44
 - The player no longer jitters while a fast download runs. Download progress now updates the player at most four times a second instead of dozens of times, and the window is only resized when its size really changes.
 
