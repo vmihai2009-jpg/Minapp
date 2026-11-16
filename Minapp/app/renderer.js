@@ -621,7 +621,7 @@
       const s = await api.state();
       lastStatus = s.status;
       if (s.status !== 'playing') setSynth(false);
-      document.documentElement.classList.toggle('src-youtube', s.source === 'youtube');
+      document.documentElement.classList.toggle('src-youtube', s.source === 'youtube' || !!s.sc);
       document.documentElement.dataset.source = s.source || 'spotify';
       document.documentElement.classList.toggle('liked', !!s.liked);
       if (window.__albumTab) window.__albumTab.setArt(s.status === 'closed' || s.status === 'stopped' ? null : s.art || '', s.title || '', s.status === 'playing', s.album || '');

@@ -8,7 +8,14 @@
   const url = (p) => encodeURI('file:///' + p.replace(/\\/g, '/').replace(/^\/+/, '')).replace(/#/g, '%23').replace(/\?/g, '%3F');
   function load(i, play) {
     if (i < 0 || i >= list.length) { a.pause(); return; }
-    idx = i; a.src = url(list[i].path);
+    idx = i;
+    if (list[i].scId) { // a SoundCloud song: its stream address is looked up when it starts
+      a.pause(); a.removeAttribute('src'); push();
+      window.localBridge.stream(list[i].scId).then((u) => { if (idx !== i) return; a.src = u; if (play !== false) a.play().catch(() => {}); push(); })
+        .catch((e) => { window.localBridge.log('soundcloud stream: ' + (e && e.message)); if (idx === i) setTimeout(() => next(true), 300); });
+      return;
+    }
+    a.src = url(list[i].path);
     if (play !== false) a.play().catch(() => {});
     push();
   }
@@ -20,7 +27,7 @@
     started = false; a.pause(); push();
   }
   a.addEventListener('ended', () => next(true));
-  a.addEventListener('error', () => { window.localBridge.log('cannot play ' + (list[idx] && list[idx].path)); setTimeout(() => next(true), 300); });
+  a.addEventListener('error', () => { if (!a.getAttribute('src')) return; window.localBridge.log('cannot play ' + (list[idx] && list[idx].path)); setTimeout(() => next(true), 300); });
   function push() {
     const t = list[idx];
     if (!t) return window.localBridge.state({ status: 'stopped' });

@@ -24,7 +24,7 @@ export function initPlaylistView(webamp, api) {
   let pick = { kind: 'queue' }, songs = null, results = null, busy = false, find = null, sort = 'order', sortOpen = false;
   let lTop = 0, rTop = 0, lHover = -1, rHover = -1, lRows = [], rRows = [], flash = '', flashUntil = 0;
   let queue = { hist: [], cur: null, q: [] }, qSig = '', rMax = 0, barSet = -1;
-  const open = { spotify: true, youtube: false, ytmusic: false, local: false };
+  const open = { spotify: true, youtube: false, ytmusic: false, soundcloud: false, local: false };
   try { Object.assign(open, JSON.parse(localStorage.getItem('minapp.pvOpen') || '{}')); } catch {}
   const skin = () => { try { return webamp.store.getState().display.skinPlaylistStyle || {}; } catch { return {}; } };
   const colours = () => { const s = skin(); return { bg: s.normalbg || '#000', fg: s.normal || '#00ff00', cur: s.current || '#fff', sel: s.selectedbg || '#0000c6', font: s.font || 'Arial' }; };
@@ -58,6 +58,14 @@ export function initPlaylistView(webamp, api) {
     const ym = data && data.ytmusic, yml = [];
     if (ym) { for (const p of ym.items) yml.push({ t: p.name, kind: 'ytmusic', id: p.id }); if (!ym.signedIn) yml.push({ t: '[ Sign in ]', kind: 'ytsignin', act: true }); }
     folder('ytmusic', 'YT MUSIC', yml, ym && ym.loading ? 'Loading...' : 'No playlists');
+    const sk = data && data.soundcloud, skl = [];
+    if (sk) {
+      for (const p of sk.items || []) skl.push({ t: p.name, kind: 'soundcloud', id: p.id });
+      for (const p of sk.links || []) skl.push({ t: p.name, kind: 'soundcloud', id: p.id });
+      if (!sk.signedIn) skl.push({ t: '[ Sign in ]', kind: 'scsignin', act: true });
+      skl.push({ t: '[ Add a playlist link ]', kind: 'scaddlink', act: true });
+    }
+    folder('soundcloud', 'SOUNDCLOUD', skl, 'No playlists');
     folder('local', 'LOCAL', ((data && data.local) || []).map((p) => ({ t: p.name, kind: 'local', id: p.name })), 'No playlists');
   }
   const pickNow = () => pick;
@@ -275,9 +283,8 @@ export function initPlaylistView(webamp, api) {
     left.addEventListener('contextmenu', (e) => {
       e.preventDefault(); e.stopPropagation();
       const r = lRows[rowOf(e)];
-      if (!r || !['spotify', 'youtube', 'ytmusic', 'ytsaved', 'ytlink'].includes(r.kind)) return;
-      const to = r.kind === 'spotify' ? 'YouTube (and YT Music)' : 'Spotify';
-      if (window.confirm(`Copy "${r.t.trim()}" to ${to}?\n\nThis makes a new playlist there. Nothing is deleted.`)) { pick = { kind: r.kind, id: r.id || '', name: r.t.trim() }; copy(); }
+      if (!r || !['spotify', 'youtube', 'ytmusic', 'ytsaved', 'ytlink', 'soundcloud'].includes(r.kind)) return;
+      pick = { kind: r.kind, id: r.id || '', name: r.t.trim() }; copy(); // the app asks where to copy it to
     });
     (document.getElementById('webamp') || document.body).appendChild(root);
     const rowOf = (e) => { const d = e.target.closest && e.target.closest('[data-i]'); return d ? Number(d.dataset.i) : -1; };
@@ -300,10 +307,11 @@ export function initPlaylistView(webamp, api) {
     if (r.folder) {
       if (!twice) { open[r.folder] = !open[r.folder]; try { localStorage.setItem('minapp.pvOpen', JSON.stringify(open)); } catch {} }
       if (r.folder === 'ytmusic' && open.ytmusic && !twice) load(false); // YouTube Music is only read once its folder is opened
-      pick = { kind: 'search', key: r.folder, folder: r.folder, name: { spotify: 'Spotify', youtube: 'YouTube', ytmusic: 'YouTube Music', local: 'your files' }[r.folder] };
+      pick = { kind: 'search', key: r.folder, folder: r.folder, name: { spotify: 'Spotify', youtube: 'YouTube', ytmusic: 'YouTube Music', soundcloud: 'SoundCloud', local: 'your files' }[r.folder] };
       results = null; rTop = 0; draw(); return;
     }
     if (r.kind === 'spotaddlink') { api.spotAddLink().then((ok) => { if (ok) load(true); }).catch(() => {}); return; }
+    if (r.kind === 'scaddlink') { api.listsPlay('scaddlink', '', '').then(() => load(true)).catch(() => {}); return; }
     if (r.act) { api.listsPlay(r.kind, r.id || '', r.t.trim()).then(() => load(true)).catch(() => {}); return; }
     if (r.kind === 'queue') { pick = { kind: 'queue' }; try { localStorage.removeItem('minapp.pvPick'); } catch {} rTop = 0; draw(); return; }
     if (twice) { say('PLAYING'); api.listsPlay(r.kind, r.id || '', r.t.trim()).catch(() => {}); return; } // double-click: play the whole playlist
@@ -405,9 +413,9 @@ export function initPlaylistView(webamp, api) {
     draw();
   }
   function copy() {
-    const ok = ['spotify', 'youtube', 'ytmusic', 'ytsaved', 'ytlink'].includes(pick.kind);
+    const ok = ['spotify', 'youtube', 'ytmusic', 'ytsaved', 'ytlink', 'soundcloud'].includes(pick.kind);
     if (!ok) { say('PICK A PLAYLIST'); return; }
-    say(pick.kind === 'spotify' ? 'COPYING TO YOUTUBE + YT MUSIC' : 'COPYING TO SPOTIFY');
+    say('COPY: CHOOSE WHERE TO');
     api.listsPlay('copy-' + pick.kind, pick.id, pick.name).then(() => load(true)).catch(() => {});
   }
   // a short note in the title bar's place for a few seconds (LIKED, COPYING...)
@@ -472,7 +480,7 @@ export function initPlaylistView(webamp, api) {
       restored = true;
       try {
         const p = JSON.parse(localStorage.getItem('minapp.pvPick') || 'null');
-        if (p && ['spotify', 'youtube', 'ytmusic', 'ytsaved', 'local'].includes(p.kind) && pick.kind === 'queue') {
+        if (p && ['spotify', 'youtube', 'ytmusic', 'ytsaved', 'soundcloud', 'local'].includes(p.kind) && pick.kind === 'queue') {
           const mine = pick = { kind: p.kind, id: String(p.id || ''), name: String(p.name || '') };
           songs = null;
           api.listsSongs(mine.kind, mine.id).then((x) => { if (pick === mine) { songs = x || []; draw(); } }).catch(() => { if (pick === mine) { songs = []; draw(); } });

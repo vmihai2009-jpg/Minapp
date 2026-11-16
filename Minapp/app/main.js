@@ -283,6 +283,7 @@ async function doCmd(cmd, arg) {
   if (source === 'youtube' && cmd === 'download') return downloadCurrentYouTube();
   if (source === 'youtube') { if (ytWin) ytWin.webContents.send('yt:cmd', cmd, arg); return; }
   if (source === 'ytmusic') { if (ytmWin && cmd !== 'download') ytmWin.webContents.send('ytm:cmd', cmd, arg); return; }
+  if (source === 'local' && scNow && cmd === 'download') return downloadSoundCloud();
   if (source === 'local') { if (localWin) localWin.webContents.send('local:cmd', cmd, arg); return; }
   if (cmd === 'jump') { // click on an upcoming title: Spotify's desktop app has no "play this one", so skip ahead to it
     const n = Math.max(-30, Math.min(40, Math.round(Number(arg) || 0))); // negative = back through the history
@@ -946,21 +947,23 @@ async function spotPlaylistTracks(id, tok) { // [{ title, artist }] of a playlis
   }
   return out;
 }
-async function copyToYouTube(id, name) {
-  const tok = readCfg().spotRefresh ? await spotAccessToken() : null;
-  if (!tok) return dialog.showMessageBox(win, { message: 'Connect Spotify first', detail: 'Open the SPOTIFY folder in the playlist panel and click Connect.' });
+async function copyToYouTube(id, name, from) {
+  const tok = from !== 'soundcloud' && readCfg().spotRefresh ? await spotAccessToken() : null;
+  if (from !== 'soundcloud' && !tok) return dialog.showMessageBox(win, { message: 'Connect Spotify first', detail: 'Open the SPOTIFY folder in the playlist panel and click Connect.' });
   await copyBar(true);
+  const failed = [];
   try {
     copyNote(0, 0, 'Reading ' + name + '...');
-    const tracks = await spotPlaylistTracks(id, tok);
+    const tracks = from === 'soundcloud' ? (await sc.tracksOf(id)).map((t) => ({ title: t.title, artist: t.artist })) : await spotPlaylistTracks(id, tok);
     const ids = [];
     for (let i = 0; i < tracks.length && !copyStop; i++) {
-      const t = tracks[i];
+      const t = tracks[i], nm = (t.artist ? t.artist + ' - ' : '') + t.title;
       copyNote(i + 1, tracks.length, 'Finding on YouTube: ' + t.title);
-      const v = await library.ytFind(`${t.artist} - ${t.title}`).catch(() => '');
-      if (v && !ids.includes(v)) ids.push(v);
+      let v = '', why = 'No match found on YouTube';
+      try { v = await library.ytFind(`${t.artist} - ${t.title}`); } catch (e) { why = 'YouTube search failed: ' + e.message; }
+      if (v && !ids.includes(v)) ids.push(v); else if (!v) failed.push({ name: nm, reason: why });
     }
-    if (!ids.length) return dialog.showMessageBox(win, { message: copyStop ? 'Stopped.' : 'Nothing found on YouTube' });
+    if (!ids.length) { await reportDialog({ message: copyStop ? 'Stopped.' : 'Nothing found on YouTube', failed, logName: 'copy-to-youtube-' + name, what: 'found' }); return; }
     const lists = (readCfg().ytLists || []).filter((x) => x.name !== name);
     writeCfg({ ytLists: [{ name, ids }, ...lists].slice(0, 30) });
     let extra = 'It is under YOUTUBE in the playlist panel.';
@@ -968,12 +971,22 @@ async function copyToYouTube(id, name) {
       copyNote(0, ids.length, 'Saving to your YouTube account...');
       const r = await ytApi.makePlaylist(name, ids, (i, n) => copyNote(i, n, 'Saving to your YouTube account'));
       extra = r.quota ? `YouTube's daily limit was reached after ${r.added} songs; the playlist on your account has those, the one in Minapp has all of them.` : 'It is also on your YouTube account, as a private playlist.';
+      if (r.quota) failed.push(...ids.slice(r.added).map((v) => ({ name: 'YouTube video ' + v, reason: 'Not saved to your YouTube account: daily limit reached (it is in the Minapp copy)' })));
     } else if (ytApi.signedIn()) extra += ' To also save copies on your YouTube account, sign out and in again once (YouTube account menu) so Minapp may create playlists there.';
-    const r = await dialog.showMessageBox(win, { message: `Made "${name}" on YouTube with ${ids.length} of ${tracks.length} songs`, detail: extra, buttons: ['Play it', 'OK'], defaultId: 1 });
-    if (r.response === 0) { writeCfg({ yt: { ids, list: null, v: null, name } }); await setSource('youtube'); }
+    const r = await reportDialog({ message: `Made "${name}" on YouTube with ${ids.length} of ${tracks.length} songs`, detail: extra, failed, logName: 'copy-to-youtube-' + name, what: 'found', buttons: ['Play it', 'OK'] });
+    if (r === 'Play it') { writeCfg({ yt: { ids, list: null, v: null, name } }); await setSource('youtube'); }
   } catch (e) {
     dialog.showMessageBox(win, { type: 'error', message: 'Could not copy the playlist', detail: String((e && e.message) || e) });
   } finally { await copyBar(false); }
+}
+// the songs of a YouTube-side list: [{ id, title, channel }]
+async function ytVids(kind, id) {
+  const cfg = readCfg();
+  let vids;
+  if (kind === 'youtube') { const ids = await ytApi.videoIds(id); vids = await ytApi.titles(ids); }
+  else if (kind === 'ytlink') { const t = cfg.yt || {}; vids = await library.ytEntries(t.list ? 'https://www.youtube.com/playlist?list=' + t.list : 'https://www.youtube.com/watch?v=' + t.v); }
+  else if (kind === 'ytsaved') { const l = (cfg.ytLists || []).find((x) => x.name === id); vids = l && ytApi.signedIn() ? await ytApi.titles(l.ids) : []; }
+  return vids || [];
 }
 async function copyToSpotify(kind, id, name) {
   const cfg = readCfg();
@@ -983,13 +996,10 @@ async function copyToSpotify(kind, id, name) {
     return;
   }
   await copyBar(true);
+  const failed = [];
   try {
     copyNote(0, 0, 'Reading ' + name + '...');
-    let vids;
-    if (kind === 'youtube') { const ids = await ytApi.videoIds(id); vids = await ytApi.titles(ids); }
-    else if (kind === 'ytlink') { const t = cfg.yt || {}; vids = await library.ytEntries(t.list ? 'https://www.youtube.com/playlist?list=' + t.list : 'https://www.youtube.com/watch?v=' + t.v); }
-    else if (kind === 'ytsaved') { const l = (cfg.ytLists || []).find((x) => x.name === id); vids = l && ytApi.signedIn() ? await ytApi.titles(l.ids) : []; }
-    vids = vids || [];
+    const vids = kind === 'soundcloud' ? (await sc.tracksOf(id)).map((t) => ({ title: t.title, channel: t.artist })) : await ytVids(kind, id);
     const tok = await spotAccessToken();
     const uris = [];
     for (let i = 0; i < vids.length && !copyStop; i++) {
@@ -999,9 +1009,9 @@ async function copyToSpotify(kind, id, name) {
       let j = await spotApi('/search?type=track&limit=1&q=' + encodeURIComponent(q), tok).catch(() => null);
       if (!(j && j.tracks && j.tracks.items.length)) j = await spotApi('/search?type=track&limit=1&q=' + encodeURIComponent(`${c.artist} ${c.title}`), tok).catch(() => null);
       const u = j && j.tracks && j.tracks.items[0] && j.tracks.items[0].uri;
-      if (u && !uris.includes(u)) uris.push(u);
+      if (u && !uris.includes(u)) uris.push(u); else if (!u) failed.push({ name: (c.artist ? c.artist + ' - ' : '') + c.title, reason: j ? 'No match found on Spotify' : 'Spotify search failed' });
     }
-    if (!uris.length) return dialog.showMessageBox(win, { message: copyStop ? 'Stopped.' : 'Nothing found on Spotify' });
+    if (!uris.length) { await reportDialog({ message: copyStop ? 'Stopped.' : 'Nothing found on Spotify', failed, logName: 'copy-to-spotify-' + name, what: 'found' }); return; }
     let pl;
     try { pl = await spotSend('POST', '/me/playlists', tok, { name, public: false, description: 'Made by Minapp' }); }
     catch { const me = await spotApi('/me', tok); pl = await spotSend('POST', `/users/${encodeURIComponent(me.id)}/playlists`, tok, { name, public: false, description: 'Made by Minapp' }); }
@@ -1010,15 +1020,143 @@ async function copyToSpotify(kind, id, name) {
       try { await spotSend('POST', `/playlists/${pl.id}/items`, tok, { uris: chunk }); } catch { await spotSend('POST', `/playlists/${pl.id}/tracks`, tok, { uris: chunk }); }
     }
     spotLists = null;
-    const r = await dialog.showMessageBox(win, { message: `Made "${name}" on Spotify with ${uris.length} of ${vids.length} songs`, detail: 'It is a private playlist on your account, and under SPOTIFY in the playlist panel.', buttons: ['Play it', 'OK'], defaultId: 1 });
-    if (r.response === 0) await playSpotifyContext('spotify:playlist:' + pl.id);
+    const r = await reportDialog({ message: `Made "${name}" on Spotify with ${uris.length} of ${vids.length} songs`, detail: 'It is a private playlist on your account, and under SPOTIFY in the playlist panel.', failed, logName: 'copy-to-spotify-' + name, what: 'found', buttons: ['Play it', 'OK'] });
+    if (r === 'Play it') await playSpotifyContext('spotify:playlist:' + pl.id);
   } catch (e) {
     if (e && e.auth) writeCfg({ spotScope: null });
     dialog.showMessageBox(win, { type: 'error', message: 'Could not copy the playlist', detail: String((e && e.message) || e) });
   } finally { await copyBar(false); }
 }
 
+// ---------- SoundCloud ----------
+const sc = require('./soundcloud').create({ log, getToken: () => readCfg().scToken || '' });
+let scListsCache = null, scListsAt = 0, scNow = null; // scNow: the SoundCloud list playing (it plays through the local player)
+const SC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
+// Sign in on soundcloud.com in a window of its own: Minapp only keeps the sign-in token that page sets, never the password
+async function scSignIn() {
+  const w = new BrowserWindow({ width: 500, height: 740, title: 'Sign in to SoundCloud', autoHideMenuBar: true, parent: win, webPreferences: { partition: 'persist:minapp-soundcloud', contextIsolation: true } });
+  w.webContents.setUserAgent(SC_UA);
+  w.loadURL('https://soundcloud.com/signin').catch(() => {});
+  const ok = await new Promise((resolve) => {
+    let done = false;
+    const end = (v) => { if (done) return; done = true; clearInterval(t); resolve(v); };
+    w.on('closed', () => end(false));
+    const t = setInterval(async () => {
+      try {
+        const c = (await w.webContents.session.cookies.get({ name: 'oauth_token' })).find((x) => /soundcloud\.com$/.test(x.domain) && x.value);
+        if (c) { writeCfg({ scToken: decodeURIComponent(c.value) }); end(true); }
+      } catch {}
+    }, 1500);
+  });
+  try { if (!w.isDestroyed()) w.close(); } catch {}
+  sc.forget(); scListsCache = null;
+  if (ok) { try { const u = await sc.whoAmI(); log('soundcloud: signed in as ' + (u && u.username)); } catch (e) { log('soundcloud sign-in check: ' + e.message); } buildMenu(); }
+  return ok;
+}
+function scSignOut() {
+  writeCfg({ scToken: null }); sc.forget(); scListsCache = null;
+  try { require('electron').session.fromPartition('persist:minapp-soundcloud').clearStorageData(); } catch {}
+  buildMenu();
+}
+async function scAddLink() {
+  const link = await askText({ title: 'Add a SoundCloud playlist', label: 'Paste a SoundCloud playlist, album or profile link:', placeholder: 'https://soundcloud.com/...', button: 'Add' });
+  if (!/^https?:\/\/(on\.|m\.)?soundcloud\.com\//i.test(String(link || '').trim())) return false;
+  try {
+    const url = String(link).trim();
+    const d = await sc.describeLink(url);
+    writeCfg({ scLinks: [...(readCfg().scLinks || []).filter((x) => x.url !== url), { url, name: d.name }] });
+    scListsCache = null; return true;
+  } catch (e) { dialog.showMessageBox(win, { type: 'error', message: 'Could not read that SoundCloud link', detail: e.message }); return false; }
+}
+// the SoundCloud folder of the playlist panel; read at most every 5 minutes (or when asked), and never longer than 8 s
+async function scListsData(force) {
+  const links = (readCfg().scLinks || []).map((l) => ({ id: l.url, name: l.name }));
+  if (!readCfg().scToken) return { signedIn: false, items: [], links };
+  if (!force && scListsCache && Date.now() - scListsAt < 300000) return { ...scListsCache, links };
+  try {
+    const r = await Promise.race([sc.playlists(), new Promise((_r, rej) => setTimeout(() => rej(new Error('SoundCloud did not answer in time')), 8000))]);
+    scListsCache = r; scListsAt = Date.now();
+    return { ...r, links };
+  } catch (e) {
+    log('soundcloud lists: ' + e.message);
+    if (e.auth) { writeCfg({ scToken: null }); sc.forget(); return { signedIn: false, items: [], links, expired: true }; }
+    return { ...(scListsCache || { signedIn: true, items: [] }), links, error: e.message };
+  }
+}
+// A short summary in a dialog plus the full list of what could not be found or saved in a text file (opened with a button)
+async function reportDialog({ message, detail = '', failed = [], saved = [], logName = 'log', what = 'saved', buttons = ['OK'], type }) {
+  let file = '';
+  if (failed.length || saved.length) {
+    try {
+      const dir = path.join(app.getPath('userData'), 'logs'); fs.mkdirSync(dir, { recursive: true });
+      file = path.join(dir, `${library.safeName(logName).slice(0, 50)} ${new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-')}.txt`);
+      const body = [message, detail && detail.trim(), '',
+        failed.length ? `COULD NOT BE ${what === 'found' ? 'FOUND' : 'SAVED'} (${failed.length}):` : '', ...failed.map((f) => `- ${f.name}: ${f.reason}`),
+        saved.length ? `\nSAVED (${saved.length}):` : '', ...saved.map((f) => `- ${f.name}: ${f.reason}`)].filter((l, i, a) => l !== '' || a[i - 1] !== '').join('\n');
+      fs.writeFileSync(file, body + '\n');
+    } catch (e) { log('log file: ' + e.message); file = ''; }
+  }
+  const lines = failed.slice(0, 8).map((f) => `• ${f.name}: ${f.reason}`);
+  const more = failed.length > 8 ? `\n…and ${failed.length - 8} more in the full list.` : '';
+  const text = [detail, failed.length ? `${failed.length} song${failed.length === 1 ? '' : 's'} could not be ${what === 'found' ? 'found' : 'saved'}:\n${lines.join('\n')}${more}` : (what === 'found' ? 'Every song was found.' : '')].filter(Boolean).join('\n\n');
+  const btns = file && failed.length ? [...buttons.slice(0, -1), 'Show full list', buttons[buttons.length - 1]] : buttons;
+  const r = await dialog.showMessageBox(win, { type: type || (failed.length ? 'warning' : 'info'), message, detail: text, buttons: btns, defaultId: btns.length - 1, cancelId: btns.length - 1 });
+  const label = btns[r.response];
+  if (label === 'Show full list') { shell.openPath(file); return buttons[buttons.length - 1]; }
+  return label;
+}
+// find a SoundCloud track whose title matches (a close match only: a wrong track in a DJ playlist is worse than a gap)
+const scNorm = (t) => String(t || '').toLowerCase().replace(/[\[(][^\])]*[\])]/g, '').replace(/[^\p{L}\p{N}]+/gu, '');
+async function copyToSoundCloud(kind, id, name) {
+  if (!readCfg().scToken) {
+    const r = await dialog.showMessageBox(win, { message: 'Sign in to SoundCloud first', detail: 'A SoundCloud page opens: sign in there once.', buttons: ['Sign in', 'Cancel'], defaultId: 0, cancelId: 1 });
+    if (r.response === 0 && (await scSignIn())) return copyToSoundCloud(kind, id, name);
+    return;
+  }
+  let tracks;
+  await copyBar(true);
+  const failed = [];
+  try {
+    copyNote(0, 0, 'Reading ' + name + '...');
+    if (kind === 'spotify') {
+      const tok = readCfg().spotRefresh ? await spotAccessToken() : null;
+      if (!tok) return dialog.showMessageBox(win, { message: 'Connect Spotify first', detail: 'Open the SPOTIFY folder in the playlist panel and click Connect.' });
+      tracks = await spotPlaylistTracks(/^spotify:user:/.test(id) ? 'liked' : String(id).split(':').pop(), tok);
+    } else tracks = (await ytVids(kind, id)).map((v) => { const c = clean(v.channel, v.title); return { title: c.title, artist: c.first || c.artist || '' }; });
+    const ids = [];
+    for (let i = 0; i < tracks.length && !copyStop; i++) {
+      const t = tracks[i], nm = (t.artist ? t.artist + ' - ' : '') + t.title;
+      copyNote(i + 1, tracks.length, 'Finding on SoundCloud: ' + t.title);
+      try {
+        const res = await sc.search(`${t.artist} ${t.title}`.trim(), 8);
+        const want = scNorm(t.title);
+        const hit = res.find((r) => want && scNorm(r.title).includes(want)) || res.find((r) => want && want.includes(scNorm(r.title)) && scNorm(r.title).length > 3);
+        if (hit && !ids.includes(hit.id)) ids.push(hit.id); else if (!hit) failed.push({ name: nm, reason: res.length ? 'SoundCloud has no track with this title (only different ones came up)' : 'No match found on SoundCloud' });
+      } catch (e) { if (e.auth) throw e; failed.push({ name: nm, reason: 'SoundCloud search failed: ' + e.message }); }
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    if (!ids.length) { await reportDialog({ message: copyStop ? 'Stopped.' : 'Nothing found on SoundCloud', failed, logName: 'copy-to-soundcloud-' + name, what: 'found' }); return; }
+    copyNote(0, ids.length, 'Saving to your SoundCloud account...');
+    const r = await sc.makePlaylist(name, ids);
+    scListsCache = null;
+    await reportDialog({ message: `Made "${name}" on SoundCloud with ${r.added} of ${tracks.length} songs`, detail: 'It is a private playlist on your account, and under SOUNDCLOUD in the playlist panel.', failed, logName: 'copy-to-soundcloud-' + name, what: 'found' });
+  } catch (e) {
+    if (e && e.auth) { writeCfg({ scToken: null }); sc.forget(); }
+    dialog.showMessageBox(win, { type: 'error', message: 'Could not copy the playlist', detail: e && e.auth ? 'SoundCloud did not allow it. Choose the SOUNDCLOUD folder and sign in again, then retry.' : String((e && e.message) || e) });
+  } finally { await copyBar(false); }
+}
+// play a SoundCloud list (or the given tracks) through the local player; each song's stream address is looked up when it starts
+const scCache = { id: '', tracks: [] };
+async function scTracksCached(id) { if (scCache.id === id && scCache.tracks.length) return scCache.tracks; const tracks = await sc.tracksOf(id); Object.assign(scCache, { id, tracks }); return tracks; }
+async function playSoundCloud(id, name, start = 0, given) {
+  let tracks;
+  try { tracks = given || await scTracksCached(id); } catch (e) { dialog.showMessageBox(win, { type: 'error', message: 'Could not open that SoundCloud list', detail: e.message }); return; }
+  if (!tracks.length) { dialog.showMessageBox(win, { message: `"${name}" has no songs` }); return; }
+  await startLocal(tracks.map((t) => ({ path: 'sc:' + t.id, scId: t.id, title: t.title, artist: t.artist, art: t.art, url: t.url })), name, start, { id, name, tracks });
+}
+
 // the playlist panel under the album picture: everything that can be played, by source
+ipcMain.handle('sc:stream', (_e, id) => sc.stream(id));
 ipcMain.handle('lists:all', async (_e, force, wantYtm) => {
   let spotify;
   try { spotify = readCfg().spotRefresh ? await getSpotifyPlaylists(!!force) : { status: 'login' }; } catch (e) { spotify = { status: 'error', message: e.message }; }
@@ -1036,7 +1174,8 @@ ipcMain.handle('lists:all', async (_e, force, wantYtm) => {
   // Spotify, YouTube and local lists. Until it answers the folder says Loading and the panel asks again shortly.
   // ...and only while its folder is open: its page is heavy, so it is not kept running for nothing
   const ytmusic = wantYtm ? ytmSoon(!!force) : (ytmLib ? ytmLib.data : { signedIn: true, items: [], idle: true });
-  return { spotify, youtube, ytmusic, local: library.playlists().filter((p) => p.count > 0).map((p) => ({ name: p.name, n: p.count })) };
+  const soundcloud = await scListsData(!!force);
+  return { spotify, youtube, ytmusic, soundcloud, local: library.playlists().filter((p) => p.count > 0).map((p) => ({ name: p.name, n: p.count })) };
 });
 // a quick YouTube search: read the results page YouTube serves to browsers and take the videos out of its data
 async function ytQuickSearch(q) {
@@ -1095,6 +1234,10 @@ ipcMain.handle('lists:search', async (_e, key, q, only) => {
     if (!list.length) return [{ t: 'YouTube did not answer. Try again in a moment.', kind: 'none' }];
     return list.map((v) => ({ t: v.title + (v.channel ? ' - ' + v.channel : ''), kind: key, id: v.id, all: list.map((x) => x.id) }));
   }
+  if (key === 'soundcloud') {
+    try { const list = await sc.search(q, 15); return list.length ? list.map((t, i) => ({ t: t.title + (t.artist ? ' - ' + t.artist : ''), kind: 'soundcloud', tracks: list, i })) : [{ t: 'Nothing found on SoundCloud', kind: 'none' }]; }
+    catch (e) { return [{ t: 'SoundCloud did not answer. Try again in a moment.', kind: 'none' }]; }
+  }
   const n = (x) => x.toLowerCase();
   const out = [];
   for (const p of library.playlists()) library.tracks(p.name).forEach((t, i) => { if (out.length < 40 && n(t.title + ' ' + t.artist).includes(n(q))) out.push({ t: t.title, kind: 'local', list: p.name, i }); });
@@ -1142,6 +1285,9 @@ ipcMain.handle('lists:songs', async (_e, kind, id) => {
     return out;
   }
   if (kind === 'local') return library.tracks(String(id || '')).map((t, i) => ({ t: t.title, kind: 'local', list: id, i }));
+  if (kind === 'soundcloud') {
+    try { return (await scTracksCached(String(id || ''))).map((t, i) => ({ t: by(t), kind: 'soundcloud', list: id, i })); } catch (e) { log('soundcloud songs: ' + e.message); return []; }
+  }
   let vids = [];
   try {
     if (kind === 'ytmusic') return await ytmSongs(String(id || ''));
@@ -1161,6 +1307,7 @@ ipcMain.handle('lists:found', async (_e, r) => {
     return setSource('youtube');
   }
   if (r.kind === 'local') return playLocal(String(r.list || ''), Number(r.i) || 0);
+  if (r.kind === 'soundcloud') return Array.isArray(r.tracks) ? playSoundCloud('search', 'SoundCloud search', Math.max(0, Number(r.i) || 0), r.tracks) : playSoundCloud(String(r.list || ''), 'SoundCloud', Number(r.i) || 0);
   if (r.kind === 'ytmusic' && /^[\w-]{11}$/.test(String(r.id))) return playYtMusic('watch?v=' + r.id + (r.list ? '&list=' + encodeURIComponent(r.list) : ''));
 });
 // ---------- YouTube Music's own library, read through its window (signed in there) with the page's own API ----------
@@ -1296,9 +1443,21 @@ ipcMain.handle('lists:play', async (_e, kind, id, name) => {
   if (kind.startsWith('copy-')) {
     if (copying || downloading) return;
     const what = kind.slice(5), nm = String(name || 'Playlist').slice(0, 100);
-    if (what === 'ytmusic') return copyToSpotify('youtube', id === 'LM' ? 'LL' : id, nm);
-    return what === 'spotify' ? copyToYouTube(/^spotify:user:/.test(id) ? 'liked' : String(id).split(':').pop(), nm) : copyToSpotify(what, id, nm);
+    // where to: every service except the one the list comes from
+    const group = what === 'spotify' ? 'spotify' : what === 'soundcloud' ? 'soundcloud' : 'youtube';
+    const labels = { spotify: 'Spotify', youtube: 'YouTube (and YT Music)', soundcloud: 'SoundCloud' };
+    const targets = Object.keys(labels).filter((x) => x !== group);
+    const r = await dialog.showMessageBox(win, { type: 'question', message: `Copy "${nm}" to:`, detail: 'This makes a new playlist there. Nothing is deleted. Afterwards you get a list of every song that could not be found.', buttons: [...targets.map((x) => labels[x]), 'Cancel'], defaultId: 0, cancelId: targets.length });
+    const to = targets[r.response];
+    if (!to) return;
+    const from = what === 'ytmusic' ? 'youtube' : what, fid = what === 'ytmusic' && id === 'LM' ? 'LL' : id;
+    if (to === 'spotify') return copyToSpotify(from, fid, nm);
+    if (to === 'youtube') return copyToYouTube(group === 'spotify' ? (/^spotify:user:/.test(id) ? 'liked' : String(id).split(':').pop()) : id, nm, group);
+    return copyToSoundCloud(from, fid, nm);
   }
+  if (kind === 'soundcloud') return playSoundCloud(String(id || ''), String(name || 'SoundCloud'));
+  if (kind === 'scsignin') return scSignIn();
+  if (kind === 'scaddlink') return scAddLink();
   if (kind === 'ytsaved') { const l = (readCfg().ytLists || []).find((x) => x.name === id); if (l) { writeCfg({ yt: { ids: l.ids, list: null, v: null, name: l.name } }); await setSource('youtube'); } return; }
   if (kind === 'spotify') return playSpotifyContext(String(id || ''));
   if (kind === 'youtube') { const p = ytApi.playlists().find((x) => x.id === id); if (p) await playMyPlaylist(p); return; }
@@ -1608,11 +1767,15 @@ const { songInfo, albumInfo, clean } = require('./songinfo');
 async function playLocal(name, start = 0) {
   const tracks = library.tracks(name);
   if (!tracks.length) { dialog.showMessageBox(win, { message: `"${name}" has no songs yet` }); return; }
+  return startLocal(tracks, name, start, null);
+}
+async function startLocal(tracks, name, start, scList) {
+  scNow = scList || null;
   try { await runCapture(null); } catch {}
   await spotifyCmd('pause');
   if (ytWin) { ytWin.webContents.send('yt:cmd', 'pause'); ytWin.hide(); }
   if (ytmWin) ytmWin.webContents.send('ytm:cmd', 'pause');
-  localList = tracks; localName = name; writeCfg({ localPlaylist: name });
+  localList = tracks; localName = name; if (!scList) writeCfg({ localPlaylist: name });
   source = 'local'; writeCfg({ source });
   localState = { status: 'closed' };
   if (!localWin) {
@@ -1810,10 +1973,12 @@ async function downloadCurrentYouTube() {
       const head = limited ? `Saved ${have}${of} songs so far` : `Saved ${plural(n)} to your local library`;
       const detail = limited
         ? 'YouTube asked Minapp to slow down, and it still said so after waiting. Nothing is lost: choose Download again in about an hour and it picks up where it stopped.'
-        : (res.error ? 'Some items were skipped (for example videos that are private or removed): ' + res.error : '');
+        : '';
       if (n) {
-        const r = await dialog.showMessageBox(win, { message: head, detail, buttons: ['Play them', 'OK'], defaultId: 1 });
-        if (r.response === 0) await playLocal(path.basename(folder));
+        const r = await reportDialog({ message: head, detail, failed: res.failed || [], logName: 'download-' + path.basename(folder), what: 'saved', buttons: ['Play them', 'OK'] });
+        if (r === 'Play them') await playLocal(path.basename(folder));
+      } else if ((res.failed || []).length && !limited) {
+        await reportDialog({ message: 'Nothing was saved', detail: '', failed: res.failed, logName: 'download-failed', what: 'saved', type: 'warning' });
       } else {
         dialog.showMessageBox(win, { type: 'warning', message: 'YouTube is asking Minapp to slow down', detail });
       }
@@ -1824,6 +1989,59 @@ async function downloadCurrentYouTube() {
     dialog.showMessageBox(win, { type: 'error', message: 'Download failed', detail: String((e && e.message) || e) });
   } finally {
     downloading = false; lastTitle = ''; buildMenu();
+    if (win && !win.isDestroyed()) { win.webContents.send('download:state', false); win.webContents.send('download:progress', null); }
+  }
+}
+
+// Download the SoundCloud list that is playing (or only the playing song), at the best quality SoundCloud offers
+async function downloadSoundCloud() {
+  if (downloading || !scNow) return;
+  const cfg = readCfg();
+  const cur = localList[localState.index];
+  const oneSong = cfg.dlWhat === 'song' && cur && cur.scId;
+  let items = (oneSong ? [cur] : scNow.tracks.map((t) => ({ ...t, scId: t.id }))).filter((t) => t.url);
+  const folderOf = oneSong ? 'Singles' : scNow.name;
+  const head = oneSong ? 'this song' : `this playlist (${items.length} songs)`;
+  const r = await dialog.showMessageBox(win, {
+    type: 'question', buttons: ['Download', 'Cancel'], defaultId: 1, cancelId: 1, message: `Download ${head} from SoundCloud?`,
+    detail: 'The best quality SoundCloud offers, kept exactly as it is (no re-encoding):\n• Tracks the artist allows downloads of: the original file they uploaded (WAV, FLAC, AIFF or MP3, whatever it was).\n• Everything else: SoundCloud\'s own stream, about 128 kbps MP3 (256 kbps AAC when a SoundCloud Go+ account is signed in under the SoundCloud menu). SoundCloud has nothing better for those tracks, so no tool can give more.\n\nWhen it ends you get the list of tracks that could not be saved, and which quality each song got.\n\nFor your personal use only: only keep what you have the right to keep. The first time, Minapp fetches the free yt-dlp and ffmpeg tools (about 45 MB).',
+  });
+  if (r.response !== 0) return;
+  writeCfg({ dlOk: true });
+  const have = oneSong ? null : library.scHave(folderOf);
+  const skipped = have ? items.filter((t) => have.has(t.title)).length : 0;
+  if (have) items = items.filter((t) => !have.has(t.title));
+  if (!items.length) { dialog.showMessageBox(win, { message: `"${folderOf}" is up to date`, detail: 'Every song is already in your local library.' }); return; }
+  downloading = true; buildMenu();
+  win.webContents.send('download:state', true);
+  let lastSent = 0, lastHead = '';
+  const note = (m, info) => {
+    if (!info || !info.phase || info.phase !== 'downloading') log('[download] ' + m);
+    const head = m.split(':')[0];
+    if (head !== lastHead) { lastHead = head; try { tray && tray.setToolTip(m.slice(0, 120)); win.setTitle(m); } catch {} }
+    const now = Date.now();
+    if (info && info.phase === 'downloading' && info.pct < 100 && now - lastSent < 250) return;
+    lastSent = now;
+    if (info && win && !win.isDestroyed()) win.webContents.send('download:progress', { ...info, paused: library.isPaused() });
+  };
+  try {
+    const titles = {}; for (const t of items) titles[t.url] = (t.artist ? t.artist + ' - ' : '') + t.title;
+    const url = { urls: items.map((t) => t.url), name: folderOf, titles };
+    const extra = { sc: true, token: cfg.scToken || '' };
+    let res = await library.download(url, true, note, false, false, cfg.dlSpeed, extra);
+    if (!res.ok && !res.rateLimited && !(res.failed || []).length) res = await library.download(url, true, note, true, false, cfg.dlSpeed, extra); // a newer yt-dlp often fixes it
+    const n = res.files.length;
+    // which quality each song got: the original upload ("download" format) or SoundCloud's stream
+    const saved = (res.quality || []).map((q) => ({ name: q.title, reason: q.fid === 'download' ? `original file (${String(q.ext).toUpperCase()}), as uploaded` : `SoundCloud stream, ${String(q.ext).toUpperCase()}${q.abr ? ' ~' + Math.round(q.abr) + ' kbps' : ''}` }));
+    const orig = saved.filter((s) => /^original/.test(s.reason)).length;
+    buildMenu();
+    const detail = `${n ? `Saved ${n} song${n === 1 ? '' : 's'}: ${orig} original file${orig === 1 ? '' : 's'}, ${saved.length - orig} SoundCloud stream${saved.length - orig === 1 ? '' : 's'}.` : ''}${skipped ? ` ${skipped} were already in the folder.` : ''}${res.cancelled ? ' Stopped before the end: download again to continue.' : ''}${res.rateLimited && !res.cancelled ? ' SoundCloud asked Minapp to slow down: download again in a while and it continues.' : ''}`.trim();
+    const btn = await reportDialog({ message: n ? 'SoundCloud download finished' : 'Nothing was saved', detail: detail || (res.error || ''), failed: res.failed || [], saved, logName: 'soundcloud-download-' + folderOf, what: 'saved', buttons: n ? ['Play them', 'OK'] : ['OK'], type: n ? 'info' : 'warning' });
+    if (btn === 'Play them') await playLocal(path.basename(path.dirname(res.files[0])));
+  } catch (e) {
+    dialog.showMessageBox(win, { type: 'error', message: 'Download failed', detail: String((e && e.message) || e) });
+  } finally {
+    downloading = false; buildMenu();
     if (win && !win.isDestroyed()) { win.webContents.send('download:state', false); win.webContents.send('download:progress', null); }
   }
 }
@@ -1909,7 +2127,8 @@ ipcMain.handle('spotify:state', async () => {
     st.source = 'local';
     if (i >= 0 && localList.length > 1) { st.trackNo = i + 1; st.trackCount = localList.length; }
     const cur = localList[i];
-    if (cur && st.status !== 'stopped') { // the cover and album saved with a downloaded song
+    if (cur && cur.scId) { st.sc = true; st.art = cur.art || ''; st.album = ''; }
+    else if (cur && st.status !== 'stopped') { // the cover and album saved with a downloaded song
       if (localMeta.path !== cur.path) localMeta = { path: cur.path, art: library.artFor(cur.path), d: library.detailsFor(cur.path) }; // read from disk once per song, not on every poll
       const { art, d } = localMeta;
       st.art = art ? 'local:' + art : '';
@@ -2231,6 +2450,11 @@ function menuItems() {
     { label: 'YouTube link…', accelerator: 'CmdOrCtrl+Shift+Y', click: async () => { if (await chooseYouTube()) await setSource('youtube'); } },
     { label: 'YouTube Music (experiment)', type: 'radio', checked: source === 'ytmusic', click: () => setSource('ytmusic') },
     { label: 'YouTube account', submenu: accountMenu() },
+    { label: 'SoundCloud', submenu: [
+      readCfg().scToken ? { label: 'Sign out of SoundCloud', click: scSignOut } : { label: 'Sign in to SoundCloud…', click: scSignIn },
+      { label: 'Add a playlist link…', click: scAddLink },
+      { label: 'Open the SOUNDCLOUD folder in the playlist panel to play, copy or download', enabled: false },
+    ] },
     { label: 'Local playlists', type: 'radio', checked: source === 'local', click: () => setSource('local') },
     { label: 'Local library', submenu: [
       ...(library.playlists().length
@@ -2242,8 +2466,10 @@ function menuItems() {
       ...(downloading ? [{ label: library.isPaused() ? 'Resume download' : 'Pause download', click: () => { library.pause(!library.isPaused()); buildMenu(); } },
         { label: 'Stop download', click: () => library.cancel() }]
         : source === 'youtube' ? [{ label: 'Download current YouTube link (personal use)…', click: downloadCurrentYouTube }] : []),
+      ...(!downloading && source === 'local' && scNow ? [{ label: 'Download current SoundCloud list (best quality, personal use)…', click: downloadSoundCloud }] : []),
       ...(!downloading ? [{ label: 'Get missing covers…', click: fillMissingCovers }] : []),
-      { label: 'Save downloads as MP3 320 (works in every DJ app)', type: 'checkbox', checked: cfgOn('dlMp3', true), click: toggleCfg('dlMp3', true) },
+      { label: 'Open logs folder (what could not be found or saved)', click: () => { const d = path.join(app.getPath('userData'), 'logs'); fs.mkdirSync(d, { recursive: true }); shell.openPath(d); } },
+      { label: 'Save YouTube downloads as MP3 320 (works in every DJ app)', type: 'checkbox', checked: cfgOn('dlMp3', true), click: toggleCfg('dlMp3', true) },
       { label: 'Record button saves', submenu: [['list', 'The whole playlist'], ['song', 'Only the song that is playing']].map(([k, label]) => ({
         label, type: 'radio', checked: (readCfg().dlWhat || 'list') === k, click: () => { writeCfg({ dlWhat: k }); buildMenu(); },
       })) },
