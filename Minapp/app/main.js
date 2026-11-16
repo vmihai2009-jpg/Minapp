@@ -954,7 +954,7 @@ async function copyToYouTube(id, name, from) {
   const failed = [];
   try {
     copyNote(0, 0, 'Reading ' + name + '...');
-    const tracks = from === 'soundcloud' ? (await sc.tracksOf(id)).map((t) => ({ title: t.title, artist: t.artist })) : await spotPlaylistTracks(id, tok);
+    const tracks = from === 'soundcloud' ? (await scTracksCached(id)).map((t) => ({ title: t.title, artist: t.artist })) : await spotPlaylistTracks(id, tok);
     const ids = [];
     for (let i = 0; i < tracks.length && !copyStop; i++) {
       const t = tracks[i], nm = (t.artist ? t.artist + ' - ' : '') + t.title;
@@ -999,7 +999,7 @@ async function copyToSpotify(kind, id, name) {
   const failed = [];
   try {
     copyNote(0, 0, 'Reading ' + name + '...');
-    const vids = kind === 'soundcloud' ? (await sc.tracksOf(id)).map((t) => ({ title: t.title, channel: t.artist })) : await ytVids(kind, id);
+    const vids = kind === 'soundcloud' ? (await scTracksCached(id)).map((t) => ({ title: t.title, channel: t.artist })) : await ytVids(kind, id);
     const tok = await spotAccessToken();
     const uris = [];
     for (let i = 0; i < vids.length && !copyStop; i++) {
@@ -1107,7 +1107,7 @@ async function scAddLink() {
 }
 // the SoundCloud folder of the playlist panel; read at most every 5 minutes (or when asked), and never longer than 8 s
 async function scListsData(force) {
-  const links = (readCfg().scLinks || []).map((l) => ({ id: l.url, name: l.name }));
+  const links = [...(readCfg().scLinks || []).map((l) => ({ id: l.url, name: l.name })), ...(readCfg().scSaved || []).map((l) => ({ id: 'saved:' + l.name, name: l.name }))];
   if (!readCfg().scToken) return { signedIn: false, items: [], links };
   if (!force && scListsCache && Date.now() - scListsAt < 300000) return { ...scListsCache, links };
   try {
@@ -1174,9 +1174,15 @@ async function copyToSoundCloud(kind, id, name) {
     }
     if (!ids.length) { await reportDialog({ message: copyStop ? 'Stopped.' : 'Nothing found on SoundCloud', failed, logName: 'copy-to-soundcloud-' + name, what: 'found' }); return; }
     copyNote(0, ids.length, 'Saving to your SoundCloud account...');
-    const r = await sc.makePlaylist(name, ids);
+    let r = null, why = '';
+    try { r = await sc.makePlaylist(name, ids); } catch (e) { if (e && e.auth) throw e; why = e.message; log('soundcloud playlist create: ' + why); }
     scListsCache = null;
-    await reportDialog({ message: `Made "${name}" on SoundCloud with ${r.added} of ${tracks.length} songs`, detail: 'It is a private playlist on your account, and under SOUNDCLOUD in the playlist panel.', failed, logName: 'copy-to-soundcloud-' + name, what: 'found' });
+    if (r) await reportDialog({ message: `Made "${name}" on SoundCloud with ${r.added} of ${tracks.length} songs`, detail: 'It is a private playlist on your account, and under SOUNDCLOUD in the playlist panel.', failed, logName: 'copy-to-soundcloud-' + name, what: 'found' });
+    else {
+      // SoundCloud would not let Minapp create the playlist on the account (its security check): keep it in Minapp instead
+      writeCfg({ scSaved: [{ name, ids }, ...(readCfg().scSaved || []).filter((x) => x.name !== name)].slice(0, 50) });
+      await reportDialog({ message: `Saved "${name}" in Minapp with ${ids.length} of ${tracks.length} songs`, detail: 'SoundCloud would not let Minapp create it on your account (its security check), so it is kept in Minapp instead: under SOUNDCLOUD in the playlist panel. It plays there and can be downloaded at the best quality.\n\nSoundCloud said: ' + why.slice(0, 140), failed, logName: 'copy-to-soundcloud-' + name, what: 'found' });
+    }
   } catch (e) {
     if (e && e.auth) { writeCfg({ scToken: null }); sc.forget(); }
     dialog.showMessageBox(win, { type: 'error', message: 'Could not copy the playlist', detail: e && e.auth ? 'Your SoundCloud sign-in has expired. Sign in again (SoundCloud menu), then retry.' : e && e.blocked ? String(e.message) + '\n\nYour sign-in was kept. SoundCloud menu > Test connection shows which step fails.' : String((e && e.message) || e) });
@@ -1184,7 +1190,10 @@ async function copyToSoundCloud(kind, id, name) {
 }
 // play a SoundCloud list (or the given tracks) through the local player; each song's stream address is looked up when it starts
 const scCache = { id: '', tracks: [] };
-async function scTracksCached(id) { if (scCache.id === id && scCache.tracks.length) return scCache.tracks; const tracks = await sc.tracksOf(id); Object.assign(scCache, { id, tracks }); return tracks; }
+async function scTracksCached(id) {
+  if (scCache.id === id && scCache.tracks.length) return scCache.tracks;
+  const saved = /^saved:/.test(id) ? (readCfg().scSaved || []).find((x) => x.name === id.slice(6)) : null;
+  const tracks = saved ? await sc.tracksByIds(saved.ids) : await sc.tracksOf(id); Object.assign(scCache, { id, tracks }); return tracks; }
 async function playSoundCloud(id, name, start = 0, given) {
   let tracks;
   try { tracks = given || await scTracksCached(id); } catch (e) { dialog.showMessageBox(win, { type: 'error', message: 'Could not open that SoundCloud list', detail: e.message }); return; }
