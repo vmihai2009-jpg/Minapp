@@ -1168,7 +1168,7 @@ async function copyToSoundCloud(kind, id, name) {
     await reportDialog({ message: `Made "${name}" on SoundCloud with ${r.added} of ${tracks.length} songs`, detail: 'It is a private playlist on your account, and under SOUNDCLOUD in the playlist panel.', failed, logName: 'copy-to-soundcloud-' + name, what: 'found' });
   } catch (e) {
     if (e && e.auth) { writeCfg({ scToken: null }); sc.forget(); }
-    dialog.showMessageBox(win, { type: 'error', message: 'Could not copy the playlist', detail: e && e.auth ? 'Your SoundCloud sign-in has expired. Sign in again (SoundCloud menu), then retry.' : e && e.blocked ? 'SoundCloud refused Minapp\'s request (its bot protection, or a token that no longer works). Your sign-in was kept. Try again in a minute; if it keeps happening, paste a fresh token (SoundCloud menu).' : String((e && e.message) || e) });
+    dialog.showMessageBox(win, { type: 'error', message: 'Could not copy the playlist', detail: e && e.auth ? 'Your SoundCloud sign-in has expired. Sign in again (SoundCloud menu), then retry.' : e && e.blocked ? String(e.message) + '\n\nYour sign-in was kept. SoundCloud menu > Test connection shows which step fails.' : String((e && e.message) || e) });
   } finally { await copyBar(false); }
 }
 // play a SoundCloud list (or the given tracks) through the local player; each song's stream address is looked up when it starts
@@ -2481,6 +2481,7 @@ function menuItems() {
       readCfg().scToken ? { label: 'Sign out of SoundCloud', click: scSignOut } : { label: 'Sign in to SoundCloud…', click: scSignIn },
       ...(readCfg().scToken ? [] : [{ label: 'Sign in with a token (if the page says "blocked")…', click: scSignInToken }]),
       { label: 'Add a playlist link…', click: scAddLink },
+      { label: 'Test connection…', click: async () => { const r = await sc.selfTest(); dialog.showMessageBox(win, { message: 'SoundCloud connection test', detail: r.map((x) => `${x.ok ? 'OK ' : 'FAILED '} ${x.step}: ${x.note}`).join('\n\n'), type: r.every((x) => x.ok) ? 'info' : 'warning' }); } },
       { label: 'Open the SOUNDCLOUD folder in the playlist panel to play, copy or download', enabled: false },
     ] },
     { label: 'Local playlists', type: 'radio', checked: source === 'local', click: () => setSource('local') },
