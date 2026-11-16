@@ -157,11 +157,16 @@ function create({ log, getToken, page }) {
     const prog = tcs.find((x) => proto(x, 'progressive'));
     const hlsMp3 = tcs.find((x) => proto(x, 'hls') && /mpeg/.test(x.format.mime_type || ''));
     const hlsAac = tcs.find((x) => proto(x, 'hls') && /mp4/.test(x.format.mime_type || ''));
-    const tc = prog || hlsMp3 || hlsAac;
-    if (!tc) { const e = new Error(`SoundCloud offers no playable stream for "${t.title}" (${t.policy || 'no policy'}; it may be preview-only, region-locked or Go+ only)`); e.noStream = true; throw e; }
+    const hlsOpus = tcs.find((x) => proto(x, 'hls') && /opus|ogg/.test(x.format.mime_type || ''));
+    const tc = prog || hlsMp3 || hlsAac || hlsOpus;
+    if (!tc) {
+      const offered = tcs.length ? tcs.map((x) => `${x.format && x.format.protocol} ${x.format && x.format.mime_type}`).join('; ') : 'no formats at all';
+      const e = new Error(`SoundCloud offers no playable stream for "${t.title}" (policy ${t.policy || 'unknown'}, formats: ${offered}). Tracks of this kind are often only playable in SoundCloud's own apps or with Go+.`);
+      e.noStream = true; throw e;
+    }
     const j = await api(tc.url, { track_authorization: t.track_authorization || '' });
     if (!j.url) throw new Error('SoundCloud gave no stream address');
-    const out = { url: j.url, hls: tc !== prog, mime: tc === hlsAac ? 'audio/mp4; codecs="mp4a.40.2"' : 'audio/mpeg' };
+    const out = { url: j.url, hls: tc !== prog, mime: tc === hlsAac ? 'audio/mp4; codecs="mp4a.40.2"' : tc === hlsOpus ? 'audio/ogg; codecs="opus"' : 'audio/mpeg' };
     streams.set(id, { out, at: Date.now() });
     return out;
   }

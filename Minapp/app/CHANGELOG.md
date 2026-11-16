@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.53
+- SoundCloud: tracks that only come as Opus streams now play (they load fully first), and when a song truly has no playable stream the message lists the formats SoundCloud offered for it.
+
 ## 1.9.52
 - SoundCloud: songs that SoundCloud only offers as a chopped-up stream (most DJ mixes and many tracks) now play: Minapp joins the pieces as they arrive. Playing begins after the first piece; seeking far ahead waits for that part to load.
 
