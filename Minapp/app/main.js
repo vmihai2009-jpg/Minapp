@@ -1676,8 +1676,16 @@ ipcMain.handle('lists:play', async (_e, kind, id, name) => {
     const group = what === 'spotify' ? 'spotify' : what === 'soundcloud' ? 'soundcloud' : 'youtube';
     const labels = { spotify: 'Spotify', youtube: 'YouTube (and YT Music)', soundcloud: 'SoundCloud', download: 'Download to this computer (best quality)', sorted: 'A sorted copy on Spotify (experimental)', spotdl: 'Download to this computer (experimental)' };
     const targets = Object.keys(labels).filter((x) => ((x === 'sorted' || x === 'spotdl') ? group === 'spotify' && readCfg().expOn : x !== group && (x !== 'download' || group === 'soundcloud')));
-    const r = await dialog.showMessageBox(win, { type: 'question', message: `Copy "${nm}" to:`, detail: 'This makes a new playlist there. Nothing is deleted. Afterwards you get a list of every song that could not be found.', buttons: [...targets.map((x) => labels[x]), 'Cancel'], defaultId: 0, cancelId: targets.length });
-    const to = targets[r.response];
+    // a drop-down menu at the pointer (not a dialog): every option for this list, experimental ones when unlocked
+    const to = await new Promise((resolve) => {
+      let picked = false;
+      const pick = (v) => () => { picked = true; resolve(v); };
+      const items = [{ label: `"${nm.slice(0, 40)}"`, enabled: false }, { type: 'separator' },
+        ...targets.map((x) => ({ label: (['spotify', 'youtube', 'soundcloud'].includes(x) ? 'Copy to ' : '') + labels[x], click: pick(x) }))];
+      if (group === 'spotify' && !readCfg().expOn) items.push({ type: 'separator' }, { label: 'Unlock experimental options…', click: () => { picked = true; resolve(null); experimentalMenu(); } });
+      items.push({ type: 'separator' }, { label: 'Cancel', click: pick(null) });
+      Menu.buildFromTemplate(items).popup({ window: win, callback: () => { if (!picked) resolve(null); } });
+    });
     if (!to) return;
     if (to === 'spotdl') return spotDownload(/^spotify:user:/.test(id) ? 'liked' : String(id).split(':').pop(), nm);
     if (to === 'sorted') return spotSortedCopy(/^spotify:user:/.test(id) ? 'liked' : String(id).split(':').pop(), nm);
