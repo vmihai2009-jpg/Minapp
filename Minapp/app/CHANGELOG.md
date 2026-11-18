@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.59
+- Experimental Spotify download: the report now marks every file whose source audio is under 192 kbps as LOW QUALITY.
+
 ## 1.9.58
 - Experimental (personal use): right-click a Spotify playlist > Copy to… > "Download to this computer (experimental)". Each song is matched to its YouTube version (by artist, title and length) and saved (MP3 320 if that option is on). The report afterwards states the real quality of every file (source format and bitrate) so the "320" claim can be checked: it is a 320 file made from YouTube's own stream, so it holds no more detail than that stream.
 
