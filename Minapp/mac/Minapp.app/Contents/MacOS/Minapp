@@ -77,6 +77,7 @@ build_engine() {
   setp NSAudioCaptureUsageDescription "Minapp listens to the music that is playing so the visualizer can move with it."
   setp NSScreenCaptureUsageDescription "Minapp listens to the music that is playing so the visualizer can move with it. It never records the screen."
   setp NSAppleEventsUsageDescription "Minapp reads what the Spotify app is playing and sends it play, pause and skip commands."
+  rebrand_engine "$E" || fail "Could not name the engine."
   # the file was modified, so give it a fresh (ad-hoc, free) signature; Apple silicon refuses unsigned code
   xattr -cr "$E" 2>/dev/null
   codesign --force --deep --sign - "$E" >/dev/null 2>&1
@@ -87,10 +88,31 @@ build_engine() {
   stop_wait
 }
 
+# Names the program and its helper processes Minapp (they say "Electron" in Activity Monitor otherwise).
+# Safe to run again: does nothing once renamed. Run before the ad-hoc signing.
+rebrand_engine() {
+  local C="$1/Contents" PB=/usr/libexec/PlistBuddy h n P
+  [ -f "$C/MacOS/Electron" ] || return 0
+  mv "$C/MacOS/Electron" "$C/MacOS/Minapp" || return 1
+  "$PB" -c "Set :CFBundleExecutable Minapp" "$C/Info.plist" 2>/dev/null
+  for h in "Electron Helper" "Electron Helper (Renderer)" "Electron Helper (GPU)" "Electron Helper (Plugin)"; do
+    n="${h/Electron/Minapp}"
+    [ -d "$C/Frameworks/$h.app" ] || continue
+    mv "$C/Frameworks/$h.app" "$C/Frameworks/$n.app"
+    mv "$C/Frameworks/$n.app/Contents/MacOS/$h" "$C/Frameworks/$n.app/Contents/MacOS/$n"
+    P="$C/Frameworks/$n.app/Contents/Info.plist"
+    "$PB" -c "Set :CFBundleName $n" "$P" 2>/dev/null
+    "$PB" -c "Set :CFBundleDisplayName $n" "$P" 2>/dev/null || "$PB" -c "Add :CFBundleDisplayName string $n" "$P" 2>/dev/null
+    "$PB" -c "Set :CFBundleIdentifier com.minapp.player.helper${n#Minapp Helper}" "$P" 2>/dev/null
+  done
+  return 0
+}
+engine_bin() { [ -f "$1/Contents/MacOS/Minapp" ] && echo "$1/Contents/MacOS/Minapp" || echo "$1/Contents/MacOS/Electron"; }
+
 # an engine built for the wrong chip (Intel code on an Apple chip runs slowly under Rosetta) is rebuilt
 wrong_chip() {
   [ "$ARCH" = "arm64" ] || return 1
-  local bin="$ENGINE/Contents/MacOS/Electron" a
+  local bin="$(engine_bin "$ENGINE")" a
   [ -f "$bin" ] || return 1
   a="$(file -b "$bin" 2>/dev/null)"
   [ -z "$a" ] && return 1
@@ -102,4 +124,8 @@ if [ ! -d "$ENGINE" ] || [ "$(cat "$ENGINE_DIR/.version" 2>/dev/null)" != "$WANT
 fi
 
 [ -d "$ENGINE" ] || fail "Minapp is not set up correctly. Open it again to retry."
+# an engine built before the rename still has the "Electron" program name: rename it now (only when Minapp is not running)
+if [ -f "$ENGINE/Contents/MacOS/Electron" ] && ! pgrep -f "^$ENGINE/Contents/" >/dev/null 2>&1; then
+  rebrand_engine "$ENGINE" && { xattr -cr "$ENGINE" 2>/dev/null; codesign --force --deep --sign - "$ENGINE" >/dev/null 2>&1; }
+fi
 open "$ENGINE"
