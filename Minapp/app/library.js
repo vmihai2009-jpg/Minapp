@@ -300,8 +300,8 @@ function create({ dir, binDir, log }) {
   // the videos of a playlist link: [{ id, title, channel }]
   async function ytEntries(url) {
     await ensureBin();
-    const out = await ytRun(['--flat-playlist', '--print', '%(id)s\t%(title)s\t%(channel,uploader)s', '--', url], 180000);
-    return out.split(/\r?\n/).map((l) => l.split('\t')).filter((x) => /^[\w-]{11}$/.test(x[0])).map(([id, title, channel]) => ({ id, title: title || '', channel: channel === 'NA' ? '' : channel || '' }));
+    const out = await ytRun(['--flat-playlist', '--print', '%(id)s\t%(title)s\t%(channel,uploader)s\t%(duration)s', '--', url], 180000);
+    return out.split(/\r?\n/).map((l) => l.split('\t')).filter((x) => /^[\w-]{11}$/.test(x[0])).map(([id, title, channel, dur]) => ({ id, title: title || '', channel: channel === 'NA' ? '' : channel || '', ms: Number(dur) > 0 ? Math.round(Number(dur) * 1000) : 0 }));
   }
   // ----- downloading a list again = bringing that local playlist up to date -----
   // Works out which songs of a list are already in its folder: from the folder's done-list, the video ids saved with each

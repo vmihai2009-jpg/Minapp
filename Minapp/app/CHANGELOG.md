@@ -1,5 +1,10 @@
 # What's new in Minapp
 
+## 1.9.57
+- Copying playlists (Spotify, YouTube, SoundCloud) finds the right song far more often: every search result is scored on artist, title and length (live, karaoke, cover and remix versions lose to the real one), and several search wordings and a retry are tried before giving up.
+- The list at the end now has a second section, "please check", for songs where a close but not certain match was used, next to the songs that could not be found.
+- Experimental (personal use): menu > Experimental, code 1234. Then right-click a Spotify playlist > Copy to… > "A sorted copy on Spotify" sorts it by tempo, key (DJ wheel), energy or danceability into a new playlist. Not yet tested against a real account.
+
 ## 1.9.55
 - SoundCloud: right-click a SoundCloud playlist (or Liked tracks) > "Download to this computer (best quality)" downloads it without having to play it first.
 
