@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.60
+- Right-clicking a playlist and choosing Copy now opens a drop-down menu with every option (copy to Spotify / YouTube / SoundCloud, download, and the experimental ones) instead of a dialog. If the experimental options are locked, the menu has "Unlock experimental options…" (code 1234).
+
 ## 1.9.59
 - Experimental Spotify download: the report now marks every file whose source audio is under 192 kbps as LOW QUALITY.
 
