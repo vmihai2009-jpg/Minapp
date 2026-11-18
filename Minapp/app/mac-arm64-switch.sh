@@ -9,6 +9,27 @@ CACHE="$SUP/downloads"
 NEW="$SUP/engine.arm64"
 LOG() { mkdir -p "$SUP"; echo "$(date '+%Y-%m-%d %H:%M:%S') [arm64-switch] $*" >> "$SUP/bridge.log"; }
 
+# Names the program and its helper processes Minapp (they say "Electron" in Activity Monitor otherwise).
+# Safe to run again: does nothing once renamed. Run before the ad-hoc signing.
+rebrand_engine() {
+  local C="$1/Contents" PB=/usr/libexec/PlistBuddy h n P
+  [ -f "$C/MacOS/Electron" ] || return 0
+  mv "$C/MacOS/Electron" "$C/MacOS/Minapp" || return 1
+  "$PB" -c "Set :CFBundleExecutable Minapp" "$C/Info.plist" 2>/dev/null
+  for h in "Electron Helper" "Electron Helper (Renderer)" "Electron Helper (GPU)" "Electron Helper (Plugin)"; do
+    n="${h/Electron/Minapp}"
+    [ -d "$C/Frameworks/$h.app" ] || continue
+    mv "$C/Frameworks/$h.app" "$C/Frameworks/$n.app"
+    mv "$C/Frameworks/$n.app/Contents/MacOS/$h" "$C/Frameworks/$n.app/Contents/MacOS/$n"
+    P="$C/Frameworks/$n.app/Contents/Info.plist"
+    "$PB" -c "Set :CFBundleName $n" "$P" 2>/dev/null
+    "$PB" -c "Set :CFBundleDisplayName $n" "$P" 2>/dev/null || "$PB" -c "Add :CFBundleDisplayName string $n" "$P" 2>/dev/null
+    "$PB" -c "Set :CFBundleIdentifier com.minapp.player.helper${n#Minapp Helper}" "$P" 2>/dev/null
+  done
+  return 0
+}
+engine_bin() { [ -f "$1/Contents/MacOS/Minapp" ] && echo "$1/Contents/MacOS/Minapp" || echo "$1/Contents/MacOS/Electron"; }
+
 has_arm64() { file -b "$1" 2>/dev/null | grep -q arm64; }
 # true on an Apple chip, also when this script itself is being run through Rosetta
 apple_chip() { [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ] || [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = "1" ]; }
@@ -16,7 +37,7 @@ apple_chip() { [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ] || [ "$(sy
 build() {
   VER="$1"
   [ -n "$VER" ] || { LOG "no Electron version given"; exit 1; }
-  if ! apple_chip || has_arm64 "$ENGINE/Contents/MacOS/Electron"; then
+  if ! apple_chip || has_arm64 "$(engine_bin "$ENGINE")"; then
     echo skip; exit 0
   fi
   mkdir -p "$CACHE"
@@ -43,11 +64,12 @@ build() {
   setp NSAudioCaptureUsageDescription "Minapp listens to the music that is playing so the visualizer can move with it."
   setp NSScreenCaptureUsageDescription "Minapp listens to the music that is playing so the visualizer can move with it. It never records the screen."
   setp NSAppleEventsUsageDescription "Minapp reads what the Spotify app is playing and sends it play, pause and skip commands."
+  rebrand_engine "$E" || { rm -rf "$NEW"; LOG "could not rename the engine"; exit 1; }
   xattr -cr "$E" 2>/dev/null
   codesign --force --deep --sign - "$E" >/dev/null 2>&1
   cp "$ENGINE_DIR/.version" "$NEW/.version" 2>/dev/null
   rm -rf "$NEW/x"
-  if has_arm64 "$E/Contents/MacOS/Electron" && codesign --verify --deep "$E" >/dev/null 2>&1; then
+  if has_arm64 "$(engine_bin "$E")" && codesign --verify --deep "$E" >/dev/null 2>&1; then
     LOG "native engine ready"
     echo ready; exit 0
   fi

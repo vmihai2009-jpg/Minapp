@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.61
+- Mac: the player engine and its helper programs are now named Minapp (Activity Monitor showed "Electron" and "Electron Helper"). New or rebuilt engines get the names automatically, and an existing engine is renamed the next time Minapp is started from its launcher while closed. Tested on a copy of the engine on the Mac; the signature is renewed, so macOS may ask once more for the visualizer permission.
+
 ## 1.9.60
 - Right-clicking a playlist and choosing Copy now opens a drop-down menu with every option (copy to Spotify / YouTube / SoundCloud, download, and the experimental ones) instead of a dialog. If the experimental options are locked, the menu has "Unlock experimental options…" (code 1234).
 
