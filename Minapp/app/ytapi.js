@@ -79,8 +79,8 @@ function create({ shell, dialog, readCfg, writeCfg, askText, getWin, log, onChan
   async function titles(ids) {
     const out = [];
     for (let i = 0; i < ids.length; i += 50) {
-      const j = await api('videos', { part: 'snippet', id: ids.slice(i, i + 50).join(',') });
-      for (const v of j.items || []) out.push({ id: v.id, title: v.snippet.title, channel: v.snippet.channelTitle });
+      const j = await api('videos', { part: 'snippet,contentDetails', id: ids.slice(i, i + 50).join(',') });
+      for (const v of j.items || []) { const m = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec((v.contentDetails && v.contentDetails.duration) || ''); out.push({ id: v.id, title: v.snippet.title, channel: v.snippet.channelTitle, ms: m ? ((+m[1] || 0) * 3600 + (+m[2] || 0) * 60 + (+m[3] || 0)) * 1000 : 0 }); }
     }
     return out;
   }
