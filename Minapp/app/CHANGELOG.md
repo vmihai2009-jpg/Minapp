@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.58
+- Experimental (personal use): right-click a Spotify playlist > Copy to… > "Download to this computer (experimental)". Each song is matched to its YouTube version (by artist, title and length) and saved (MP3 320 if that option is on). The report afterwards states the real quality of every file (source format and bitrate) so the "320" claim can be checked: it is a 320 file made from YouTube's own stream, so it holds no more detail than that stream.
+
 ## 1.9.57
 - Copying playlists (Spotify, YouTube, SoundCloud) finds the right song far more often: every search result is scored on artist, title and length (live, karaoke, cover and remix versions lose to the real one), and several search wordings and a retry are tried before giving up.
 - The list at the end now has a second section, "please check", for songs where a close but not certain match was used, next to the songs that could not be found.

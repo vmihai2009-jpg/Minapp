@@ -1125,13 +1125,62 @@ async function spotSortedCopy(id, name) {
     dialog.showMessageBox(win, { type: 'error', message: 'Could not sort the playlist', detail: String((e && e.message) || e) });
   } finally { await copyBar(false); }
 }
+// Experimental: download a Spotify playlist. Spotify's own audio is protected, so (like unstream) each song is matched to its YouTube upload and
+// that is downloaded. Every file's real source quality is measured and written in the report, to check the "320" claim: the MP3 is 320 kbps,
+// but it is made from YouTube's own stream (usually about 130-160 kbps), so it holds no more detail than that stream.
+async function spotDownload(id, name) {
+  if (downloading || copying) return;
+  const cfg = readCfg();
+  if (!cfg.spotRefresh) { dialog.showMessageBox(win, { message: 'Connect Spotify first', detail: 'Open the SPOTIFY folder in the playlist panel and click Connect.' }); return; }
+  const mp3 = cfgOn('dlMp3', true);
+  const go = await dialog.showMessageBox(win, { type: 'question', buttons: ['Download', 'Cancel'], defaultId: 1, cancelId: 1,
+    message: `Download "${name}" to this computer?`,
+    detail: 'Experimental, for your personal use only. Spotify does not allow downloads, and most music is copyrighted: only keep what you have the right to keep.\n\nSpotify itself is not copied. Each song is matched to its YouTube version (by artist, title and length) and that is saved' + (mp3 ? ' as MP3 320' : '') + '. You get a report afterwards with the real quality of each file and any song that was matched less surely.',
+    });
+  if (go.response !== 0) return;
+  writeCfg({ dlOk: true });
+  await copyBar(true);
+  const failed = [], uncertain = [];
+  let res = null, folder = '';
+  const note = (m, info) => { try { win.setTitle(m.slice(0, 120)); } catch {} if (info && win && !win.isDestroyed()) win.webContents.send('download:progress', { ...info, paused: library.isPaused() }); };
+  try {
+    const tok = await spotAccessToken();
+    copyNote(0, 0, 'Reading ' + name + '...');
+    const tracks = await spotPlaylistTracks(id, tok);
+    const ids = [], names = [];
+    for (let i = 0; i < tracks.length && !copyStop; i++) {
+      const t = tracks[i], nm = (t.artist ? t.artist + ' - ' : '') + t.title;
+      copyNote(i + 1, tracks.length, 'Matching: ' + t.title);
+      let f = { id: '' }, why = 'No close match on YouTube (only other songs came up)';
+      try { f = await findOnYouTube(t); } catch (e) { why = 'YouTube search failed: ' + e.message; }
+      if (f.id && !ids.includes(f.id)) { ids.push(f.id); names.push(nm); if (f.level === 'maybe') uncertain.push({ name: nm, reason: 'used "' + f.got + '"' + (f.why ? ' (' + f.why + ')' : '') }); }
+      else if (!f.id) failed.push({ name: nm, reason: why });
+    }
+    if (copyStop || !ids.length) { await reportDialog({ message: copyStop ? 'Stopped.' : 'Nothing was matched', failed, uncertain, logName: 'spotify-download-' + name, what: 'found' }); return; }
+    copyBar(false); downloading = true; buildMenu(); win.webContents.send('download:state', true);
+    const url = { ids, name };
+    res = await library.download(url, true, note, false, mp3, cfg.dlSpeed);
+    if (!res.ok && !res.rateLimited) res = await library.download(url, true, note, true, mp3, cfg.dlSpeed);
+    (res.failed || []).forEach((f) => failed.push(f));
+    folder = res.files.length ? path.basename(path.dirname(res.files[0])) : '';
+    const q = res.quality || [];
+    const lines = q.map((x) => ({ name: x.title || '?', reason: `source: ${x.ext || '?'} ${x.abr ? Math.round(x.abr) + ' kbps' : '(rate unknown)'}${x.asr ? ', ' + x.asr + ' Hz' : ''}${mp3 ? ' -> saved as MP3 320 (re-encoded)' : ' (kept as is)'}` }));
+    const rates = q.map((x) => x.abr).filter((x) => x > 0), avg = rates.length ? Math.round(rates.reduce((a, b) => a + b, 0) / rates.length) : 0;
+    const fact = avg ? `Quality check: the YouTube audio these files came from averaged ${avg} kbps (best ${Math.round(Math.max(...rates))}).${mp3 ? ' They are saved as MP3 320 so every DJ app plays them, but a 320 file made from a ~' + avg + ' kbps source sounds like the source: the label is 320, the detail is not.' : ''} Spotify itself streams about 160 kbps (free) to 320 kbps (Premium, Very high).` : 'Quality check: the source quality was not reported for these files.';
+    const n = res.files.length;
+    const r = await reportDialog({ message: n ? `Saved ${n} of ${tracks.length} songs to your local library` : 'Nothing was saved', detail: fact, failed, uncertain, saved: lines, logName: 'spotify-download-' + name, what: 'found', buttons: n ? ['Play them', 'OK'] : ['OK'], type: n ? 'info' : 'warning' });
+    if (r === 'Play them' && folder) await playLocal(folder);
+  } catch (e) {
+    dialog.showMessageBox(win, { type: 'error', message: 'Could not download the playlist', detail: String((e && e.message) || e) });
+  } finally { downloading = false; copying = false; copyStop = false; try { win.webContents.send('download:state', false); win.webContents.send('download:progress', null); } catch {} buildMenu(); }
+}
 async function experimentalMenu() {
   if (!readCfg().expOn) {
     const code = await askText({ title: 'Experimental features', label: 'Personal-use extras. Enter the code:', placeholder: 'code', button: 'Unlock' });
     if (code == null) return;
     if (String(code).trim() !== EXP_CODE) { dialog.showMessageBox(win, { message: 'Wrong code' }); return; }
     writeCfg({ expOn: true }); buildMenu();
-    dialog.showMessageBox(win, { message: 'Experimental features unlocked', detail: 'Right-click a Spotify playlist in the playlist panel > Copy to… > "A sorted copy on Spotify (experimental)". Sorts by tempo, key (DJ wheel), energy or danceability.' });
+    dialog.showMessageBox(win, { message: 'Experimental features unlocked', detail: 'Right-click a Spotify playlist in the playlist panel > Copy to… > "A sorted copy on Spotify (experimental)". Sorts by tempo, key (DJ wheel), energy or danceability. Or "Download to this computer (experimental)" (saves the songs, with a real-quality report).' });
   }
 }
 
@@ -1624,11 +1673,12 @@ ipcMain.handle('lists:play', async (_e, kind, id, name) => {
     const what = kind.slice(5), nm = String(name || 'Playlist').slice(0, 100);
     // where to: every service except the one the list comes from
     const group = what === 'spotify' ? 'spotify' : what === 'soundcloud' ? 'soundcloud' : 'youtube';
-    const labels = { spotify: 'Spotify', youtube: 'YouTube (and YT Music)', soundcloud: 'SoundCloud', download: 'Download to this computer (best quality)', sorted: 'A sorted copy on Spotify (experimental)' };
-    const targets = Object.keys(labels).filter((x) => (x === 'sorted' ? group === 'spotify' && readCfg().expOn : x !== group && (x !== 'download' || group === 'soundcloud')));
+    const labels = { spotify: 'Spotify', youtube: 'YouTube (and YT Music)', soundcloud: 'SoundCloud', download: 'Download to this computer (best quality)', sorted: 'A sorted copy on Spotify (experimental)', spotdl: 'Download to this computer (experimental)' };
+    const targets = Object.keys(labels).filter((x) => ((x === 'sorted' || x === 'spotdl') ? group === 'spotify' && readCfg().expOn : x !== group && (x !== 'download' || group === 'soundcloud')));
     const r = await dialog.showMessageBox(win, { type: 'question', message: `Copy "${nm}" to:`, detail: 'This makes a new playlist there. Nothing is deleted. Afterwards you get a list of every song that could not be found.', buttons: [...targets.map((x) => labels[x]), 'Cancel'], defaultId: 0, cancelId: targets.length });
     const to = targets[r.response];
     if (!to) return;
+    if (to === 'spotdl') return spotDownload(/^spotify:user:/.test(id) ? 'liked' : String(id).split(':').pop(), nm);
     if (to === 'sorted') return spotSortedCopy(/^spotify:user:/.test(id) ? 'liked' : String(id).split(':').pop(), nm);
     if (to === 'download') {
       let tr;
@@ -2664,7 +2714,7 @@ function menuItems() {
         : source === 'youtube' ? [{ label: 'Download current YouTube link (personal use)…', click: downloadCurrentYouTube }] : []),
       ...(!downloading && source === 'local' && scNow ? [{ label: 'Download current SoundCloud list (best quality, personal use)…', click: downloadSoundCloud }] : []),
       ...(!downloading ? [{ label: 'Get missing covers…', click: fillMissingCovers }] : []),
-      readCfg().expOn ? { label: 'Experimental (on, personal use)', submenu: [{ label: 'Sort a Spotify playlist: right-click it > Copy to… > sorted copy', enabled: false }, { label: 'Lock experimental features', click: () => { writeCfg({ expOn: false }); buildMenu(); } }] } : { label: 'Experimental (personal use)…', click: experimentalMenu },
+      readCfg().expOn ? { label: 'Experimental (on, personal use)', submenu: [{ label: 'Right-click a Spotify playlist > Copy to… > sorted copy, or download', enabled: false }, { label: 'Lock experimental features', click: () => { writeCfg({ expOn: false }); buildMenu(); } }] } : { label: 'Experimental (personal use)…', click: experimentalMenu },
       { label: 'Open logs folder (what could not be found or saved)', click: () => { const d = path.join(app.getPath('userData'), 'logs'); fs.mkdirSync(d, { recursive: true }); shell.openPath(d); } },
       { label: 'Save YouTube downloads as MP3 320 (works in every DJ app)', type: 'checkbox', checked: cfgOn('dlMp3', true), click: toggleCfg('dlMp3', true) },
       { label: 'Record button saves', submenu: [['list', 'The whole playlist'], ['song', 'Only the song that is playing']].map(([k, label]) => ({
