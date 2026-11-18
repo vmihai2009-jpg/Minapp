@@ -1164,9 +1164,10 @@ async function spotDownload(id, name) {
     (res.failed || []).forEach((f) => failed.push(f));
     folder = res.files.length ? path.basename(path.dirname(res.files[0])) : '';
     const q = res.quality || [];
-    const lines = q.map((x) => ({ name: x.title || '?', reason: `source: ${x.ext || '?'} ${x.abr ? Math.round(x.abr) + ' kbps' : '(rate unknown)'}${x.asr ? ', ' + x.asr + ' Hz' : ''}${mp3 ? ' -> saved as MP3 320 (re-encoded)' : ' (kept as is)'}` }));
+    const low = q.filter((x) => x.abr > 0 && x.abr < 192).length;
+    const lines = q.map((x) => ({ name: (x.abr > 0 && x.abr < 192 ? 'LOW QUALITY (under 192 kbps) - ' : '') + (x.title || '?'), reason: `source: ${x.ext || '?'} ${x.abr ? Math.round(x.abr) + ' kbps' : '(rate unknown)'}${x.asr ? ', ' + x.asr + ' Hz' : ''}${mp3 ? ' -> saved as MP3 320 (re-encoded)' : ' (kept as is)'}` }));
     const rates = q.map((x) => x.abr).filter((x) => x > 0), avg = rates.length ? Math.round(rates.reduce((a, b) => a + b, 0) / rates.length) : 0;
-    const fact = avg ? `Quality check: the YouTube audio these files came from averaged ${avg} kbps (best ${Math.round(Math.max(...rates))}).${mp3 ? ' They are saved as MP3 320 so every DJ app plays them, but a 320 file made from a ~' + avg + ' kbps source sounds like the source: the label is 320, the detail is not.' : ''} Spotify itself streams about 160 kbps (free) to 320 kbps (Premium, Very high).` : 'Quality check: the source quality was not reported for these files.';
+    const fact = avg ? (low ? `${low} of ${q.length} files are under 192 kbps (marked LOW QUALITY in the full list). ` : '') + `Quality check: the YouTube audio these files came from averaged ${avg} kbps (best ${Math.round(Math.max(...rates))}).${mp3 ? ' They are saved as MP3 320 so every DJ app plays them, but a 320 file made from a ~' + avg + ' kbps source sounds like the source: the label is 320, the detail is not.' : ''} Spotify itself streams about 160 kbps (free) to 320 kbps (Premium, Very high).` : 'Quality check: the source quality was not reported for these files.';
     const n = res.files.length;
     const r = await reportDialog({ message: n ? `Saved ${n} of ${tracks.length} songs to your local library` : 'Nothing was saved', detail: fact, failed, uncertain, saved: lines, logName: 'spotify-download-' + name, what: 'found', buttons: n ? ['Play them', 'OK'] : ['OK'], type: n ? 'info' : 'warning' });
     if (r === 'Play them' && folder) await playLocal(folder);
