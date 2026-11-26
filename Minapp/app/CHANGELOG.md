@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.63
+- Crate Digger: "Generate CSV for Crate Digger" (and Port playlist > Crate Digger) now writes the exact layout Crate Digger imports (Track URI, Track Name, Album Name, Artist Name(s), Release Date, Duration). Spotify lists carry the track link and every artist, so Crate Digger can de-duplicate and search better.
+
 ## 1.9.62
 - Simpler menus. The MENU button and the right-click menu now show about ten things instead of twenty-five. Source (Spotify / YouTube / YT Music / Local, YouTube link, show video, Open Spotify), Accounts (YouTube, SoundCloud, Spotify queue), Local library (download settings tucked into their own sub-menu), Look (album picture, lyrics, widget, size, pin on top), Sound (equalizer sound, visualizer, sleep timer) and Settings. Playlist, Equalizer, Milkdrop and Mini mode stay one click away.
 - Right-click a playlist in the LIBRARY (left side) for a small bar in the skin's look: Download, Generate CSV for Crate Digger (saved in Documents > Minapp > Crate Digger), and Port playlist, which opens a second bar on hover: Spotify, YouTube, SoundCloud, Crate Digger. Replaces the old copy pop-up.
