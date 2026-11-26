@@ -1386,7 +1386,8 @@ ipcMain.on('sc:fail', (_e, msg) => {
   scFailAt = Date.now();
   dialog.showMessageBox(win, { type: 'warning', message: 'A SoundCloud song could not be played', detail: String(msg).slice(0, 400) + '\n\nMinapp skips to the next song. SoundCloud menu > Test connection checks the stream.' });
 });
-ipcMain.handle('lists:all', async (_e, force, wantYtm) => {
+ipcMain.handle('lists:all', (_e, force, wantYtm) => listsAll(force, wantYtm));
+async function listsAll(force, wantYtm) {
   let spotify;
   try { spotify = readCfg().spotRefresh ? await getSpotifyPlaylists(!!force) : { status: 'login' }; } catch (e) { spotify = { status: 'error', message: e.message }; }
   const yt = readCfg().yt;
@@ -1405,7 +1406,7 @@ ipcMain.handle('lists:all', async (_e, force, wantYtm) => {
   const ytmusic = wantYtm ? ytmSoon(!!force) : (ytmLib ? ytmLib.data : { signedIn: true, items: [], idle: true });
   const soundcloud = await scListsData(!!force);
   return { spotify, youtube, ytmusic, soundcloud, local: library.playlists().filter((p) => p.count > 0).map((p) => ({ name: p.name, n: p.count })) };
-});
+}
 // a quick YouTube search: read the results page YouTube serves to browsers and take the videos out of its data
 async function ytQuickSearch(q) {
   try {
@@ -1530,23 +1531,58 @@ async function listSongs(kind, id) {
 }
 // right-click bar in the playlist window: download / CSV for Crate Digger / port to another service
 function csvCell(v) { v = String(v == null ? '' : v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
-async function exportCsv(kind, id, name) {
+async function exportCsv(kind, id, name, toInbox) {
   const rows = await listSongs(kind, id);
+  if (!rows.length && toInbox) return null;
   if (!rows.length) { dialog.showMessageBox(win, { message: 'Nothing to export', detail: `Minapp could not read the songs of "${name}" (sign in first?).` }); return; }
   // the layout CrateDigger imports (an Exportify-style Spotify export): "Track Name" and "Artist Name(s)" are required, several artists are separated by ";"
   const split = (r) => { if (r.title || r.artist) return [r.title || '', r.artists || r.artist || '']; const m = /^(.*) - ([^-]+)$/.exec(r.t || ''); return m ? [m[1], m[2]] : [r.t || '', '']; };
   const head = ['Track URI', 'Track Name', 'Album Name', 'Artist Name(s)', 'Release Date', 'Duration (ms)'];
   const lines = [head.join(',')].concat(rows.map((r) => { const [t, a] = split(r); return [/^spotify:track:/.test(r.uri || '') ? r.uri : '', t, r.album || '', a, r.released || '', r.ms || ''].map(csvCell).join(','); }));
-  const dir = path.join(app.getPath('documents'), 'Minapp', 'Crate Digger'); fs.mkdirSync(dir, { recursive: true });
+  const dir = toInbox ? crateInbox() : path.join(app.getPath('documents'), 'Minapp', 'Crate Digger'); fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, String(name).replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 80) + '.csv');
-  fs.writeFileSync(file, '﻿' + lines.join('\r\n') + '\r\n'); // BOM so accents open right in Excel / Numbers
+  const tmp = file + '.part'; fs.writeFileSync(tmp, '\ufeff' + lines.join('\r\n') + '\r\n'); fs.renameSync(tmp, file); // BOM so accents open right in Excel / Numbers; renamed when complete so CrateDigger never reads half a file
   log('csv written: ' + file + ' (' + rows.length + ' songs)');
-  shell.showItemInFolder(file);
+  if (!toInbox) shell.showItemInFolder(file);
   return file;
+}
+// ---------- CrateDigger (the DJ crate app, Mac): playlists are handed over as CSV files dropped in its inbox folder ----------
+const crateHome = () => path.join(app.getPath('home'), 'Library', 'Application Support', 'CrateDigger');
+const crateInbox = () => path.join(crateHome(), 'inbox');
+const crateApp = () => ['/Applications/CrateDigger.app', path.join(app.getPath('home'), 'Applications', 'CrateDigger.app')].find((f) => fs.existsSync(f)) || '';
+const crateInstalled = () => isMac && (!!crateApp() || fs.existsSync(crateHome()));
+const CRATE_PAGE = 'https://github.com/vmihai2009-jpg/CrateDigger';
+function openCrate() { const a = crateApp(); if (a) execFile('open', [a], () => {}); }
+async function sendToCrate(lists) { // lists: [{ kind, id, name }]
+  let sent = 0, songs = 0;
+  for (const l of lists) {
+    try { const f = await exportCsv(l.kind, l.id, l.name, true); if (f) { sent++; songs += Math.max(0, fs.readFileSync(f, 'utf8').split('\n').length - 2); } } catch (e) { log('send to cratedigger: ' + l.name + ': ' + e.message); }
+  }
+  return { sent, songs };
+}
+async function sendEverythingToCrate() {
+  if (!isMac) { dialog.showMessageBox(win, { message: 'CrateDigger runs on the Mac only' }); return; }
+  if (!crateInstalled()) { const r = await dialog.showMessageBox(win, { type: 'info', buttons: ['Get CrateDigger', 'Cancel'], defaultId: 0, cancelId: 1, message: 'CrateDigger is not installed on this Mac', detail: 'Get it first, then come back to Send.' }); if (r.response === 0) shell.openExternal(CRATE_PAGE); return; }
+  const d = await listsAll(false, false), all = [];
+  const sp = d.spotify;
+  if (sp && sp.status === 'ok') { all.push({ kind: 'spotify', id: `spotify:user:${sp.userId}:collection`, name: 'Spotify Liked songs' }); for (const p of sp.items || []) all.push({ kind: 'spotify', id: 'spotify:playlist:' + p.id, name: p.name }); }
+  for (const p of d.youtube.items || []) all.push({ kind: 'youtube', id: p.id, name: p.name });
+  for (const p of d.youtube.saved || []) all.push({ kind: 'ytsaved', id: p.name, name: p.name });
+  for (const p of (d.soundcloud && d.soundcloud.items) || []) if (p.id) all.push({ kind: 'soundcloud', id: p.id, name: p.name || p.title || 'SoundCloud' });
+  for (const p of d.local || []) all.push({ kind: 'local', id: p.name, name: p.name });
+  if (!all.length) { dialog.showMessageBox(win, { message: 'No playlists to send yet', detail: 'Connect Spotify or sign in to YouTube first, or add local playlists.' }); return; }
+  const r = await dialog.showMessageBox(win, { type: 'question', buttons: ['Send', 'Cancel'], defaultId: 0, cancelId: 1, message: `Send ${all.length} playlists to CrateDigger?`, detail: 'Every playlist from Spotify, YouTube, SoundCloud and your local library is handed to CrateDigger (songs already there are not duplicated). It can take a minute for long lists.' });
+  if (r.response !== 0) return;
+  win.setTitle('Sending playlists to CrateDigger…');
+  const res = await sendToCrate(all);
+  try { win.setTitle('Minapp'); } catch {}
+  openCrate();
+  dialog.showMessageBox(win, { message: `Sent ${res.sent} of ${all.length} playlists to CrateDigger`, detail: `About ${res.songs} songs. CrateDigger picks them up when it opens (it was just opened for you).` });
 }
 ipcMain.handle('lists:action', async (_e, action, kind, id, name) => {
   kind = String(kind); id = String(id || ''); const nm = String(name || 'Playlist').slice(0, 100);
   try {
+    if (action === 'port-crate' && crateInstalled()) { const r = await sendToCrate([{ kind, id, name: nm }]); if (r.sent) { openCrate(); return 'SENT TO CRATEDIGGER'; } return 'NOTHING TO SEND'; }
     if (action === 'csv' || action === 'port-crate') { await exportCsv(kind, id, nm); return 'CSV SAVED'; }
     if (action === 'port-sorted' && !readCfg().expOn) { experimentalMenu(); return null; }
     if (action.startsWith('port-')) { await listsPlay('copy-' + kind, id, nm, action.slice(5)); return null; }
@@ -2833,6 +2869,12 @@ function menuItems() {
       sleepMenu(),
     ] },
     { type: 'separator' },
+    { label: 'Export', submenu: [
+      { label: 'CrateDigger', submenu: [
+        { label: 'Send everything to CrateDigger…', click: sendEverythingToCrate },
+        { label: 'Get CrateDigger', click: () => shell.openExternal(CRATE_PAGE) },
+      ] },
+    ] },
     { label: 'Settings', submenu: [
       { label: 'Global hotkeys (Ctrl+Alt+←/→/↓/↑, L = like, I = lyrics)', type: 'checkbox', checked: cfgOn('hotkeys', true), click: () => { toggleCfg('hotkeys', true)(); registerHotkeys(); } },
       { label: 'Snap to screen edges', type: 'checkbox', checked: cfgOn('snap', true), click: toggleCfg('snap', true) },
