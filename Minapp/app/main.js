@@ -1535,6 +1535,9 @@ async function exportCsv(kind, id, name, toInbox) {
   const rows = await listSongs(kind, id);
   if (!rows.length && toInbox) return null;
   if (!rows.length) { dialog.showMessageBox(win, { message: 'Nothing to export', detail: `Minapp could not read the songs of "${name}" (sign in first?).` }); return; }
+  return writeCsv(rows, name, toInbox);
+}
+function writeCsv(rows, name, toInbox) {
   // the layout CrateDigger imports (an Exportify-style Spotify export): "Track Name" and "Artist Name(s)" are required, several artists are separated by ";"
   const split = (r) => { if (r.title || r.artist) return [r.title || '', r.artists || r.artist || '']; const m = /^(.*) - ([^-]+)$/.exec(r.t || ''); return m ? [m[1], m[2]] : [r.t || '', '']; };
   const head = ['Track URI', 'Track Name', 'Album Name', 'Artist Name(s)', 'Release Date', 'Duration (ms)'];
@@ -1579,6 +1582,69 @@ async function sendEverythingToCrate() {
   openCrate();
   dialog.showMessageBox(win, { message: `Sent ${res.sent} of ${all.length} playlists to CrateDigger`, detail: `About ${res.songs} songs. CrateDigger picks them up when it opens (it was just opened for you).` });
 }
+// ---------- right-click a song: Export > Spotify / YouTube > playlist, Download > YouTube / CrateDigger ----------
+// the song comes from the panel as { title, artist, t (the line shown), kind, uri, id, album, ms, list, i }
+function songParts(s) {
+  let title = String(s.title || ''), artist = String(s.artist || '');
+  if (!title) { const t = String(s.t || '').replace(/^\d+\.\s+/, ''); const m = /^(.*) - ([^-]+)$/.exec(t); title = m ? m[1] : t; if (!artist && m) artist = m[2]; }
+  return { title: title.trim(), artist: artist.trim(), ms: Number(s.ms) || 0 };
+}
+const songYtId = (s) => (/^[\w-]{11}$/.test(String(s.id || '')) && (s.kind === 'youtube' || s.kind === 'ytmusic' || !trackIdOf(s.id)) ? String(s.id) : '');
+async function findOnSpotify(w, tok) { // { uri, level, got } of the closest Spotify track, or uri ''
+  const c = clean(w.artist, w.title), want = { artist: c.artist, title: c.title, ms: w.ms || 0 };
+  const lines = [...new Set([c.artist ? `track:${c.title} artist:${c.first || c.artist}` : c.title, `${c.artist} ${c.title}`.trim(), c.title])];
+  let best = null;
+  for (const q of lines) {
+    let j = null;
+    for (let a = 0; a < 2 && !j; a++) j = await spotApi('/search?type=track&limit=6&q=' + encodeURIComponent(q), tok).catch((e) => { if (e.auth) throw e; return null; });
+    if (!j) continue;
+    const r = matcher.pick(want, ((j.tracks && j.tracks.items) || []).map((x) => ({ artist: (x.artists || []).map((a) => a.name).join(', '), title: x.name, ms: x.duration_ms || 0, uri: x.uri })));
+    if (r.best && (!best || r.score > best.score)) best = r;
+    if (r.level === 'sure') break;
+  }
+  return best && best.level !== 'none' ? { uri: best.best.uri, level: best.level } : { uri: '', level: 'none' };
+}
+ipcMain.handle('song:action', async (_e, action, song, target) => {
+  song = song && typeof song === 'object' ? song : {}; target = String(target || '');
+  const w = songParts(song);
+  if (!w.title) return 'NO SONG';
+  try {
+    if (action === 'export-spotify') {
+      const cfg = readCfg();
+      if (!cfg.spotRefresh || !String(cfg.spotScope || '').includes('playlist-modify')) return 'CONNECT SPOTIFY (MENU > ACCOUNTS)';
+      const tok = await spotAccessToken();
+      let tid = song.kind === 'spotify' ? trackIdOf(song.uri) : trackIdOf(song.id), loose = false;
+      if (!tid) { const f = await findOnSpotify(w, tok); if (!f.uri) return 'NOT FOUND ON SPOTIFY'; tid = trackIdOf(f.uri); loose = f.level === 'maybe'; }
+      if (/:collection$/.test(target)) { await spotLibrary('PUT', tid); return 'ADDED TO LIKED SONGS' + (loose ? ' (CHECK MATCH)' : ''); }
+      const pid = target.split(':').pop(), uris = ['spotify:track:' + tid];
+      try { await spotSend('POST', `/playlists/${pid}/items`, tok, { uris }); } catch { await spotSend('POST', `/playlists/${pid}/tracks`, tok, { uris }); }
+      spotLists = null;
+      return 'ADDED TO SPOTIFY' + (loose ? ' (CHECK MATCH)' : '');
+    }
+    if (action === 'export-youtube') {
+      if (!ytApi.canWrite()) return 'SIGN IN TO YOUTUBE (MENU > ACCOUNTS)';
+      let vid = songYtId(song), loose = false;
+      if (!vid) { const f = await findOnYouTube(w); if (!f.id) return 'NOT FOUND ON YOUTUBE'; vid = f.id; loose = f.level === 'maybe'; }
+      if (target === 'LM') { await ytApi.addToLikes(vid); return 'SAVED TO MINAPP LIKES'; }
+      await ytApi.addTo(target, vid); ytmLib = null;
+      return 'ADDED TO YOUTUBE' + (loose ? ' (CHECK MATCH)' : '');
+    }
+    if (action === 'download-youtube') {
+      if (downloading || copying) return 'A DOWNLOAD IS RUNNING';
+      let vid = songYtId(song);
+      if (!vid) { const f = await findOnYouTube(w); if (!f.id) return 'NOT FOUND ON YOUTUBE'; vid = f.id; }
+      downloadCurrentYouTube({ v: vid, name: w.title }); // asks first, reports when done
+      return 'DOWNLOADING...';
+    }
+    if (action === 'download-crate') {
+      if (!crateInstalled()) { const r = await dialog.showMessageBox(win, { type: 'info', buttons: ['Get CrateDigger', 'Cancel'], defaultId: 0, cancelId: 1, message: 'CrateDigger is not installed on this Mac' }); if (r.response === 0) shell.openExternal(CRATE_PAGE); return null; }
+      writeCsv([{ title: w.title, artist: w.artist, artists: song.artists || w.artist, album: song.album || '', uri: song.kind === 'spotify' ? song.uri : '', released: song.released || '', ms: song.ms || 0 }], 'Minapp songs', true);
+      openCrate();
+      return 'SENT TO CRATEDIGGER';
+    }
+  } catch (e) { log('song action ' + action + ': ' + ((e && e.message) || e)); return e && e.auth ? 'CONNECT AGAIN (MENU > ACCOUNTS)' : 'DID NOT WORK'; }
+  return null;
+});
 ipcMain.handle('lists:action', async (_e, action, kind, id, name) => {
   kind = String(kind); id = String(id || ''); const nm = String(name || 'Playlist').slice(0, 100);
   try {
