@@ -60,6 +60,7 @@ contextBridge.exposeInMainWorld('bridge', {
   listsAll: (force, ytm) => ipcRenderer.invoke('lists:all', force, ytm),
   listsPlay: (kind, id, name) => ipcRenderer.invoke('lists:play', kind, id, name),
   listsAction: (a, kind, id, name) => ipcRenderer.invoke('lists:action', a, kind, id, name),
+  songAction: (a, song, target) => ipcRenderer.invoke('song:action', a, song, target),
   listsSearch: (key, q, only) => ipcRenderer.invoke('lists:search', key, q, only),
   listsSongs: (kind, id) => ipcRenderer.invoke('lists:songs', kind, id),
   listsFound: (r) => ipcRenderer.invoke('lists:found', r),

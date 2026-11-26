@@ -81,7 +81,7 @@ export function initPlaylistView(webamp, api) {
       queue.hist.forEach((x, i) => list.push({ x, off: i - queue.hist.length }));
       if (queue.cur) list.push({ x: queue.cur, off: 0 });
       queue.q.forEach((x, i) => list.push({ x, off: i + 1 }));
-      list = list.map((e, i) => ({ t: (tab === 'playlist' ? i + 1 + '. ' : '') + (e.x.artist ? e.x.artist + ' - ' : '') + e.x.title, d: e.x.duration, off: e.off, now: e.off === 0, dim: e.off < 0, hint: e.x.hint }));
+      list = list.map((e, i) => ({ x: e.x, t: (tab === 'playlist' ? i + 1 + '. ' : '') + (e.x.artist ? e.x.artist + ' - ' : '') + e.x.title, d: e.x.duration, off: e.off, now: e.off === 0, dim: e.off < 0, hint: e.x.hint }));
       if (!list.length) { rRows.push({ t: 'Nothing is playing.', dim: true }); return; }
     } else if (pick.kind === 'search') {
       if (busy) { rRows.push({ t: 'Searching...', dim: true }); return; }
@@ -298,7 +298,20 @@ export function initPlaylistView(webamp, api) {
     left.addEventListener('wheel', (e) => { e.preventDefault(); lTop += e.deltaY > 0 ? 2 : -2; draw(); }, { passive: false });
     right.addEventListener('wheel', (e) => { e.preventDefault(); rTop += e.deltaY > 0 ? 3 : -3; draw(); }, { passive: false });
     root.addEventListener('mousedown', (e) => e.stopPropagation());
+    right.addEventListener('contextmenu', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const r = rRows[rowOf(e)], song = r && !r.dim && !r.hint && !r.input ? songOf(r) : null;
+      if (!song) { closePop(); return; }
+      openPop(e.clientX, e.clientY, { song });
+    });
     root.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); });
+  }
+
+  // what a right-clicked song row stands for (the panel's rows carry the song as `x` in the queue, or `found` in a list)
+  function songOf(r) {
+    if (r.x) return { title: r.x.title || '', artist: r.x.artist || '', id: r.x.id || '', ms: (r.x.duration || 0) * 1000, kind: 'queue', t: r.t };
+    const f = r.found; if (!f) return null;
+    return { title: f.title || '', artist: f.artist || '', artists: f.artists || '', album: f.album || '', released: f.released || '', ms: f.ms || 0, uri: f.uri || '', id: f.id || '', kind: f.kind || '', t: f.t || r.t };
   }
 
   // ---------- clicks ----------
@@ -551,67 +564,91 @@ export function initPlaylistView(webamp, api) {
   }
 
 
-  // ---------- right-click bar for a playlist (same look as MENU; Port opens a second bar when hovered) ----------
-  let popEl = null, pop2El = null, popFor = null, popHover = -1, pop2Hover = -1, popPos = { x: 0, y: 0 };
+  // ---------- right-click bars (same look as MENU): a playlist on the left, or a song on the right ----------
+  // Each bar can open a next bar beside it when a row with a ">" is hovered; long lists (playlists) scroll with the wheel.
+  let pops = [], popCtx = null, popPos = { x: 0, y: 0 };
   const PORTS = [['spotify', 'Spotify'], ['youtube', 'YouTube'], ['soundcloud', 'SoundCloud'], ['crate', 'Crate Digger']];
-  function popItems() {
-    const k = popFor.kind, items = [];
+  const POP_ROWS = 12; // a bar shows at most this many rows, then scrolls
+  function listItems(f) {
+    const k = f.kind, items = [];
     if (k !== 'local') items.push({ label: 'Download', act: 'download' });
     items.push({ label: 'Generate CSV for Crate Digger', act: 'csv' });
     if (k !== 'local') items.push({ label: 'Port playlist', sub: [...PORTS.filter(([p]) => !(p === k || (p === 'youtube' && (k === 'ytmusic' || k === 'ytsaved' || k === 'ytlink')))).map(([p, label]) => ({ label, act: 'port-' + p })), ...(k === 'spotify' ? [{ label: 'Sorted copy (experimental)', act: 'port-sorted' }] : [])] });
     return items;
   }
-  function closePop() { popFor = null; if (popEl) popEl.remove(); if (pop2El) pop2El.remove(); popEl = pop2El = null; popHover = pop2Hover = -1; }
-  function openPop(x, y, f) { closePop(); popFor = f; popPos = { x, y }; drawPop(); }
-  function popBox(el, items, left, top, width, hover) {
-    const { bg, fg, cur, font } = colours();
-    el.style.cssText = `position:fixed;left:${left}px;top:${top}px;width:${width}px;height:${items.length * ROW + 2}px;z-index:41;background:${bg};border:1px solid ${fg};box-sizing:content-box;font:${FS}px/${ROW}px ${font},Arial,sans-serif;color:${fg};overflow:hidden;user-select:none;box-shadow:0 0 0 1px rgba(0,0,0,.6);`;
-    el.textContent = '';
-    items.forEach((m, i) => {
-      const d = document.createElement('div'), on = i === hover;
-      d.dataset.i = String(i);
-      d.style.cssText = `position:absolute;left:0;right:0;top:${i * ROW + 1}px;height:${ROW}px;padding:0 6px;white-space:nowrap;overflow:hidden;box-sizing:border-box;cursor:pointer;color:${on ? cur : fg};`;
-      setPixel(d, m.label + (m.sub ? ' +' : ''), on ? cur : fg);
-      el.appendChild(d);
+  function songItems() {
+    const sp = data && data.spotify, yt = data && data.youtube;
+    const spl = sp && sp.status === 'ok' ? [{ label: 'Liked songs', act: 'export-spotify', target: `spotify:user:${sp.userId}:collection` }, ...sp.items.filter((p) => p.mine && !p.link).map((p) => ({ label: p.name, act: 'export-spotify', target: 'spotify:playlist:' + p.id }))] : null;
+    const ytl = yt && yt.signedIn ? yt.items.map((p) => ({ label: p.name, act: 'export-youtube', target: p.id })) : null;
+    const none = (t) => [{ label: t, off: true }];
+    return [
+      { label: 'Export', sub: [
+        { label: 'Spotify', sub: !data ? none('Loading...') : spl && spl.length ? spl : none(sp && sp.status === 'ok' ? 'No playlists' : 'Connect Spotify first') },
+        { label: 'YouTube', sub: !data ? none('Loading...') : ytl && ytl.length ? ytl : none(yt && yt.signedIn ? 'No playlists' : 'Sign in to YouTube first') },
+      ] },
+      { label: 'Download', sub: [{ label: 'YouTube', act: 'download-youtube' }, { label: 'CrateDigger', act: 'download-crate' }] },
+    ];
+  }
+  function closePop() { popCtx = null; pops.forEach((p) => p.el && p.el.remove()); pops = []; }
+  function openPop(x, y, f) { closePop(); popCtx = f; popPos = { x, y }; pops = [{ items: f.song ? songItems() : listItems(f), hover: -1, top: 0, el: null }]; if (f.song && !data) load(false).then(() => { if (popCtx === f && pops[0]) { pops[0].items = songItems(); drawPop(); } }); drawPop(); }
+  function drawPop() {
+    if (!popCtx) return;
+    const { bg, fg, cur, font } = colours(), host = document.getElementById('webamp') || document.body;
+    const widths = [190, 120, 170], VW = innerWidth, VH = innerHeight;
+    let parent = null; // { left, top, width, height } of the bar before this one
+    pops.forEach((p, lv) => {
+      const W = widths[Math.min(lv, 2)], vis = Math.min(p.items.length, POP_ROWS), H = vis * ROW + 2;
+      p.top = Math.max(0, Math.min(p.top, p.items.length - vis));
+      let left, top;
+      if (!parent) { left = Math.max(0, Math.min(popPos.x, VW - W - 2)); top = Math.max(0, Math.min(popPos.y, VH - H - 4)); }
+      else {
+        const hv = pops[lv - 1].hover - pops[lv - 1].top;
+        left = parent.left + parent.width + 2; top = parent.top + Math.max(0, hv) * ROW;
+        if (left + W > VW) { if (parent.left - W - 2 >= 0) left = parent.left - W - 2; else { left = parent.left; top = parent.top + parent.height + 2; } } // narrow window: left of the bar, or under it
+        if (top + H > VH) top = Math.max(0, VH - H - 2);
+      }
+      if (!p.el) {
+        const el = p.el = document.createElement('div'); el.className = 'pv-pop';
+        el.addEventListener('mousedown', (e) => e.stopPropagation());
+        el.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); });
+        el.addEventListener('wheel', (e) => { e.preventDefault(); p.top += e.deltaY > 0 ? 3 : -3; drawPop(); }, { passive: false });
+        el.addEventListener('mousemove', (e) => {
+          const d = e.target.closest && e.target.closest('[data-i]'), i = d ? Number(d.dataset.i) : -1;
+          if (i < 0 || i === p.hover) return;
+          p.hover = i; const it = p.items[i];
+          const at = pops.indexOf(p);
+          pops.slice(at + 1).forEach((q) => q.el && q.el.remove()); pops.length = at + 1;
+          if (it && it.sub && !it.off) pops.push({ items: it.sub, hover: -1, top: 0, el: null });
+          drawPop();
+        });
+        el.addEventListener('click', (e) => { e.stopPropagation(); const d = e.target.closest && e.target.closest('[data-i]'); if (d) popAct(p.items[Number(d.dataset.i)]); });
+        host.appendChild(el);
+      }
+      p.el.style.cssText = `position:fixed;left:${left}px;top:${top}px;width:${W}px;height:${H}px;z-index:${41 + lv};background:${bg};border:1px solid ${fg};box-sizing:content-box;font:${FS}px/${ROW}px ${font},Arial,sans-serif;color:${fg};overflow:hidden;user-select:none;box-shadow:0 0 0 1px rgba(0,0,0,.6);`;
+      p.el.textContent = '';
+      p.items.slice(p.top, p.top + vis).forEach((m, i) => {
+        const at = p.top + i, on = at === p.hover && !m.off, d = document.createElement('div');
+        d.dataset.i = String(at);
+        d.style.cssText = `position:absolute;left:0;right:0;top:${i * ROW + 1}px;height:${ROW}px;padding:0 6px;white-space:nowrap;overflow:hidden;box-sizing:border-box;cursor:${m.off ? 'default' : 'pointer'};` + (m.off ? 'opacity:.5;' : '');
+        setPixel(d, m.label + (m.sub ? ' +' : ''), on ? cur : fg);
+        p.el.appendChild(d);
+      });
+      parent = { left, top, width: W, height: H };
     });
   }
-  function drawPop() {
-    if (!popFor) return;
-    const items = popItems(), W = 190, host = document.getElementById('webamp') || document.body;
-    if (!popEl) {
-      popEl = document.createElement('div'); popEl.id = 'pv-pop';
-      popEl.addEventListener('mousedown', (e) => e.stopPropagation());
-      popEl.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); });
-      popEl.addEventListener('mousemove', (e) => { const d = e.target.closest && e.target.closest('[data-i]'), i = d ? Number(d.dataset.i) : -1; if (i !== popHover) { popHover = i; if (!(popItems()[i] || {}).sub) closePop2(); drawPop(); } });
-      popEl.addEventListener('click', (e) => { e.stopPropagation(); const d = e.target.closest && e.target.closest('[data-i]'); if (d) popAct(popItems()[Number(d.dataset.i)]); });
-      host.appendChild(popEl);
-    }
-    const left = Math.max(0, Math.min(popPos.x, innerWidth - W - 2)), top = Math.max(0, Math.min(popPos.y, innerHeight - items.length * ROW - 4));
-    popBox(popEl, items, left, top, W, popHover);
-    const it = items[popHover];
-    if (it && it.sub) {
-      if (!pop2El) {
-        pop2El = document.createElement('div'); pop2El.id = 'pv-pop2';
-        pop2El.addEventListener('mousedown', (e) => e.stopPropagation());
-        pop2El.addEventListener('mousemove', (e) => { const d = e.target.closest && e.target.closest('[data-i]'), i = d ? Number(d.dataset.i) : -1; if (i !== pop2Hover) { pop2Hover = i; drawPop(); } });
-        pop2El.addEventListener('click', (e) => { e.stopPropagation(); const d = e.target.closest && e.target.closest('[data-i]'); if (d) popAct(it.sub[Number(d.dataset.i)]); });
-        host.appendChild(pop2El);
-      }
-      const W2 = 150, h2 = it.sub.length * ROW + 2;
-      let x2 = left + W + 2, y2 = top + popHover * ROW;
-      if (x2 + W2 > innerWidth) { if (left - W2 - 2 >= 0) x2 = left - W2 - 2; else { x2 = left; y2 = top + items.length * ROW + 4; if (y2 + h2 > innerHeight) y2 = Math.max(0, top - h2 - 2); } } // narrow window: left of the bar, or under it
-      popBox(pop2El, it.sub, x2, y2, W2, pop2Hover);
-    }
-  }
-  function closePop2() { if (pop2El) pop2El.remove(); pop2El = null; pop2Hover = -1; }
   function popAct(it) {
-    if (!it || !it.act || !popFor) return;
-    const f = popFor; closePop();
+    if (!it || !it.act || it.off || !popCtx) return;
+    const f = popCtx; closePop();
+    if (f.song) {
+      say(it.act.startsWith('export') ? 'ADDING...' : it.act === 'download-crate' ? 'SENDING...' : 'LOOKING ON YOUTUBE...');
+      api.songAction(it.act, f.song, it.target || '').then((m) => { if (m) say(m); if (it.act.startsWith('export')) load(true); }, () => say('DID NOT WORK'));
+      return;
+    }
     say(it.act === 'download' ? 'DOWNLOAD...' : it.act === 'csv' || it.act === 'port-crate' ? 'WRITING CSV...' : 'PORT: WORKING...');
     api.listsAction(it.act, f.kind, f.id, f.name).then((m) => { if (m) say(m); load(true); }, () => say('DID NOT WORK'));
   }
-  document.addEventListener('mousedown', (e) => { if (popFor && !(popEl && popEl.contains(e.target)) && !(pop2El && pop2El.contains(e.target))) closePop(); }, true);
-  document.addEventListener('keydown', (e) => { if (popFor && e.key === 'Escape') { closePop(); e.preventDefault(); } }, true);
+  document.addEventListener('mousedown', (e) => { if (popCtx && !pops.some((p) => p.el && p.el.contains(e.target))) closePop(); }, true);
+  document.addEventListener('keydown', (e) => { if (popCtx && e.key === 'Escape') { closePop(); e.preventDefault(); } }, true);
 
   // ---------- MENU: the app menu in the skin's look; click MENU again, click outside or press Esc to close ----------
   let menuEl = null, menuItems = [], menuTop = 0, menuOpenSubs = new Set(), menuHover = -1;
@@ -673,7 +710,7 @@ export function initPlaylistView(webamp, api) {
 
   // called with every poll: played songs, the playing one and the ones up next
   function setQueue(hist, cur, q) {
-    const pickQ = (x) => ({ artist: x.artist || '', title: x.title || '', duration: x.duration || 0, hint: !!x.hint });
+    const pickQ = (x) => ({ artist: x.artist || '', title: x.title || '', duration: x.duration || 0, hint: !!x.hint, id: typeof x.id === 'string' ? x.id : '' });
     queue = { hist: (hist || []).map(pickQ), cur: cur && cur.title ? pickQ(cur) : null, q: (q || []).map(pickQ) };
     const sig = JSON.stringify(queue);
     if (sig === qSig) return;

@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.65
+- Right-click a song (in the PLAYLIST tab or in a library list) for a small bar: Export > Spotify or YouTube > pick one of your playlists (Spotify also has Liked songs) adds that song; Download > YouTube or CrateDigger saves it or sends it to CrateDigger. A song from another service is looked up first; a loose match says "CHECK MATCH".
+
 ## 1.9.64
 - Menu > Export > CrateDigger: "Send everything to CrateDigger…" hands every playlist (Spotify, YouTube, SoundCloud, local) straight to the CrateDigger app, which imports them on its own (CrateDigger 0.3.0 or newer). "Get CrateDigger" opens its download page. Right-click a playlist > Port playlist > Crate Digger now sends that playlist directly when CrateDigger is installed, otherwise it still saves the CSV.
 
