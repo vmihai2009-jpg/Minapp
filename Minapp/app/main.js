@@ -1508,7 +1508,7 @@ async function listSongs(kind, id) {
     for (let k = 0; p && k < 20; k++) {
       let j = await spotApi(p, tok).catch(() => null);
       if (!j && !k && !liked) j = await spotApi(`/playlists/${pid}/tracks?limit=50`, tok).catch(() => null);
-      for (const x of (j && j.items) || []) { const t = x.item || x.track; if (t && t.uri) out.push({ t: by({ title: t.name, artist: t.artists && t.artists[0] ? t.artists[0].name : '' }), title: t.name, artist: t.artists && t.artists[0] ? t.artists[0].name : '', album: (t.album && t.album.name) || '', secs: Math.round((t.duration_ms || 0) / 1000), link: 'https://open.spotify.com/track/' + String(t.uri).split(':').pop(), kind: 'spotify', uri: t.uri, ctx: id }); }
+      for (const x of (j && j.items) || []) { const t = x.item || x.track; if (t && t.uri) out.push({ t: by({ title: t.name, artist: t.artists && t.artists[0] ? t.artists[0].name : '' }), title: t.name, artist: t.artists && t.artists[0] ? t.artists[0].name : '', artists: (t.artists || []).map((a) => a.name).join(';'), album: (t.album && t.album.name) || '', released: (t.album && t.album.release_date) || '', ms: t.duration_ms || 0, kind: 'spotify', uri: t.uri, ctx: id }); }
       p = j && j.next ? j.next.replace('https://api.spotify.com/v1', '') : null;
     }
     if (!out.length && !liked) for (const t of (await spotEmbedSongs(pid)).songs) out.push({ t: by(t), title: t.title, artist: t.artist, kind: 'spotify', uri: t.uri, ctx: id });
@@ -1533,9 +1533,10 @@ function csvCell(v) { v = String(v == null ? '' : v); return /[",\n\r]/.test(v) 
 async function exportCsv(kind, id, name) {
   const rows = await listSongs(kind, id);
   if (!rows.length) { dialog.showMessageBox(win, { message: 'Nothing to export', detail: `Minapp could not read the songs of "${name}" (sign in first?).` }); return; }
-  const split = (r) => { if (r.title || r.artist) return [r.title || '', r.artist || '']; const m = /^(.*) - ([^-]+)$/.exec(r.t || ''); return m ? [m[1], m[2]] : [r.t || '', '']; };
-  const head = ['Title', 'Artist', 'Album', 'Seconds', 'Link'];
-  const lines = [head.join(',')].concat(rows.map((r) => { const [t, a] = split(r); return [t, a, r.album || '', r.secs || '', r.link || ''].map(csvCell).join(','); }));
+  // the layout CrateDigger imports (an Exportify-style Spotify export): "Track Name" and "Artist Name(s)" are required, several artists are separated by ";"
+  const split = (r) => { if (r.title || r.artist) return [r.title || '', r.artists || r.artist || '']; const m = /^(.*) - ([^-]+)$/.exec(r.t || ''); return m ? [m[1], m[2]] : [r.t || '', '']; };
+  const head = ['Track URI', 'Track Name', 'Album Name', 'Artist Name(s)', 'Release Date', 'Duration (ms)'];
+  const lines = [head.join(',')].concat(rows.map((r) => { const [t, a] = split(r); return [/^spotify:track:/.test(r.uri || '') ? r.uri : '', t, r.album || '', a, r.released || '', r.ms || ''].map(csvCell).join(','); }));
   const dir = path.join(app.getPath('documents'), 'Minapp', 'Crate Digger'); fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, String(name).replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 80) + '.csv');
   fs.writeFileSync(file, '﻿' + lines.join('\r\n') + '\r\n'); // BOM so accents open right in Excel / Numbers
