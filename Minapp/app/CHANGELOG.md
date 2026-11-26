@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.64
+- Menu > Export > CrateDigger: "Send everything to CrateDigger…" hands every playlist (Spotify, YouTube, SoundCloud, local) straight to the CrateDigger app, which imports them on its own (CrateDigger 0.3.0 or newer). "Get CrateDigger" opens its download page. Right-click a playlist > Port playlist > Crate Digger now sends that playlist directly when CrateDigger is installed, otherwise it still saves the CSV.
+
 ## 1.9.63
 - Crate Digger: "Generate CSV for Crate Digger" (and Port playlist > Crate Digger) now writes the exact layout Crate Digger imports (Track URI, Track Name, Album Name, Artist Name(s), Release Date, Duration). Spotify lists carry the track link and every artist, so Crate Digger can de-duplicate and search better.
 
