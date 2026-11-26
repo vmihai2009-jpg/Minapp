@@ -225,6 +225,20 @@
   window.addEventListener('mouseup', () => api.dragEnd());
   window.addEventListener('blur', () => api.dragEnd());
 
+  // thin strips on the four edges: drag one to rescale the whole app in proportion
+  (() => {
+    const st = document.createElement('style');
+    st.textContent = '.mn-edge{position:fixed;z-index:2147483000;background:transparent}.mn-edge.left,.mn-edge.right{top:6px;bottom:6px;width:4px;cursor:ew-resize}.mn-edge.top,.mn-edge.bottom{left:6px;right:6px;height:4px;cursor:ns-resize}.mn-edge.left{left:0}.mn-edge.right{right:0}.mn-edge.top{top:0}.mn-edge.bottom{bottom:0}';
+    document.head.appendChild(st);
+    for (const edge of ['left', 'right', 'top', 'bottom']) {
+      const d = document.createElement('div'); d.className = 'mn-edge ' + edge;
+      d.addEventListener('mousedown', (e) => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); api.rescaleStart(edge); });
+      document.body.appendChild(d);
+    }
+    window.addEventListener('mouseup', () => api.rescaleEnd());
+    window.addEventListener('blur', () => api.rescaleEnd());
+  })();
+
   // ----- skin buttons -> Spotify -----
   const MAP = { play: 'play', pause: 'playpause', stop: 'pause', next: 'next', previous: 'previous' };
   document.addEventListener('click', (e) => {
