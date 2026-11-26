@@ -1496,7 +1496,8 @@ ipcMain.handle('spotify:addlink', async () => {
   spotLists = null;
   return true;
 });
-ipcMain.handle('lists:songs', async (_e, kind, id) => {
+ipcMain.handle('lists:songs', (_e, kind, id) => listSongs(kind, id));
+async function listSongs(kind, id) {
   const by = (t) => (t.artist ? t.title + ' - ' + t.artist : t.title);
   if (kind === 'spotify') {
     const tok = readCfg().spotRefresh ? await spotAccessToken().catch(() => null) : null;
@@ -1507,15 +1508,15 @@ ipcMain.handle('lists:songs', async (_e, kind, id) => {
     for (let k = 0; p && k < 20; k++) {
       let j = await spotApi(p, tok).catch(() => null);
       if (!j && !k && !liked) j = await spotApi(`/playlists/${pid}/tracks?limit=50`, tok).catch(() => null);
-      for (const x of (j && j.items) || []) { const t = x.item || x.track; if (t && t.uri) out.push({ t: by({ title: t.name, artist: t.artists && t.artists[0] ? t.artists[0].name : '' }), kind: 'spotify', uri: t.uri, ctx: id }); }
+      for (const x of (j && j.items) || []) { const t = x.item || x.track; if (t && t.uri) out.push({ t: by({ title: t.name, artist: t.artists && t.artists[0] ? t.artists[0].name : '' }), title: t.name, artist: t.artists && t.artists[0] ? t.artists[0].name : '', album: (t.album && t.album.name) || '', secs: Math.round((t.duration_ms || 0) / 1000), link: 'https://open.spotify.com/track/' + String(t.uri).split(':').pop(), kind: 'spotify', uri: t.uri, ctx: id }); }
       p = j && j.next ? j.next.replace('https://api.spotify.com/v1', '') : null;
     }
-    if (!out.length && !liked) for (const t of (await spotEmbedSongs(pid)).songs) out.push({ t: by(t), kind: 'spotify', uri: t.uri, ctx: id });
+    if (!out.length && !liked) for (const t of (await spotEmbedSongs(pid)).songs) out.push({ t: by(t), title: t.title, artist: t.artist, kind: 'spotify', uri: t.uri, ctx: id });
     return out;
   }
-  if (kind === 'local') return library.tracks(String(id || '')).map((t, i) => ({ t: t.title, kind: 'local', list: id, i }));
+  if (kind === 'local') return library.tracks(String(id || '')).map((t, i) => { const m = /^(.+?) - (.+)$/.exec(t.title || ''); return { t: t.title, artist: m ? m[1] : '', title: m ? m[2] : t.title, album: String(id || ''), kind: 'local', list: id, i }; });
   if (kind === 'soundcloud') {
-    try { return (await scTracksCached(String(id || ''))).map((t, i) => ({ t: by(t), kind: 'soundcloud', list: id, i })); } catch (e) { log('soundcloud songs: ' + e.message); return []; }
+    try { return (await scTracksCached(String(id || ''))).map((t, i) => ({ t: by(t), title: t.title, artist: t.artist, kind: 'soundcloud', list: id, i })); } catch (e) { log('soundcloud songs: ' + e.message); return []; }
   }
   let vids = [];
   try {
@@ -1525,7 +1526,43 @@ ipcMain.handle('lists:songs', async (_e, kind, id) => {
     else if (kind === 'ytsaved') { const l = (readCfg().ytLists || []).find((x) => x.name === id); if (l) vids = ytApi.signedIn() ? await ytApi.titles(l.ids) : []; }
   } catch (e) { log('playlist songs: ' + e.message); }
   const all = vids.map((v) => v.id);
-  return vids.map((v) => ({ t: v.title, kind: kind === 'ytmusic' ? 'ytmusic' : 'youtube', id: v.id, all, list: kind === 'ytmusic' ? id : '' }));
+  return vids.map((v) => ({ t: v.title, title: v.title, link: v.id && /^[\w-]{11}$/.test(v.id) ? 'https://www.youtube.com/watch?v=' + v.id : '', kind: kind === 'ytmusic' ? 'ytmusic' : 'youtube', id: v.id, all, list: kind === 'ytmusic' ? id : '' }));
+}
+// right-click bar in the playlist window: download / CSV for Crate Digger / port to another service
+function csvCell(v) { v = String(v == null ? '' : v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+async function exportCsv(kind, id, name) {
+  const rows = await listSongs(kind, id);
+  if (!rows.length) { dialog.showMessageBox(win, { message: 'Nothing to export', detail: `Minapp could not read the songs of "${name}" (sign in first?).` }); return; }
+  const split = (r) => { if (r.title || r.artist) return [r.title || '', r.artist || '']; const m = /^(.*) - ([^-]+)$/.exec(r.t || ''); return m ? [m[1], m[2]] : [r.t || '', '']; };
+  const head = ['Title', 'Artist', 'Album', 'Seconds', 'Link'];
+  const lines = [head.join(',')].concat(rows.map((r) => { const [t, a] = split(r); return [t, a, r.album || '', r.secs || '', r.link || ''].map(csvCell).join(','); }));
+  const dir = path.join(app.getPath('documents'), 'Minapp', 'Crate Digger'); fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, String(name).replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 80) + '.csv');
+  fs.writeFileSync(file, '﻿' + lines.join('\r\n') + '\r\n'); // BOM so accents open right in Excel / Numbers
+  log('csv written: ' + file + ' (' + rows.length + ' songs)');
+  shell.showItemInFolder(file);
+  return file;
+}
+ipcMain.handle('lists:action', async (_e, action, kind, id, name) => {
+  kind = String(kind); id = String(id || ''); const nm = String(name || 'Playlist').slice(0, 100);
+  try {
+    if (action === 'csv' || action === 'port-crate') { await exportCsv(kind, id, nm); return 'CSV SAVED'; }
+    if (action === 'port-sorted' && !readCfg().expOn) { experimentalMenu(); return null; }
+    if (action.startsWith('port-')) { await listsPlay('copy-' + kind, id, nm, action.slice(5)); return null; }
+    if (action === 'download') {
+      if (kind === 'soundcloud') return void (await listsPlay('copy-soundcloud', id, nm, 'download'));
+      if (kind === 'spotify') { if (!readCfg().expOn) { experimentalMenu(); return null; } return void (await listsPlay('copy-spotify', id, nm, 'spotdl')); }
+      if (kind === 'local') return 'ALREADY ON THIS COMPUTER';
+      let target = null;
+      if (kind === 'youtube') target = { ids: await ytApi.videoIds(id), name: nm };
+      else if (kind === 'ytsaved') { const l = (readCfg().ytLists || []).find((x) => x.name === id); if (l) target = { ids: l.ids, name: l.name }; }
+      else if (kind === 'ytmusic') target = { list: id === 'LM' ? 'LL' : id, name: nm };
+      else if (kind === 'ytlink') target = readCfg().yt;
+      if (!target) return 'NOTHING TO DOWNLOAD';
+      return void (await downloadCurrentYouTube(target));
+    }
+  } catch (e) { log('list action failed: ' + e.message); dialog.showMessageBox(win, { type: 'error', message: 'That did not work', detail: String(e.message || e) }); }
+  return null;
 });
 ipcMain.handle('lists:found', async (_e, r) => {
   if (!r || typeof r !== 'object') return;
@@ -1668,7 +1705,7 @@ async function playYtMusic(what) {
   await setSource('ytmusic');
   if (ytmWin) ytmWin.loadURL('https://music.youtube.com/' + what);
 }
-ipcMain.handle('lists:play', async (_e, kind, id, name) => {
+async function listsPlay(kind, id, name, preTo) {
   if (kind.startsWith('copy-')) {
     if (copying || downloading) return;
     const what = kind.slice(5), nm = String(name || 'Playlist').slice(0, 100);
@@ -1677,7 +1714,7 @@ ipcMain.handle('lists:play', async (_e, kind, id, name) => {
     const labels = { spotify: 'Spotify', youtube: 'YouTube (and YT Music)', soundcloud: 'SoundCloud', download: 'Download to this computer (best quality)', sorted: 'A sorted copy on Spotify (experimental)', spotdl: 'Download to this computer (experimental)' };
     const targets = Object.keys(labels).filter((x) => ((x === 'sorted' || x === 'spotdl') ? group === 'spotify' && readCfg().expOn : x !== group && (x !== 'download' || group === 'soundcloud')));
     // a drop-down menu at the pointer (not a dialog): every option for this list, experimental ones when unlocked
-    const to = await new Promise((resolve) => {
+    const to = preTo && targets.includes(preTo) ? preTo : preTo ? null : await new Promise((resolve) => {
       let picked = false;
       const pick = (v) => () => { picked = true; resolve(v); };
       const items = [{ label: `"${nm.slice(0, 40)}"`, enabled: false }, { type: 'separator' },
@@ -1686,7 +1723,7 @@ ipcMain.handle('lists:play', async (_e, kind, id, name) => {
       items.push({ type: 'separator' }, { label: 'Cancel', click: pick(null) });
       Menu.buildFromTemplate(items).popup({ window: win, callback: () => { if (!picked) resolve(null); } });
     });
-    if (!to) return;
+    if (!to) { if (preTo) dialog.showMessageBox(win, { message: 'That list is already on ' + ({ spotify: 'Spotify', youtube: 'YouTube', soundcloud: 'SoundCloud' }[preTo] || 'that service') }); return; }
     if (to === 'spotdl') return spotDownload(/^spotify:user:/.test(id) ? 'liked' : String(id).split(':').pop(), nm);
     if (to === 'sorted') return spotSortedCopy(/^spotify:user:/.test(id) ? 'liked' : String(id).split(':').pop(), nm);
     if (to === 'download') {
@@ -1712,7 +1749,8 @@ ipcMain.handle('lists:play', async (_e, kind, id, name) => {
   if (kind === 'ytsignin') return ytApi.signIn();
   if (kind === 'ytmsignin') { await openYouTubeMusic(false); ytmLib = null; return; } // sign in inside YouTube Music's own window
   if (kind === 'spotconnect') return connectSpotifyQueue().then(() => { spotLists = null; });
-});
+}
+ipcMain.handle('lists:play', (_e, kind, id, name) => listsPlay(String(kind), id, name));
 ipcMain.handle('spotlists:play', (_e, uri) => playSpotifyContext(String(uri || '')));
 ipcMain.on('spotlists:connect', () => { connectSpotifyQueue().then(() => { spotLists = null; }); });
 
@@ -2153,12 +2191,12 @@ function whatsNew() {
 }
 
 let downloading = false;
-async function downloadCurrentYouTube() {
-  const t = readCfg().yt;
+async function downloadCurrentYouTube(target) {
+  const t = target || readCfg().yt; // a list picked in the panel, or the one that is playing
   if (!t) { dialog.showMessageBox(win, { message: 'Open a YouTube link first (menu > YouTube link…)' }); return; }
   // the record button saves the whole list, or only the song that is playing (menu > Local library > Record button saves)
   const vid = /^[\w-]{11}$/.test(ytState.id || '') ? ytState.id : /^[\w-]{11}$/.test(t.v || '') ? t.v : '';
-  const oneSong = readCfg().dlWhat === 'song' && !!vid;
+  const oneSong = !target && readCfg().dlWhat === 'song' && !!vid;
   if (!oneSong && t.ids && !t.ids.length) { dialog.showMessageBox(win, { message: 'This list has no videos to download' }); return; }
   if (downloading) return;
   if (!library.haveBin() || !readCfg().dlOk) {
@@ -2498,6 +2536,26 @@ ipcMain.on('win:dragstart', () => {
     win.setBounds({ x, y, width: b0.width, height: b0.height });
   }, 16);
 });
+// drag a window edge to rescale the whole app in proportion (the opposite edge stays where it is)
+let rescaleTimer = null;
+ipcMain.on('win:rescale-start', (_e, edge) => {
+  if (!win || win.isDestroyed() || rescaleTimer || !['left', 'right', 'top', 'bottom'].includes(edge)) return;
+  const c0 = screen.getCursorScreenPoint(), b0 = win.getBounds(), z0 = zoom, horiz = edge === 'left' || edge === 'right';
+  rescaleTimer = setInterval(() => {
+    if (!win || win.isDestroyed()) { clearInterval(rescaleTimer); rescaleTimer = null; return; }
+    const c = screen.getCursorScreenPoint();
+    const d = edge === 'right' ? c.x - c0.x : edge === 'left' ? c0.x - c.x : edge === 'bottom' ? c.y - c0.y : c0.y - c.y;
+    const z = Math.max(0.5, Math.min(3, Math.round(z0 * ((horiz ? b0.width : b0.height) + d) / (horiz ? b0.width : b0.height) * 20) / 20)); // steps of 0.05
+    if (z === zoom) return;
+    zoom = z; writeCfg({ zoom, zoomSet: 2 });
+    sizedZoom = zoom; win.webContents.setZoomFactor(zoom);
+    const w = Math.round(lastSize.w * zoom), h = Math.round(lastSize.h * zoom);
+    // keep the corner opposite to the dragged edge in place
+    const x = edge === 'left' ? b0.x + b0.width - w : b0.x, y = edge === 'top' ? b0.y + b0.height - h : b0.y;
+    win.setBounds({ x, y, width: w, height: h });
+  }, 30);
+});
+ipcMain.on('win:rescale-end', () => { if (rescaleTimer) { clearInterval(rescaleTimer); rescaleTimer = null; savePos(); buildMenu(); } });
 ipcMain.on('win:dragend', () => { if (dragTimer) { clearInterval(dragTimer); dragTimer = null; savePos(); } });
 let albumUi = { look: 'case', spin: false, open: false, filter: 'dots32', big: false }; // what the album panel shows, for the menu's ticks
 let infoUi = { open: false, kind: 'lyrics' };
@@ -2690,14 +2748,20 @@ function menuItems() {
   return [
     updateInfo ? { label: `Update available: ${updateInfo.latest}…`, click: installUpdate } : { label: 'Check for updates…', click: () => checkForUpdate(true) },
     { type: 'separator' },
-    { label: 'Source', enabled: false },
-    { label: 'Spotify', type: 'radio', checked: source === 'spotify', click: () => setSource('spotify') },
-    { label: 'YouTube', type: 'radio', checked: source === 'youtube', click: () => setSource('youtube'), accelerator: 'CmdOrCtrl+Shift+S' },
-    { label: 'Show YouTube video', type: 'checkbox', checked: !cfgOn('ytHidden', false), click: () => setYtHidden(!readCfg().ytHidden) },
-    { label: 'YouTube link…', accelerator: 'CmdOrCtrl+Shift+Y', click: async () => { if (await chooseYouTube()) await setSource('youtube'); } },
-    { label: 'YouTube Music (experiment)', type: 'radio', checked: source === 'ytmusic', click: () => setSource('ytmusic') },
-    { label: 'YouTube account', submenu: accountMenu() },
-    { label: 'SoundCloud', submenu: [
+    { label: 'Source', submenu: [
+      { label: 'Spotify', type: 'radio', checked: source === 'spotify', click: () => setSource('spotify') },
+      { label: 'YouTube', type: 'radio', checked: source === 'youtube', click: () => setSource('youtube'), accelerator: 'CmdOrCtrl+Shift+S' },
+      { label: 'YouTube Music (experiment)', type: 'radio', checked: source === 'ytmusic', click: () => setSource('ytmusic') },
+      { label: 'Local playlists', type: 'radio', checked: source === 'local', click: () => setSource('local') },
+      { type: 'separator' },
+      { label: 'YouTube link…', accelerator: 'CmdOrCtrl+Shift+Y', click: async () => { if (await chooseYouTube()) await setSource('youtube'); } },
+      { label: 'Show YouTube video', type: 'checkbox', checked: !cfgOn('ytHidden', false), click: () => setYtHidden(!readCfg().ytHidden) },
+      { label: 'Open Spotify', click: () => shell.openExternal('spotify:') },
+    ] },
+    { label: 'Accounts', submenu: [
+      { label: 'YouTube account', submenu: accountMenu() },
+      { label: readCfg().spotRefresh ? 'Disconnect Spotify queue' : 'Connect Spotify queue…', click: () => (readCfg().spotRefresh ? disconnectSpotifyQueue() : connectSpotifyQueue()) },
+      { label: 'SoundCloud', submenu: [
       readCfg().scToken ? { label: 'Sign out of SoundCloud', click: scSignOut } : { label: 'Sign in to SoundCloud…', click: scSignIn },
       ...(readCfg().scToken ? [] : [{ label: 'Sign in with a token (if the page says "blocked")…', click: scSignInToken }]),
       { label: 'Add a playlist link…', click: scAddLink },
@@ -2710,7 +2774,7 @@ function menuItems() {
         dialog.showMessageBox(win, { message: 'SoundCloud connection test', detail: r.map((x) => `${x.ok ? 'OK ' : 'FAILED '} ${x.step}: ${x.note}`).join('\n\n'), type: r.every((x) => x.ok) ? 'info' : 'warning' }); } },
       { label: 'Open the SOUNDCLOUD folder in the playlist panel to play, copy or download', enabled: false },
     ] },
-    { label: 'Local playlists', type: 'radio', checked: source === 'local', click: () => setSource('local') },
+    ] },
     { label: 'Local library', submenu: [
       ...(library.playlists().length
         ? library.playlists().map((p) => ({ label: `${p.name} (${p.count})`, enabled: p.count > 0, type: 'radio', checked: source === 'local' && localName === p.name, click: () => playLocal(p.name) }))
@@ -2723,7 +2787,9 @@ function menuItems() {
         : source === 'youtube' ? [{ label: 'Download current YouTube link (personal use)…', click: downloadCurrentYouTube }] : []),
       ...(!downloading && source === 'local' && scNow ? [{ label: 'Download current SoundCloud list (best quality, personal use)…', click: downloadSoundCloud }] : []),
       ...(!downloading ? [{ label: 'Get missing covers…', click: fillMissingCovers }] : []),
-      readCfg().expOn ? { label: 'Experimental (on, personal use)', submenu: [{ label: 'Right-click a Spotify playlist > Copy to… > sorted copy, or download', enabled: false }, { label: 'Lock experimental features', click: () => { writeCfg({ expOn: false }); buildMenu(); } }] } : { label: 'Experimental (personal use)…', click: experimentalMenu },
+      { label: 'Open library folder', click: () => { fs.mkdirSync(library.dir, { recursive: true }); shell.openPath(library.dir); } },
+      { label: 'Download settings', submenu: [
+      readCfg().expOn ? { label: 'Experimental (on, personal use)', submenu: [{ label: 'Right-click a Spotify playlist: Download, or Port playlist > Sorted copy', enabled: false }, { label: 'Lock experimental features', click: () => { writeCfg({ expOn: false }); buildMenu(); } }] } : { label: 'Experimental (personal use)…', click: experimentalMenu },
       { label: 'Open logs folder (what could not be found or saved)', click: () => { const d = path.join(app.getPath('userData'), 'logs'); fs.mkdirSync(d, { recursive: true }); shell.openPath(d); } },
       { label: 'Save YouTube downloads as MP3 320 (works in every DJ app)', type: 'checkbox', checked: cfgOn('dlMp3', true), click: toggleCfg('dlMp3', true) },
       { label: 'Record button saves', submenu: [['list', 'The whole playlist'], ['song', 'Only the song that is playing']].map(([k, label]) => ({
@@ -2732,13 +2798,14 @@ function menuItems() {
       { label: 'Download speed', submenu: [['slow', 'Slow (safest for very long playlists)'], ['normal', 'Normal'], ['fast', 'Fast (YouTube may ask Minapp to slow down)']].map(([k, label]) => ({
         label, type: 'radio', checked: (readCfg().dlSpeed || 'normal') === k, click: () => { writeCfg({ dlSpeed: k }); buildMenu(); },
       })) },
-      { label: 'Open library folder', click: () => { fs.mkdirSync(library.dir, { recursive: true }); shell.openPath(library.dir); } },
+      ] },
     ] },
-    { label: 'Open Spotify', click: () => shell.openExternal('spotify:') },
     { type: 'separator' },
-    { label: 'Queue', click: send('playlist') },
+    { label: 'Playlist window', click: send('playlist') },
     { label: 'Equalizer window', click: send('equalizer') },
     { label: 'Milkdrop', accelerator: 'CmdOrCtrl+Shift+K', click: () => win.webContents.send('milkdrop:toggle') },
+    { label: 'Mini mode', accelerator: 'CmdOrCtrl+Shift+M', click: () => win.webContents.send('mini:toggle') },
+    { label: 'Look', submenu: [
     { label: 'Album picture', submenu: [
       ...[['case', 'Cassette box'], ['tape', 'Cassette'], ['cd', 'CD'], ['vinyl', 'Record']].map(([k, label]) => ({ label, type: 'radio', checked: albumUi.look === k, click: () => win.webContents.send('album:options', { look: k }) })),
       { type: 'separator' },
@@ -2748,8 +2815,6 @@ function menuItems() {
       { label: 'Spin the CD (slowly, while playing)', type: 'checkbox', checked: !!albumUi.spin, click: () => win.webContents.send('album:options', { look: 'cd', spin: !albumUi.spin }) },
     ] },
     { label: 'Lyrics / about the artist', type: 'checkbox', checked: infoUi.open, accelerator: 'CmdOrCtrl+Shift+L', click: () => win.webContents.send('info:options', { open: !infoUi.open }) },
-    sleepMenu(),
-    { label: 'Mini mode', accelerator: 'CmdOrCtrl+Shift+M', click: () => win.webContents.send('mini:toggle') },
     { label: 'Widget', submenu: [
       { label: 'Off (full player)', type: 'radio', checked: widget === 'off', click: () => setWidget('off', true) },
       { label: 'Small: timer + visualizer', type: 'radio', checked: widget === 'small', accelerator: 'CmdOrCtrl+Shift+W', click: () => setWidget('small', true) },
@@ -2757,14 +2822,15 @@ function menuItems() {
       { type: 'separator' },
       { label: 'Stay on top of other windows', type: 'checkbox', checked: readCfg().widgetTop !== false, click: () => { writeCfg({ widgetTop: readCfg().widgetTop === false }); applyOnTop(); buildMenu(); } },
     ] },
-    { type: 'separator' },
     { label: 'Skins', submenu: skinsMenu() },
+    { label: 'Size (or drag the player\'s edges)', submenu: [0.5, 0.75, 1, 1.25, 1.5, 2, 3].map((z) => ({ label: `${z}x`, type: 'radio', checked: z === zoom, click: () => { zoom = z; writeCfg({ zoom, zoomSet: 2 }); applySize(); } })) },
     { label: 'Pin on top', type: 'checkbox', checked: pinned, click: () => setPinned(!pinned) },
-    { label: 'Size', submenu: [0.5, 0.75, 1, 1.25, 1.5, 2, 3].map((z) => ({ label: `${z}x`, type: 'radio', checked: z === zoom, click: () => { zoom = z; writeCfg({ zoom, zoomSet: 2 }); applySize(); } })) },
-    { type: 'separator' },
-    { label: eqLabel, type: 'checkbox', checked: eqOn, click: toggleEq },
-    ...(isWin || isMac ? [{ label: 'Visualizer follows the music', type: 'checkbox', checked: vizOn, click: async () => { vizOn = !vizOn; vizFailed = false; writeCfg({ viz: vizOn }); await applyAudio(); } }] : []),
-    { label: readCfg().spotRefresh ? 'Disconnect Spotify queue' : 'Connect Spotify queue…', click: () => (readCfg().spotRefresh ? disconnectSpotifyQueue() : connectSpotifyQueue()) },
+    ] },
+    { label: 'Sound', submenu: [
+      { label: eqLabel, type: 'checkbox', checked: eqOn, click: toggleEq },
+      ...(isWin || isMac ? [{ label: 'Visualizer follows the music', type: 'checkbox', checked: vizOn, click: async () => { vizOn = !vizOn; vizFailed = false; writeCfg({ viz: vizOn }); await applyAudio(); } }] : []),
+      sleepMenu(),
+    ] },
     { type: 'separator' },
     { label: 'Settings', submenu: [
       { label: 'Global hotkeys (Ctrl+Alt+←/→/↓/↑, L = like, I = lyrics)', type: 'checkbox', checked: cfgOn('hotkeys', true), click: () => { toggleCfg('hotkeys', true)(); registerHotkeys(); } },
@@ -2777,10 +2843,10 @@ function menuItems() {
         const vs = updater.savedVersions(versionsDir()).filter((v) => v !== appVersion());
         return vs.length ? vs.map((v) => ({ label: `Minapp ${v}`, click: () => goBackTo(v) })) : [{ label: 'None saved yet (kept from the next update on)', enabled: false }];
       })() },
+      ...(isWin ? [{ label: 'Check Spotify connection…', click: checkSpotify }] : []),
       { label: 'Open data folder', click: () => shell.openPath(app.getPath('userData')) },
       ...(inMacBundle ? [{ label: 'Uninstall Minapp…', click: () => { const u = path.join(app.getPath('userData'), 'Uninstall Minapp.command'); if (fs.existsSync(u)) shell.openPath(u); } }] : []),
     ] },
-    ...(isWin ? [{ label: 'Check Spotify connection…', click: checkSpotify }] : []),
     { type: 'separator' },
     { label: isMac ? 'Hide window' : 'Hide to tray', accelerator: 'Control+Alt+Up', registerAccelerator: false, click: () => win.hide() },
     { label: 'Quit', click: () => app.quit() },
