@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.66
+- Mac: the new right-click bars (playlist options with Crate Digger, and the song Export / Download bar) now stay open on a Mac. A Mac raises the right-click as the button goes down (Windows as it comes up), so the bar could be closed again straight away. A Ctrl+click is treated as a right-click too.
+
 ## 1.9.65
 - Right-click a song (in the PLAYLIST tab or in a library list) for a small bar: Export > Spotify or YouTube > pick one of your playlists (Spotify also has Liked songs) adds that song; Download > YouTube or CrateDigger saves it or sends it to CrateDigger. A song from another service is looked up first; a loose match says "CHECK MATCH".
 

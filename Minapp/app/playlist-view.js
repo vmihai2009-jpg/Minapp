@@ -298,6 +298,10 @@ export function initPlaylistView(webamp, api) {
     left.addEventListener('wheel', (e) => { e.preventDefault(); lTop += e.deltaY > 0 ? 2 : -2; draw(); }, { passive: false });
     right.addEventListener('wheel', (e) => { e.preventDefault(); rTop += e.deltaY > 0 ? 3 : -3; draw(); }, { passive: false });
     root.addEventListener('mousedown', (e) => e.stopPropagation());
+    // Mac: a trackpad "secondary click" is a Ctrl+click on some setups and may not raise contextmenu: treat it the same, once
+    let lastCtx = 0;
+    const viaCtrlClick = (e) => { if (e.button === 0 && e.ctrlKey && Date.now() - lastCtx > 300) { lastCtx = Date.now(); e.target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY })); } };
+    left.addEventListener('mousedown', viaCtrlClick); right.addEventListener('mousedown', viaCtrlClick);
     right.addEventListener('contextmenu', (e) => {
       e.preventDefault(); e.stopPropagation();
       const r = rRows[rowOf(e)], song = r && !r.dim && !r.hint && !r.input ? songOf(r) : null;
@@ -566,7 +570,7 @@ export function initPlaylistView(webamp, api) {
 
   // ---------- right-click bars (same look as MENU): a playlist on the left, or a song on the right ----------
   // Each bar can open a next bar beside it when a row with a ">" is hovered; long lists (playlists) scroll with the wheel.
-  let pops = [], popCtx = null, popPos = { x: 0, y: 0 };
+  let pops = [], popCtx = null, popPos = { x: 0, y: 0 }, popAt = 0;
   const PORTS = [['spotify', 'Spotify'], ['youtube', 'YouTube'], ['soundcloud', 'SoundCloud'], ['crate', 'Crate Digger']];
   const POP_ROWS = 12; // a bar shows at most this many rows, then scrolls
   function listItems(f) {
@@ -590,7 +594,7 @@ export function initPlaylistView(webamp, api) {
     ];
   }
   function closePop() { popCtx = null; pops.forEach((p) => p.el && p.el.remove()); pops = []; }
-  function openPop(x, y, f) { closePop(); popCtx = f; popPos = { x, y }; pops = [{ items: f.song ? songItems() : listItems(f), hover: -1, top: 0, el: null }]; if (f.song && !data) load(false).then(() => { if (popCtx === f && pops[0]) { pops[0].items = songItems(); drawPop(); } }); drawPop(); }
+  function openPop(x, y, f) { closePop(); popCtx = f; popAt = Date.now(); popPos = { x: x + 2, y: y + 2 }; pops = [{ items: f.song ? songItems() : listItems(f), hover: -1, top: 0, el: null }]; if (f.song && !data) load(false).then(() => { if (popCtx === f && pops[0]) { pops[0].items = songItems(); drawPop(); } }); drawPop(); }
   function drawPop() {
     if (!popCtx) return;
     const { bg, fg, cur, font } = colours(), host = document.getElementById('webamp') || document.body;
@@ -647,7 +651,9 @@ export function initPlaylistView(webamp, api) {
     say(it.act === 'download' ? 'DOWNLOAD...' : it.act === 'csv' || it.act === 'port-crate' ? 'WRITING CSV...' : 'PORT: WORKING...');
     api.listsAction(it.act, f.kind, f.id, f.name).then((m) => { if (m) say(m); load(true); }, () => say('DID NOT WORK'));
   }
-  document.addEventListener('mousedown', (e) => { if (popCtx && !pops.some((p) => p.el && p.el.contains(e.target))) closePop(); }, true);
+  // On a Mac the browser raises "contextmenu" as the button goes down (Windows: when it comes up), and a Mac may deliver the
+  // button-down after it: so a press right after opening must not close the bar. Same for the button-up that follows.
+  document.addEventListener('mousedown', (e) => { if (popCtx && Date.now() - popAt > 450 && !pops.some((p) => p.el && p.el.contains(e.target))) closePop(); }, true);
   document.addEventListener('keydown', (e) => { if (popCtx && e.key === 'Escape') { closePop(); e.preventDefault(); } }, true);
 
   // ---------- MENU: the app menu in the skin's look; click MENU again, click outside or press Esc to close ----------
