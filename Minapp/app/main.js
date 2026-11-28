@@ -1814,8 +1814,8 @@ async function listsPlay(kind, id, name, preTo) {
     const what = kind.slice(5), nm = String(name || 'Playlist').slice(0, 100);
     // where to: every service except the one the list comes from
     const group = what === 'spotify' ? 'spotify' : what === 'soundcloud' ? 'soundcloud' : 'youtube';
-    const labels = { spotify: 'Spotify', youtube: 'YouTube (and YT Music)', soundcloud: 'SoundCloud', download: 'Download to this computer (best quality)', sorted: 'A sorted copy on Spotify (experimental)', spotdl: 'Download to this computer (experimental)' };
-    const targets = Object.keys(labels).filter((x) => ((x === 'sorted' || x === 'spotdl') ? group === 'spotify' && readCfg().expOn : x !== group && (x !== 'download' || group === 'soundcloud')));
+    const labels = { spotify: 'Spotify', youtube: 'YouTube (and YT Music)', soundcloud: 'SoundCloud', download: 'Download to this computer (best quality)', sorted: 'A sorted copy on Spotify (experimental)', spotdl: 'Download to this computer (experimental)', crate: 'Export to Crate Digger' };
+    const targets = Object.keys(labels).filter((x) => ((x === 'sorted' || x === 'spotdl') ? group === 'spotify' && readCfg().expOn : x === 'crate' ? true : x !== group && (x !== 'download' || group === 'soundcloud')));
     // a drop-down menu at the pointer (not a dialog): every option for this list, experimental ones when unlocked
     const to = preTo && targets.includes(preTo) ? preTo : preTo ? null : await new Promise((resolve) => {
       let picked = false;
@@ -1827,6 +1827,7 @@ async function listsPlay(kind, id, name, preTo) {
       Menu.buildFromTemplate(items).popup({ window: win, callback: () => { if (!picked) resolve(null); } });
     });
     if (!to) { if (preTo) dialog.showMessageBox(win, { message: 'That list is already on ' + ({ spotify: 'Spotify', youtube: 'YouTube', soundcloud: 'SoundCloud' }[preTo] || 'that service') }); return; }
+    if (to === 'crate') { const k = what === 'ytmusic' ? 'ytmusic' : what; if (crateInstalled()) { const r = await sendToCrate([{ kind: k, id, name: nm }]); if (r.sent) openCrate(); return; } await exportCsv(k, id, nm); return; }
     if (to === 'spotdl') return spotDownload(/^spotify:user:/.test(id) ? 'liked' : String(id).split(':').pop(), nm);
     if (to === 'sorted') return spotSortedCopy(/^spotify:user:/.test(id) ? 'liked' : String(id).split(':').pop(), nm);
     if (to === 'download') {
