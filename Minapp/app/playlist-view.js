@@ -576,6 +576,7 @@ export function initPlaylistView(webamp, api) {
   function listItems(f) {
     const k = f.kind, items = [];
     if (k !== 'local') items.push({ label: 'Download', act: 'download' });
+    items.push({ label: 'Export to Crate Digger', act: 'port-crate' });
     items.push({ label: 'Generate CSV for Crate Digger', act: 'csv' });
     if (k !== 'local') items.push({ label: 'Port playlist', sub: [...PORTS.filter(([p]) => !(p === k || (p === 'youtube' && (k === 'ytmusic' || k === 'ytsaved' || k === 'ytlink')))).map(([p, label]) => ({ label, act: 'port-' + p })), ...(k === 'spotify' ? [{ label: 'Sorted copy (experimental)', act: 'port-sorted' }] : [])] });
     return items;
