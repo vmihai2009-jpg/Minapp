@@ -1,6 +1,6 @@
 # What's new in Minapp
 
-## 1.9.68
+## 1.9.69
 - The older drop-down menu for a playlist (Copy to…, Download…) now also has "Export to Crate Digger", so it is the same everywhere. The green bar from 1.9.62 on already has it.
 
 ## 1.9.68
