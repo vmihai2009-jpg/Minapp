@@ -2620,7 +2620,7 @@ ipcMain.handle('art:get', async (_e, url) => {
 // Dragging uses the cursor position instead of CSS drag regions (so menus stay clickable).
 // setBounds with the original size avoids the Windows high-DPI bug where setPosition makes the window grow.
 // The window snaps to screen edges like classic Winamp.
-let dragTimer = null;
+let dragTimer = null, rescaleTimer = null;
 function snapPos(x, y, w, h) {
   if (readCfg().snap === false) return [x, y];
   const d = screen.getDisplayNearestPoint({ x: Math.round(x + w / 2), y: Math.round(y + h / 2) }).workArea, T = 14;
@@ -2629,18 +2629,24 @@ function snapPos(x, y, w, h) {
   return [x, y];
 }
 function savePos() { try { if (win && !win.isDestroyed()) { const [x, y] = win.getPosition(); writeCfg({ pos: { x, y } }); } } catch {} }
+function stopDrags() {
+  if (dragTimer) { clearInterval(dragTimer); dragTimer = null; savePos(); }
+  if (rescaleTimer) { clearInterval(rescaleTimer); rescaleTimer = null; savePos(); buildMenu(); }
+}
 ipcMain.on('win:dragstart', () => {
-  if (!win || dragTimer) return;
+  if (!win) return;
+  if (dragTimer) { clearInterval(dragTimer); dragTimer = null; } // a leftover drag is dropped, never doubled
   const c0 = screen.getCursorScreenPoint(), b0 = win.getBounds();
+  const t0 = Date.now();
   dragTimer = setInterval(() => {
     if (!win || win.isDestroyed()) { clearInterval(dragTimer); dragTimer = null; return; }
+    if (Date.now() - t0 > 400 && !win.isFocused()) { stopDrags(); return; } // lost focus = mouse released elsewhere
     const c = screen.getCursorScreenPoint();
     const [x, y] = snapPos(b0.x + c.x - c0.x, b0.y + c.y - c0.y, b0.width, b0.height);
     win.setBounds({ x, y, width: b0.width, height: b0.height });
   }, 16);
 });
 // drag a window edge to rescale the whole app in proportion (the opposite edge stays where it is)
-let rescaleTimer = null;
 ipcMain.on('win:rescale-start', (_e, edge) => {
   if (!win || win.isDestroyed() || rescaleTimer || !['left', 'right', 'top', 'bottom'].includes(edge)) return;
   const c0 = screen.getCursorScreenPoint(), b0 = win.getBounds(), z0 = zoom, horiz = edge === 'left' || edge === 'right';
@@ -3078,6 +3084,8 @@ app.whenReady().then(() => {
     setTimeout(applyAudio, 1200); // start the visualizer / restore the equalizer once the page is up
   });
   win.on('closed', () => app.quit());
+  for (const ev of ['blur', 'hide', 'minimize']) win.on(ev, stopDrags);
+  win.webContents.on('did-start-navigation', stopDrags); win.webContents.on('render-process-gone', stopDrags);
   win.on('hide', savePos);
   app.on('before-quit', savePos);
   // Equalizer comes back on its own only where it is safe: YouTube capture, or the Equalizer APO route.
