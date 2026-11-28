@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.68
+- Fixed the window getting stuck in "dragging" (following the mouse after you let go), mostly right after turning on Milkdrop or changing skins. Dragging now ends on any release, on losing focus, on a skin or Milkdrop rebuild, and as soon as the mouse is seen moving with no button held.
+
 ## 1.9.67
 - Right-click a playlist: "Export to Crate Digger" is now its own line (it sends the playlist straight to CrateDigger when it is installed, or saves the CSV if not). It was only inside Port playlist before.
 

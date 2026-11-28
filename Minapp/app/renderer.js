@@ -222,8 +222,15 @@
     e.stopPropagation();
     api.dragStart();
   }, true);
-  window.addEventListener('mouseup', () => api.dragEnd());
-  window.addEventListener('blur', () => api.dragEnd());
+  // The drag must end no matter what: the mouse-up can be lost when Milkdrop or a skin change rebuilds the windows, so we
+  // listen in the capture phase (nothing can swallow it), on every kind of release, and release when the mouse is seen
+  // moving with no button held (the safety net).
+  const endDrags = () => { api.dragEnd(); api.rescaleEnd(); };
+  for (const ev of ['mouseup', 'pointerup', 'pointercancel', 'dragend', 'drop', 'contextmenu', 'dblclick', 'blur']) window.addEventListener(ev, endDrags, true);
+  document.addEventListener('visibilitychange', endDrags);
+  document.addEventListener('mouseleave', (e) => { if (!e.buttons) endDrags(); });
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') endDrags(); }, true);
+  window.addEventListener('mousemove', (e) => { if (e.buttons === 0) endDrags(); }, true);
 
   // thin strips on the four edges: drag one to rescale the whole app in proportion
   (() => {
@@ -235,8 +242,6 @@
       d.addEventListener('mousedown', (e) => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); api.rescaleStart(edge); });
       document.body.appendChild(d);
     }
-    window.addEventListener('mouseup', () => api.rescaleEnd());
-    window.addEventListener('blur', () => api.rescaleEnd());
   })();
 
   // ----- skin buttons -> Spotify -----
