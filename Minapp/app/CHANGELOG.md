@@ -1,5 +1,8 @@
 # What's new in Minapp
 
+## 1.9.67
+- Right-click a playlist: "Export to Crate Digger" is now its own line (it sends the playlist straight to CrateDigger when it is installed, or saves the CSV if not). It was only inside Port playlist before.
+
 ## 1.9.66
 - Mac: the new right-click bars (playlist options with Crate Digger, and the song Export / Download bar) now stay open on a Mac. A Mac raises the right-click as the button goes down (Windows as it comes up), so the bar could be closed again straight away. A Ctrl+click is treated as a right-click too.
 
